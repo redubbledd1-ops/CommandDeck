@@ -892,6 +892,12 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
 .cmdvis-row input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; cursor: pointer; }
 
 .modal-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+/* Meer dan twee keuzes passen niet naast elkaar in een venster van 320px; de
+   labels breken dan middenin over twee regels. Dan liever onder elkaar.
+   column-reverse omdat de aanbevolen knop achteraan in de lijst staat (rechts
+   bij een rij) en bovenaan hoort te staan zodra het een kolom wordt. */
+.modal-footer.kolom { flex-direction: column-reverse; align-items: stretch; gap: 6px; }
+.modal-footer.kolom button { width: 100%; text-align: center; white-space: nowrap; }
 .btn-ghost { padding: 7px 16px; border: 1px solid var(--border2); border-radius: var(--radius); background: none; color: var(--muted2); cursor: pointer; font-size: 13px; transition: all 0.12s; }
 .btn-ghost:hover { background: var(--s2); color: var(--text); }
 .btn-primary { padding: 7px 18px; border: 1px solid rgba(84,200,232,0.4); border-radius: var(--radius); background: var(--accent-d); color: var(--accent); cursor: pointer; font-size: 13px; font-weight: 500; transition: all 0.12s; }

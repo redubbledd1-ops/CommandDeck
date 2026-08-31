@@ -1079,6 +1079,9 @@ function vraagKeuze({ titel, tekst, regels = [], knoppen }) {
       + (regels.length > 40 ? `<div class="vraag-regel">… en nog ${regels.length - 40}</div>` : '')
 
     const vak = document.getElementById('vraag-knoppen')
+    // Twee keuzes passen naast elkaar; meer niet — dan breken de labels
+    // middenin. Zie .modal-footer.kolom in style.css.
+    vak.className = 'modal-footer' + (knoppen.length > 2 ? ' kolom' : '')
     vak.innerHTML = knoppen.map((k, i) =>
       `<button class="${k.soort === 'gevaar' ? 'btn-danger' : k.soort === 'primair' ? 'btn-primary' : 'btn-ghost'}" data-v="${i}">${esc(k.label)}</button>`).join('')
     vak.querySelectorAll('[data-v]').forEach(el =>
@@ -1124,6 +1127,7 @@ function vraagTekst({ titel, tekst = '', waarde = '', placeholder = '', okLabel 
     invoer.value = waarde
 
     const vak = document.getElementById('vraag-knoppen')
+    vak.className = 'modal-footer'        // dezelfde bak; kolomstand weer eraf
     vak.innerHTML = `<button class="btn-ghost" data-v="0">${esc(I18N.t('common.cancel'))}</button>`
       + `<button class="${soort === 'gevaar' ? 'btn-danger' : 'btn-primary'}" data-v="1">${esc(okLabel || I18N.t('common.ok'))}</button>`
 
@@ -10693,10 +10697,12 @@ async function vraagOverProject(project) {
     titel: I18N.t('git.afsluit.titel', { project: project.naam }),
     tekst: I18N.t('git.afsluit.tekst'),
     regels,
+    // Onder elkaar (vier keuzes), dus achterste eerst: commit & push bovenaan,
+    // blijven onderaan, en de rode knop niet direct onder de aanbevolen.
     knoppen: [
       { label: I18N.t('git.afsluit.blijven'), waarde: 'blijven' },
-      { label: I18N.t('git.afsluit.terminal'), waarde: 'terminal' },
       { label: I18N.t('git.afsluit.tochAf'), waarde: 'door', soort: 'gevaar' },
+      { label: I18N.t('git.afsluit.terminal'), waarde: 'terminal' },
       { label: I18N.t('git.afsluit.commitPush'), waarde: 'commitpush', soort: 'primair' },
     ],
   })
