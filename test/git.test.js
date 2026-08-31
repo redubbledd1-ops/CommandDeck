@@ -1,3 +1,4 @@
+const fs = require('fs'), path = require('path')
 const G = require('../git-tools')
 
 let ok = true
@@ -84,6 +85,26 @@ t('isGitId laat flutter-knoppen met rust',
   !G.isGitId('build-apk') && !G.isGitId('run-windows') && !G.isGitId('custom:abc'))
 t('elke zichtbare id bestaat ook als knop', [geenRepo, losseRepo, gekoppeld]
   .every(s => G.zichtbareGitIds(s).every(id => G.GIT_IDS.includes(id))))
+
+// ── bedrading naar de app ────────────────────────────────────────────────────
+// Zonder deze twee zie je de knoppen wel staan, maar grijs en zonder icoon —
+// ze lijken dan uitgeschakeld. Dat is precies wat er de eerste keer misging.
+const APP = path.join(__dirname, '..')
+const css = fs.readFileSync(path.join(APP, 'style.css'), 'utf8')
+const html = fs.readFileSync(path.join(APP, 'index.html'), 'utf8')
+const nl = JSON.parse(fs.readFileSync(path.join(APP, 'locales', 'nl.json'), 'utf8'))
+const en = JSON.parse(fs.readFileSync(path.join(APP, 'locales', 'en.json'), 'utf8'))
+
+for (const d of G.GIT_CMD_DEFS) {
+  t('kleurklasse ' + d.cls + ' bestaat in style.css', css.includes('.cmd-btn.' + d.cls + ' {'))
+  t('vertaling ' + d.labelKey + ' bestaat in nl en en', !!nl[d.labelKey] && !!en[d.labelKey])
+}
+// Op de script-tags zelf kijken: renderer.js staat verderop ook in een comment.
+t('index.html laadt git-tools.js vóór renderer.js',
+  html.indexOf('src="git-tools.js"') > 0
+  && html.indexOf('src="git-tools.js"') < html.indexOf('src="renderer.js"'))
+t('ui.test.js laadt git-tools.js ook',
+  fs.readFileSync(path.join(APP, 'test', 'ui.test.js'), 'utf8').includes('git-tools.js'))
 
 // ── repo-naam en url opschonen ───────────────────────────────────────────────
 t('spaties worden streepjes', G.veiligeRepoNaam('Mijn Project') === 'Mijn-Project')

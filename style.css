@@ -511,6 +511,21 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
 .cmd-btn.buildweb:hover { background: rgba(34,211,238,0.1); border-color: #22d3ee; }
 .cmd-btn.buildwin { border-color: rgba(129,140,248,0.35); color: #818cf8; }
 .cmd-btn.buildwin:hover { background: rgba(129,140,248,0.1); border-color: #818cf8; }
+
+/* Git. Koppelen krijgt het oranje van git zelf: dat is de knop die er als
+   enige staat zolang een project nog nergens aan hangt, dus die mag opvallen.
+   De leesknoppen erna zijn onderling verschillend maar geen van alle rood —
+   ze veranderen niets, en dat moet je aan de kleur kunnen zien. */
+.cmd-btn.gitlink { border-color: rgba(240,136,62,0.4); color: #f0883e; }
+.cmd-btn.gitlink:hover { background: rgba(240,136,62,0.12); border-color: #f0883e; }
+.cmd-btn.gitread { border-color: rgba(244,114,182,0.35); color: #f472b6; }
+.cmd-btn.gitread:hover { background: rgba(244,114,182,0.1); border-color: #f472b6; }
+.cmd-btn.gitpull { border-color: rgba(96,165,250,0.35); color: #60a5fa; }
+.cmd-btn.gitpull:hover { background: rgba(96,165,250,0.1); border-color: #60a5fa; }
+.cmd-btn.gitfetch { border-color: rgba(216,180,254,0.35); color: #d8b4fe; }
+.cmd-btn.gitfetch:hover { background: rgba(216,180,254,0.1); border-color: #d8b4fe; }
+.cmd-btn.gitlog { border-color: rgba(165,243,252,0.35); color: #a5f3fc; }
+.cmd-btn.gitlog:hover { background: rgba(165,243,252,0.1); border-color: #a5f3fc; }
 .cmd-btn.merk-visualstudio, .prog-kleur-vak.merk-visualstudio { }
 .cmd-btn.merk-visualstudio { border-color: rgba(167,139,250,0.35); color: #c4b5fd; }
 .cmd-btn.merk-visualstudio:hover { background: rgba(167,139,250,0.1); border-color: #c4b5fd; }
