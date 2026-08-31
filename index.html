@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; img-src 'self' data:;" />
+<title>CommandDeck</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.10.0/dist/tabler-icons.min.css" />
+<link rel="stylesheet" href="node_modules/@xterm/xterm/css/xterm.css" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- Titlebar -->
+<div class="titlebar">
+  <div class="titlebar-drag">
+    <img class="app-logo" src="assets/icon.png" width="18" height="18" alt="" draggable="false" />
+    <span class="app-name">CommandDeck</span>
+  </div>
+  <div class="titlebar-btns">
+    <button class="tbtn build-btn" id="btn-update" hidden data-i18n-title="titlebar.updateTitle" title="Update &amp; herstart — installeert dependencies, bouwt opnieuw en herstart automatisch"><i class="ti ti-cloud-download"></i></button>
+    <button class="tbtn" id="btn-min"><i class="ti ti-minus"></i></button>
+    <button class="tbtn" id="btn-max"><i class="ti ti-square"></i></button>
+    <button class="tbtn danger" id="btn-close"><i class="ti ti-x"></i></button>
+  </div>
+</div>
+
+<div class="layout">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-top">
+      <button class="settings-btn" id="btn-settings" data-i18n-title="sidebar.settingsTitle" title="Instellingen">
+        <i class="ti ti-settings"></i>
+      </button>
+      <div class="nav-arrows">
+        <button class="settings-btn" id="btn-nav-back" data-i18n-title="sidebar.navBackTitle" title="Vorige (Alt+←, of de zijknop van je muis)" disabled>
+          <i class="ti ti-arrow-left"></i>
+        </button>
+        <button class="settings-btn" id="btn-nav-forward" data-i18n-title="sidebar.navForwardTitle" title="Volgende (Alt+→, of de zijknop van je muis)" disabled>
+          <i class="ti ti-arrow-right"></i>
+        </button>
+      </div>
+    </div>
+    <!-- Elke sectie zit in een eigen doos: die kun je inklappen, en met een
+         lange druk op de kop naar boven of beneden slepen. -->
+    <div class="sidebar-sectie" data-zijsectie="cmd">
+      <div class="sidebar-header" id="kop-cmd">
+        <i class="ti ti-chevron-down sectie-pijl"></i>
+        <span data-i18n="sidebar.sectionCmd">opdrachten</span>
+        <button class="sec-sort" id="sort-nav" data-i18n-title="common.reorderTitle" title="Volgorde aanpassen"><i class="ti ti-arrows-sort"></i></button>
+      </div>
+      <div class="sectie-inhoud">
+        <div class="nav-list">
+          <button class="nav-item" id="btn-nav-cmd">
+            <i class="ti ti-terminal-2"></i>
+            <span data-i18n="sidebar.navCmd">cmd</span>
+            <span class="nav-edit" id="nav-cmd-edit" role="button" tabindex="0"
+                  data-i18n-title="cmd.settingsTitle" title="Instellingen van de cmd-sectie"><i class="ti ti-pencil"></i></span>
+          </button>
+          <button class="nav-item" id="btn-nav-ps">
+            <i class="ti ti-brand-powershell"></i>
+            <span data-i18n="sidebar.navPowershell">powershell</span>
+            <span class="nav-edit" id="nav-ps-edit" role="button" tabindex="0"
+                  data-i18n-title="ps.settingsTitle" title="Instellingen van de powershell-sectie"><i class="ti ti-pencil"></i></span>
+          </button>
+          <button class="nav-item" id="btn-nav-bat">
+            <i class="ti ti-file-code"></i>
+            <span data-i18n="sidebar.navBat">bat</span>
+          </button>
+          <button class="nav-item" id="btn-nav-dict">
+            <i class="ti ti-book"></i>
+            <span data-i18n="sidebar.navDict">woordenboek</span>
+            <span class="nav-count" id="nav-dict-count"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar-sectie" data-zijsectie="dezepc">
+      <div class="dezepc-greep dezepc-greep-boven" id="boom-greep-boven" hidden data-i18n-title="sidebar.dezepcGripTitle" title="Sleep om de max. hoogte te zetten · dubbelklik om te wissen"></div>
+      <div class="sidebar-header" id="kop-dezepc">
+        <i class="ti ti-chevron-down sectie-pijl"></i>
+        <span data-i18n="sidebar.sectionDezepc">deze pc</span>
+        <button class="sec-sort" id="boom-hoogte" data-i18n-title="sidebar.dezepcHeightTitle" title="Max. hoogte instellen — vasthouden en swipen"><i class="ti ti-arrows-vertical"></i></button>
+        <button class="sec-sort" id="boom-vol" data-i18n-title="sidebar.dezepcFullTitle" title="Deze pc op volledige hoogte"><i class="ti ti-arrows-maximize"></i></button>
+        <button class="sec-sort" id="boom-ververs" data-i18n-title="sidebar.dezepcRefreshTitle" title="Opnieuw inlezen"><i class="ti ti-refresh"></i></button>
+        <button class="sec-sort" id="sort-dezepc" data-i18n-title="tree.moveModeTitle" title="Bestanden en mappen verplaatsen"><i class="ti ti-arrows-move"></i></button>
+      </div>
+      <div class="sectie-inhoud">
+        <div class="boom" id="boom"></div>
+      </div>
+      <div class="dezepc-greep dezepc-greep-onder" id="boom-greep" hidden data-i18n-title="sidebar.dezepcGripTitle" title="Sleep om de max. hoogte te zetten · dubbelklik om te wissen"></div>
+    </div>
+
+    <div class="sidebar-sectie" data-zijsectie="projecten">
+      <div class="sidebar-header" id="kop-projecten">
+        <i class="ti ti-chevron-down sectie-pijl"></i>
+        <span data-i18n="sidebar.sectionProjects">projecten</span>
+        <button class="sec-sort" id="sort-proj" data-i18n-title="common.reorderTitle" title="Volgorde aanpassen"><i class="ti ti-arrows-sort"></i></button>
+      </div>
+      <div class="sectie-inhoud">
+        <div id="proj-list"></div>
+        <button class="add-proj-btn" id="btn-add-proj">
+          <i class="ti ti-plus"></i> <span data-i18n="sidebar.addProject">project toevoegen</span>
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Onzichtbaar sleepvlak op de scheiding; bij hover een blauwe lijn. -->
+  <button type="button" class="zijbalk-greep" id="zijbalk-greep"
+    data-i18n-title="sidebar.resizeTitle" title="Sleep om de breedte te zetten · dubbelklik voor de standaardbreedte"
+    data-i18n-aria="sidebar.resizeAriaLabel" aria-label="Breedte van de zijbalk"></button>
+
+  <!-- Werkvlak: hierin splitsen project, cmd, woordenboek en bat. Instellingen blijft er buiten. -->
+  <div class="werk" id="werk">
+    <div class="werk-vlak actief" data-slot="0" id="werk-vlak-0">
+      <div class="werk-vlak-naam"></div>
+      <main class="main" id="main">
+        <div class="empty-state">
+          <i class="ti ti-layout-sidebar-left-expand"></i>
+          <p data-i18n="main.emptyState">Selecteer een project</p>
+        </div>
+      </main>
+      <main class="main" id="cmd-panel" style="display:none"></main>
+      <main class="main" id="ps-panel" style="display:none"></main>
+      <main class="main" id="dict-panel" style="display:none"></main>
+      <main class="main" id="bat-panel" style="display:none"></main>
+    </div>
+    <div class="werk-vlak" data-slot="1" id="werk-vlak-1" hidden>
+      <div class="werk-vlak-naam"></div>
+    </div>
+    <button type="button" class="werk-split-plus" data-split="left" hidden><i class="ti ti-minus"></i></button>
+    <button type="button" class="werk-split-plus" data-split="top" hidden><i class="ti ti-minus"></i></button>
+    <button type="button" class="werk-split-plus" data-split="right" hidden><i class="ti ti-plus"></i></button>
+    <button type="button" class="werk-split-plus" data-split="bottom" hidden><i class="ti ti-plus"></i></button>
+  </div>
+
+  <!-- Settings panel (hidden by default) -->
+  <main class="main settings-panel" id="settings-panel" style="display:none">
+  </main>
+
+</div>
+
+<!-- Project modal -->
+<div class="modal-backdrop" id="modal-proj" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <span id="modal-title" data-i18n="modal.project.title">Project toevoegen</span>
+      <button class="modal-close" id="modal-proj-close"><i class="ti ti-x"></i></button>
+    </div>
+    <label class="field-label" data-i18n="modal.project.nameLabel">naam</label>
+    <input class="field" id="f-name" placeholder="dd_crypto" />
+    <label class="field-label" data-i18n="modal.project.iconLabel">icoon</label>
+    <div class="emoji-row" id="emoji-row"></div>
+    <label class="field-label"><span data-i18n="modal.project.deviceLabel">android device id</span> <span class="opt" data-i18n="common.optional">(optioneel)</span></label>
+    <input class="field mono" id="f-device" placeholder="437d872e" />
+    <label class="field-label" data-i18n="modal.project.locationsLabel">locaties</label>
+    <div id="loc-list"></div>
+    <button class="add-loc-btn" id="btn-add-loc"><i class="ti ti-plus"></i> <span data-i18n="modal.project.addLocation">locatie toevoegen</span></button>
+    <label class="field-label" data-i18n="modal.project.visibleCommandsLabel">zichtbare commando's</label>
+    <div id="cmdvis-section"></div>
+    <div class="modal-footer">
+      <button class="btn-ghost" id="modal-proj-cancel" data-i18n="common.cancel">annuleren</button>
+      <button class="btn-primary" id="modal-proj-save" data-i18n="common.save">opslaan</button>
+    </div>
+  </div>
+</div>
+
+<!-- Delete confirm -->
+<div class="modal-backdrop" id="modal-del" hidden>
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <span data-i18n="modal.deleteProject.title">Project verwijderen?</span>
+      <button class="modal-close" id="modal-del-close"><i class="ti ti-x"></i></button>
+    </div>
+    <p class="del-msg" data-i18n-html="modal.deleteProject.message">Dit verwijdert het project uit de launcher. De bestanden op schijf worden <strong>niet</strong> verwijderd.</p>
+    <div class="modal-footer">
+      <button class="btn-ghost" id="del-cancel" data-i18n="common.cancel">annuleren</button>
+      <button class="btn-danger" id="del-confirm" data-i18n="common.delete">verwijderen</button>
+    </div>
+  </div>
+</div>
+
+<!-- Woordenboek: regel toevoegen / bewerken -->
+<div class="modal-backdrop" id="modal-dict" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <span id="modal-dict-title" data-i18n="modal.dict.title">Commando toevoegen</span>
+      <button class="modal-close" id="modal-dict-close"><i class="ti ti-x"></i></button>
+    </div>
+    <label class="field-label" data-i18n="modal.dict.cmdLabel">commando</label>
+    <textarea class="field mono" id="d-cmd" rows="2" placeholder="flutter build apk --release" spellcheck="false"></textarea>
+    <label class="field-label"><span data-i18n="modal.dict.descLabel">omschrijving</span> <span class="opt" data-i18n="common.optional">(optioneel)</span></label>
+    <input class="field" id="d-label" placeholder="Release-APK bouwen" />
+    <label class="field-label"><span data-i18n="modal.dict.noteLabel">notitie</span> <span class="opt" data-i18n="common.optional">(optioneel)</span></label>
+    <textarea class="field" id="d-note" rows="2" placeholder="Vergeet niet eerst de versie te verhogen"></textarea>
+    <label class="field-label"><span data-i18n="modal.dict.tagsLabel">labels</span> <span class="opt" data-i18n="common.commaSeparated">(komma-gescheiden)</span></label>
+    <input class="field" id="d-tags" placeholder="build, android" />
+    <label class="field-label" data-i18n="modal.dict.shellLabel">draait in</label>
+    <div class="shell-pick" id="d-shell">
+      <label class="shell-pick-opt">
+        <input type="radio" name="d-shell" value="cmd" checked />
+        <span data-i18n="dict.kind.cmd">cmd</span>
+      </label>
+      <label class="shell-pick-opt">
+        <input type="radio" name="d-shell" value="powershell" />
+        <span data-i18n="dict.kind.powershell">powershell</span>
+      </label>
+      <label class="shell-pick-opt">
+        <input type="radio" name="d-shell" value="both" />
+        <span data-i18n="dict.kind.both">cmd en powershell</span>
+      </label>
+    </div>
+    <label class="cmdvis-row" style="margin-top:10px">
+      <input type="checkbox" id="d-fav" />
+      <i class="ti ti-star"></i> <span data-i18n="common.favorite">favoriet</span>
+    </label>
+    <div class="modal-footer">
+      <button class="btn-ghost" id="modal-dict-cancel" data-i18n="common.cancel">annuleren</button>
+      <button class="btn-primary" id="modal-dict-save" data-i18n="common.save">opslaan</button>
+    </div>
+  </div>
+</div>
+
+<!-- Commando als knop aan een project toevoegen -->
+<div class="modal-backdrop" id="modal-addbtn" hidden>
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <span data-i18n="modal.addButton.title">Als knop toevoegen</span>
+      <button class="modal-close" id="modal-addbtn-close"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="addbtn-cmd mono" id="addbtn-cmd"></div>
+    <label class="field-label" data-i18n="modal.addButton.projectLabel">project</label>
+    <select class="loc-select addbtn-select" id="addbtn-proj"></select>
+    <label class="field-label" data-i18n="modal.addButton.sectionLabel">sectie</label>
+    <div class="addbtn-sections">
+      <label class="cmdvis-row"><input type="radio" name="addbtn-section" value="run" checked /> <i class="ti ti-player-play"></i> <span data-i18n="modal.addButton.sectionRun">uitvoeren</span></label>
+      <label class="cmdvis-row"><input type="radio" name="addbtn-section" value="tools" /> <i class="ti ti-tool"></i> <span data-i18n="modal.addButton.sectionTools">tools</span></label>
+    </div>
+    <label class="field-label" data-i18n="modal.addButton.buttonTextLabel">knoptekst</label>
+    <input class="field" id="addbtn-label" placeholder="Release APK" />
+    <div class="modal-footer">
+      <button class="btn-ghost" id="modal-addbtn-cancel" data-i18n="common.cancel">annuleren</button>
+      <button class="btn-primary" id="modal-addbtn-save" data-i18n="common.add">toevoegen</button>
+    </div>
+  </div>
+</div>
+
+<!-- Geïnstalleerd programma kiezen -->
+<div class="modal-backdrop" id="modal-prog" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <span data-i18n="modal.program.title">Programma kiezen</span>
+      <button class="modal-close" id="modal-prog-close"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="dict-search-wrap" style="margin-bottom:8px">
+      <i class="ti ti-search"></i>
+      <input class="field dict-search" id="prog-search" data-i18n-placeholder="modal.program.searchPlaceholder" placeholder="zoek een programma..." autocomplete="off" spellcheck="false" />
+    </div>
+    <div class="prog-list" id="prog-list"></div>
+    <div class="modal-footer">
+      <button class="btn-ghost" id="modal-prog-cancel" data-i18n="common.cancel">annuleren</button>
+    </div>
+  </div>
+</div>
+
+<!-- Gevonden editors aanbieden -->
+<div class="modal-backdrop" id="modal-found" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <span id="modal-found-title" data-i18n="modal.foundEditors.title">Editors gevonden</span>
+      <button class="modal-close" id="modal-found-close"><i class="ti ti-x"></i></button>
+    </div>
+    <p class="del-msg" id="found-uitleg"></p>
+    <div class="found-list" id="found-list"></div>
+    <div class="modal-footer">
+      <button class="btn-ghost" id="modal-found-skip" data-i18n="modal.foundEditors.skipButton">niet meer vragen</button>
+      <button class="btn-ghost" id="modal-found-later" data-i18n="common.later">later</button>
+      <button class="btn-primary" id="modal-found-add" data-i18n="common.add">toevoegen</button>
+    </div>
+  </div>
+</div>
+
+<!-- Vraagvenster in de stijl van de app, in plaats van het venster van Windows -->
+<!-- Instellingen van de cmd-sectie. Nu alleen de snelkoppelingen; hier komt
+     later meer bij, vandaar een eigen venster in plaats van een uitklapvlak. -->
+<div class="modal-backdrop" id="modal-cmdset" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <span data-i18n="modal.cmdset.title">cmd-instellingen</span>
+      <button class="modal-close" id="modal-cmdset-close"><i class="ti ti-x"></i></button>
+    </div>
+    <div id="cmdset-body"></div>
+    <div class="modal-footer">
+      <button class="btn-primary" id="modal-cmdset-klaar" data-i18n="common.done">klaar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Instellingen van de powershell-sectie: programma, profiel, policy, snelkoppelingen. -->
+<div class="modal-backdrop" id="modal-psset" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <span data-i18n="modal.psset.title">powershell-instellingen</span>
+      <button class="modal-close" id="modal-psset-close"><i class="ti ti-x"></i></button>
+    </div>
+    <div id="psset-body"></div>
+    <div class="modal-footer">
+      <button class="btn-primary" id="modal-psset-klaar" data-i18n="common.done">klaar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="modal-vraag" hidden>
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <span id="vraag-titel" data-i18n="modal.confirm.defaultTitle">Weet je het zeker?</span>
+      <button class="modal-close" id="vraag-sluit"><i class="ti ti-x"></i></button>
+    </div>
+    <p class="del-msg" id="vraag-tekst"></p>
+    <div class="vraag-lijst" id="vraag-lijst" hidden></div>
+    <div class="modal-footer" id="vraag-knoppen"></div>
+  </div>
+</div>
+
+<!-- Wat er op het klembord staat -->
+<div class="modal-backdrop" id="modal-klembord" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <span id="klembord-titel" data-i18n="modal.clipboard.title">Op het klembord</span>
+      <button class="modal-close" id="klembord-sluit"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="found-list" id="klembord-lijst"></div>
+    <div class="modal-footer">
+      <button class="btn-ghost" id="klembord-leeg" data-i18n="modal.clipboard.emptyButton">klembord legen</button>
+      <button class="btn-ghost" id="klembord-annuleer" data-i18n="common.close">sluiten</button>
+      <button class="btn-primary" id="klembord-plak" data-i18n="modal.clipboard.pasteButton">hier plakken</button>
+    </div>
+  </div>
+</div>
+
+<!-- Rechtsklikmenu in de verkenner -->
+<div class="ctx-menu" id="ctx-menu" hidden></div>
+
+<!-- Om een naam vragen -->
+<div class="modal-backdrop" id="modal-naam" hidden>
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <span id="modal-naam-titel" data-i18n="modal.name.defaultTitle">Naam</span>
+      <button class="modal-close" id="modal-naam-close"><i class="ti ti-x"></i></button>
+    </div>
+    <label class="field-label" id="modal-naam-label" data-i18n="modal.name.defaultLabel">naam</label>
+    <input class="field" id="naam-invoer" spellcheck="false" />
+    <div class="bat-warn" id="naam-fout" hidden></div>
+    <div class="modal-footer">
+      <button class="btn-ghost" id="modal-naam-cancel" data-i18n="common.cancel">annuleren</button>
+      <button class="btn-primary" id="modal-naam-ok" data-i18n="modal.name.createButton">maken</button>
+    </div>
+  </div>
+</div>
+
+<!-- Eigenschappen -->
+<div class="modal-backdrop" id="modal-info" hidden>
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <span data-i18n="modal.properties.title">Eigenschappen</span>
+      <button class="modal-close" id="modal-info-close"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="info-lijst" id="info-lijst"></div>
+    <div class="modal-footer">
+      <button class="btn-primary" id="modal-info-ok" data-i18n="common.close">sluiten</button>
+    </div>
+  </div>
+</div>
+
+<!-- Overlay bij het slepen van een bestand -->
+<div id="drop-overlay" hidden>
+  <div class="drop-box">
+    <i class="ti ti-file-code"></i>
+    <div class="drop-title" data-i18n="dropOverlay.title">Laat los om te bewerken</div>
+    <div class="drop-sub" data-i18n="dropOverlay.subtitle">.bat- en .cmd-bestanden openen in de bat-editor</div>
+  </div>
+</div>
+
+<!-- Command status pill -->
+<div id="cmd-status">
+  <div class="status-dot"></div>
+  <span id="cmd-status-label"></span>
+  <button id="cmd-status-sluit" data-i18n-title="common.close" title="sluiten"><i class="ti ti-x"></i></button>
+</div>
+
+<!-- De echte terminal. Lukt het laden niet, dan valt de app terug op een
+     eigen consolevenster; renderer.js controleert daarop. -->
+<script src="node_modules/@xterm/xterm/lib/xterm.js"></script>
+<script src="node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+<script src="i18n.js"></script>
+<script src="renderer.js"></script>
+</body>
+</html>

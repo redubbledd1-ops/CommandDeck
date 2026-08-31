@@ -1,0 +1,98 @@
+{
+  "name": "commanddeck",
+  "version": "1.0.0",
+  "description": "CommandDeck — Flutter & terminal command launcher",
+  "author": "CommandDeck",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "set CSC_IDENTITY_AUTO_DISCOVERY=false&& electron-builder --win --x64",
+    "build:installer": "set CSC_IDENTITY_AUTO_DISCOVERY=false&& electron-builder --win nsis --x64",
+    "build:portable": "set CSC_IDENTITY_AUTO_DISCOVERY=false&& electron-builder --win portable --x64",
+    "build:dir": "set CSC_IDENTITY_AUTO_DISCOVERY=false&& electron-builder --win dir --x64",
+    "test": "node test/history.test.js && node test/library.test.js && node test/seed.test.js && node test/shell.test.js && node test/ps-launch.test.js && node test/ai.test.js && node test/editors.test.js && node test/editorscan.test.js && node test/archive.test.js && node test/bewerken.test.js && node test/shortenpath.test.js && node test/batexe.test.js && node test/icon.test.js && node test/bat.test.js && node test/sourcedir.test.js && node test/update.test.js && node test/klembord.test.js && node test/mapgrootte.test.js && node test/fluttermissing.test.js && node test/flutter-devices.test.js && node test/ui.test.js",
+    "test:ui": "node test/ui.test.js",
+    "test:history": "node test/history.test.js",
+    "test:update": "node test/sourcedir.test.js && node test/update.test.js",
+    "test:bat": "node test/bat.test.js",
+    "test:archive": "node test/archive.test.js",
+    "test:flutter": "node test/fluttermissing.test.js && node test/flutter-devices.test.js",
+    "test:ai": "node test/ai.test.js"
+  },
+  "build": {
+    "appId": "com.redubbledd.commanddeck",
+    "productName": "CommandDeck",
+    "copyright": "Copyright © CommandDeck",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "createDesktopShortcut": false,
+      "createStartMenuShortcut": true,
+      "shortcutName": "CommandDeck",
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "installerHeaderIcon": "assets/icon.ico",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true,
+      "menuCategory": false,
+      "artifactName": "CommandDeck-Setup-${version}.${ext}",
+      "uninstallDisplayName": "CommandDeck",
+      "include": "installer.nsh",
+      "warningsAsErrors": false
+    },
+    "portable": {
+      "artifactName": "CommandDeck.exe"
+    },
+    "files": [
+      "**/*",
+      "!dist/**",
+      "!test/**",
+      "!.git/**",
+      "!TODO.md",
+      "!update-run.bat",
+      "!**/*.md",
+      "!**/*.map",
+      "!build/**"
+    ],
+    "asarUnpack": [
+      "**/node_modules/@lydell/**"
+    ]
+  },
+  "dependencies": {
+    "@lydell/node-pty": "^1.2.0-beta.15",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "resedit": "^1.7.2"
+  },
+  "devDependencies": {
+    "electron": "^41.10.5",
+    "electron-builder": "^26.15.3",
+    "jsdom": "^30.0.1"
+  },
+  "overrides": {
+    "@noble/hashes": "1.8.0"
+  }
+}

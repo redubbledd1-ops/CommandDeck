@@ -1,0 +1,23 @@
+# Normaliseer regeleindes: LF in de repo, CRLF in je working copy op Windows
+* text=auto
+
+# Altijd LF (scripts die op Linux/CI kunnen draaien)
+*.sh text eol=lf
+
+# Altijd CRLF (Windows batch/PowerShell)
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binair — nooit aanraken
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.exe binary
+*.dll binary
+*.zip binary
+*.ttf binary
+*.woff binary
+*.woff2 binary
