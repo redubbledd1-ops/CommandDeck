@@ -723,7 +723,15 @@ window.addEventListener('DOMContentLoaded', async () => {
   // Git-toestand van álle projecten ophalen en daarna blijven bijhouden. Ook
   // van projecten die niet open staan: de afsluitcontrole moet straks over
   // allemaal iets kunnen zeggen, niet alleen over het laatst bekeken project.
-  setTimeout(() => { ververesAlleGitStaten(true); startGitPolling() }, 1500)
+  setTimeout(async () => {
+    await ververesAlleGitStaten(true)
+    startGitPolling()
+    // Ook bij het opstarten kijken of de remote vóórloopt. restoreLastView()
+    // zet activeId rechtstreeks en gaat niet langs selectProject(), dus zonder
+    // dit zou een project dat al open stond nooit gecontroleerd worden.
+    const open = projects.find(x => x.id === activeId)
+    if (open) controleerAchterstand(open)
+  }, 1500)
 
   // Het main-proces houdt het sluiten tegen en vraagt ons na te kijken.
   try { window.api.opAfsluitControle(() => controleerVoorAfsluiten()) } catch {}
