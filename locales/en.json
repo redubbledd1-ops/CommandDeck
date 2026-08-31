@@ -812,5 +812,13 @@
   "git.block.geen-commitsTitle": "No commit yet",
   "git.block.geen-commitsText": "Nothing to push: this repository has no commits at all.",
   "git.block.niets-vooruitTitle": "Up to date",
-  "git.block.niets-vooruitText": "You have no commits the remote does not already have."
+  "git.block.niets-vooruitText": "You have no commits the remote does not already have.",
+  "git.ind.aheadTitle": "commits the remote does not have yet",
+  "git.ind.behindTitle": "commits on the remote you do not have yet (only updated after a fetch)",
+  "git.ind.dirtyTitle": "changed or new files not recorded anywhere yet",
+  "git.ind.dirtyShort": " chg.",
+  "git.ind.noRemote": "no remote",
+  "git.ind.noRemoteTitle": "this project is not linked to anything yet — use link github",
+  "git.ind.noUpstream": "never pushed",
+  "git.ind.noUpstreamTitle": "this branch does not track a remote branch yet; the first push sets that up"
 }

@@ -812,5 +812,13 @@
   "git.block.geen-commitsTitle": "Nog geen commit",
   "git.block.geen-commitsText": "Er valt niets te pushen: deze repository heeft nog geen enkele commit.",
   "git.block.niets-vooruitTitle": "Al bij",
-  "git.block.niets-vooruitText": "Je hebt geen commits die de remote nog niet heeft."
+  "git.block.niets-vooruitText": "Je hebt geen commits die de remote nog niet heeft.",
+  "git.ind.aheadTitle": "commits die de remote nog niet heeft",
+  "git.ind.behindTitle": "commits op de remote die jij nog niet hebt (alleen bijgewerkt na een fetch)",
+  "git.ind.dirtyTitle": "gewijzigde of nieuwe bestanden die nog nergens zijn vastgelegd",
+  "git.ind.dirtyShort": " gew.",
+  "git.ind.noRemote": "geen remote",
+  "git.ind.noRemoteTitle": "dit project hangt nog nergens aan — gebruik github koppelen",
+  "git.ind.noUpstream": "nog niet gepusht",
+  "git.ind.noUpstreamTitle": "deze branch volgt nog geen remote-branch; de eerste push zet dat goed"
 }

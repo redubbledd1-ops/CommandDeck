@@ -423,8 +423,7 @@ function gitStaatVan(p) {
 // Zonder `forceer` gebeurt er niets als we het antwoord al hebben. Dat is wat
 // het opnieuw tekenen laat stoppen: de eerste ronde haalt op en tekent, de
 // tweede vindt de cache en doet niets meer.
-async function ververesGitStaat(p, forceer = false) {
-  const pad = actieveLocPad(p)
+async function ververesGitPad(pad, forceer = false) {
   if (!pad || !window.api || !window.api.gitInfo) return null
   if (!forceer && gitStaten[pad]) return gitStaten[pad]
   if (gitBezig.has(pad)) return gitStaten[pad] || null
@@ -442,6 +441,59 @@ async function ververesGitStaat(p, forceer = false) {
   } finally {
     gitBezig.delete(pad)
   }
+}
+
+async function ververesGitStaat(p, forceer = false) {
+  return ververesGitPad(actieveLocPad(p), forceer)
+}
+
+// Ook de projecten die niet open staan. Zonder dit weet de afsluitcontrole van
+// ronde 5 alleen iets over het project dat je toevallig als laatste bekeek.
+// Eén voor één, niet allemaal tegelijk: bij tien projecten zou dat tien
+// git-processen naast elkaar zijn.
+async function ververesAlleGitStaten(forceer = false) {
+  for (const p of projects) {
+    const pad = actieveLocPad(p)
+    if (pad) await ververesGitPad(pad, forceer)
+  }
+}
+
+// Achtergrondverversing. Het venster verbergen zet hem stil: anders draaien er
+// tien git-processen per minuut voor een scherm waar niemand naar kijkt.
+const GIT_POLL_MS = 30000          // ronde 4 maakt dit instelbaar
+const GIT_VOLLEDIG_ELKE = 10       // elke tiende ronde ook de andere projecten
+let gitPollTeller = 0
+let gitPollTimer = null
+
+function startGitPolling() {
+  if (gitPollTimer) return
+  gitPollTimer = setInterval(async () => {
+    if (document.hidden) return
+    gitPollTeller++
+    if (gitPollTeller % GIT_VOLLEDIG_ELKE === 0) { await ververesAlleGitStaten(true); return }
+    const p = projects.find(x => x.id === activeId)
+    if (p) await ververesGitStaat(p, true)
+  }, GIT_POLL_MS)
+}
+
+// De indicator in de projectkop: welke branch, hoeveel vooruit/achter, hoeveel
+// gewijzigd. Hij licht op zodra er werk is dat alleen op deze pc bestaat.
+function gitIndicatorHtml(p) {
+  const i = GitTools.indicator(gitStaatVan(p))
+  if (!i) return ''
+
+  const delen = []
+  if (i.ahead)  delen.push(`<span class="git-ind-ahead" title="${esc(I18N.t('git.ind.aheadTitle'))}">↑${i.ahead}</span>`)
+  if (i.behind) delen.push(`<span class="git-ind-behind" title="${esc(I18N.t('git.ind.behindTitle'))}">↓${i.behind}</span>`)
+  if (i.vuil)   delen.push(`<span class="git-ind-dirty" title="${esc(I18N.t('git.ind.dirtyTitle'))}">${i.vuil}${esc(I18N.t('git.ind.dirtyShort'))}</span>`)
+  if (!i.gekoppeld) delen.push(`<span class="git-ind-los" title="${esc(I18N.t('git.ind.noRemoteTitle'))}">${esc(I18N.t('git.ind.noRemote'))}</span>`)
+  else if (!i.volgt) delen.push(`<span class="git-ind-los" title="${esc(I18N.t('git.ind.noUpstreamTitle'))}">${esc(I18N.t('git.ind.noUpstream'))}</span>`)
+
+  return `<span class="git-ind ${i.onveilig ? 'onveilig' : ''}">
+      <i class="ti ti-git-branch"></i>
+      <span class="git-ind-branch">${esc(i.branch)}</span>
+      ${delen.join('')}
+    </span>`
 }
 
 // Eigen knoppen die de gebruiker vanuit het woordenboek heeft toegevoegd.
@@ -647,6 +699,11 @@ window.addEventListener('DOMContentLoaded', async () => {
   // Bestaande projecten die nog nooit nagekeken zijn (verse installatie, of na
   // een update waarin deze controle erbij kwam) alsnog beoordelen.
   setTimeout(() => keurProjectenNa(), 1200)
+
+  // Git-toestand van álle projecten ophalen en daarna blijven bijhouden. Ook
+  // van projecten die niet open staan: de afsluitcontrole moet straks over
+  // allemaal iets kunnen zeggen, niet alleen over het laatst bekeken project.
+  setTimeout(() => { ververesAlleGitStaten(true); startGitPolling() }, 1500)
 
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return
@@ -2650,6 +2707,7 @@ function renderMain() {
       <div class="proj-header-left">
         <span class="proj-header-icon">${p.icon}</span>
         <span class="proj-header-name">${esc(p.name)}</span>
+        ${gitIndicatorHtml(p)}
       </div>
       <div class="loc-switcher">
         <label>${esc(I18N.t('project.locationLabel'))}</label>

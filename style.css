@@ -390,6 +390,25 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
 .proj-header-icon { font-size: 22px; line-height: 1; }
 .proj-header-name { font-size: 16px; font-weight: 600; color: var(--text); }
 
+/* ── Git-indicator in de projectkop ──────────────────────────────────────── */
+/* Rustig grijs zolang alles ergens anders ook staat. Zodra er werk is dat
+   alleen op deze pc bestaat, kleurt de hele indicator op — dat is het signaal
+   waar de afsluitcontrole straks ook op afgaat. */
+.git-ind {
+  display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0;
+  padding: 2px 8px; border-radius: 999px;
+  border: 1px solid var(--border2); background: var(--s2);
+  font-family: var(--mono); font-size: 11px; color: var(--muted2);
+}
+.git-ind i { font-size: 12px; }
+.git-ind-branch { color: var(--text); }
+.git-ind.onveilig { border-color: rgba(251,191,36,0.4); background: rgba(251,191,36,0.07); }
+.git-ind.onveilig .git-ind-branch { color: var(--amber); }
+.git-ind-ahead  { color: #34d399; }
+.git-ind-behind { color: #60a5fa; }
+.git-ind-dirty  { color: var(--amber); }
+.git-ind-los    { color: var(--muted); font-style: italic; }
+
 .loc-switcher { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .loc-switcher label { font-size: 11px; color: var(--muted); }
 .loc-select {

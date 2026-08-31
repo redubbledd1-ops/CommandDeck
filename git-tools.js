@@ -162,6 +162,47 @@
   const schrijftIds = GIT_CMD_DEFS.filter(d => d.schrijft).map(d => d.id)
   const isSchrijfKnop = (id) => schrijftIds.includes(id)
 
+  // ── De indicator (ronde 3) ──────────────────────────────────────────────────
+  // Wat er in de projectkop komt te staan, en — belangrijker — of er werk is
+  // dat nergens anders staat. Dat laatste is wat de afsluitcontrole van ronde 5
+  // straks per project moet weten, dus die vraag hoort hier en niet in de
+  // opmaak.
+  function indicator(staat) {
+    if (!staat || !staat.beschikbaar || !staat.isRepo) return null
+
+    const vuil = staat.vuil || 0
+    const ahead = staat.ahead || 0
+    const behind = staat.behind || 0
+
+    return {
+      branch: staat.branch || 'HEAD',
+      losgekoppeld: !staat.branch,          // detached HEAD
+      gekoppeld: !!staat.gekoppeld,
+      volgt: !!staat.upstream,              // wijst deze branch ergens naartoe
+      ahead, behind, vuil,
+      // Niets te doen: niets gewijzigd, niets vooruit, niets achter.
+      schoon: vuil === 0 && ahead === 0 && behind === 0,
+      // Werk dat alleen op deze pc bestaat. Niet-vastgelegde wijzigingen, of
+      // commits die nog nergens heen zijn gepusht. Dit is de vraag waar de
+      // afsluitcontrole op afgaat.
+      onveilig: vuil > 0 || ahead > 0,
+      // De remote heeft iets wat jij niet hebt. Alleen betrouwbaar kort na een
+      // fetch — zonder fetch blijft dit 0, ook al staat er werk klaar.
+      achter: behind > 0,
+    }
+  }
+
+  // Waarom een project onveilig is, in de volgorde waarin je het wilt horen.
+  // Geeft [] terug als er niets aan de hand is.
+  function onveiligeRedenen(staat) {
+    const i = indicator(staat)
+    if (!i || !i.onveilig) return []
+    const uit = []
+    if (i.vuil > 0) uit.push({ soort: 'niet-vastgelegd', aantal: i.vuil })
+    if (i.ahead > 0) uit.push({ soort: 'niet-gepusht', aantal: i.ahead })
+    return uit
+  }
+
   // ── Koppelen ────────────────────────────────────────────────────────────────
   // Twee stappen, bewust niet in één klik. Een map zonder repo krijgt eerst
   // alleen `git init`; wat er gecommit wordt bepaal je zelf, want zonder
@@ -276,6 +317,7 @@
     parseRemotes, parseBranch, parseStatusV2, maakStaat, zichtbareGitIds,
     koppelStap, koppelCommando, veiligeRepoNaam, normaliseerRepoUrl,
     veiligCommitBericht, commitCommando, pushCommando, stashCommando, blokkade,
+    indicator, onveiligeRedenen,
     KOPPEL_INIT, KOPPEL_COMMIT, KOPPEL_GH, KOPPEL_URL, KOPPEL_AL_GEDAAN,
   }
 })

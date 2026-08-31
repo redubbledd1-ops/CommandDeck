@@ -190,6 +190,58 @@ t('met wijzigingen mag commit gewoon', G.blokkade('git-commit', repoVol) === nul
 t('met commits vooruit mag push gewoon', G.blokkade('git-push', repoVol) === null)
 t('een leesknop wordt nooit tegengehouden', G.blokkade('git-log', schoon) === null)
 
+// ── ronde 3: de indicator ────────────────────────────────────────────────────
+const iVol = G.indicator(G.maakStaat({ isRepo: true, remotes: ['origin'], branch: 'main',
+  upstream: 'origin/main', ahead: 2, behind: 1, vuil: 3 }))
+t('branch in de indicator', iVol.branch === 'main')
+t('vooruit en achter', iVol.ahead === 2 && iVol.behind === 1)
+t('vuile bestanden', iVol.vuil === 3)
+t('niet schoon', iVol.schoon === false)
+t('onveilig: er staat werk dat nergens anders is', iVol.onveilig === true)
+
+const iSchoon = G.indicator(G.maakStaat({ isRepo: true, remotes: ['origin'], branch: 'main',
+  upstream: 'origin/main' }))
+t('alles gelijk is schoon', iSchoon.schoon === true)
+t('en dus niet onveilig', iSchoon.onveilig === false)
+
+const iAchter = G.indicator(G.maakStaat({ isRepo: true, remotes: ['origin'], branch: 'main',
+  upstream: 'origin/main', behind: 4 }))
+t('alleen achterlopen is niet schoon', iAchter.schoon === false)
+t('maar ook niet onveilig — je raakt niets kwijt', iAchter.onveilig === false)
+t('achter wordt wel gemeld', iAchter.achter === true)
+
+const iVuil = G.indicator(G.maakStaat({ isRepo: true, remotes: ['origin'], branch: 'main',
+  upstream: 'origin/main', vuil: 1 }))
+t('niet-vastgelegd werk is onveilig', iVuil.onveilig === true)
+const iVooruit = G.indicator(G.maakStaat({ isRepo: true, remotes: ['origin'], branch: 'main',
+  upstream: 'origin/main', ahead: 1 }))
+t('niet-gepusht werk is ook onveilig', iVooruit.onveilig === true)
+
+const iLos = G.indicator(G.maakStaat({ isRepo: true, remotes: [], branch: 'main', vuil: 2 }))
+t('zonder remote: gekoppeld is onwaar', iLos.gekoppeld === false)
+t('zonder remote: volgt niets', iLos.volgt === false)
+const iGeenUpstream = G.indicator(G.maakStaat({ isRepo: true, remotes: ['origin'], branch: 'main' }))
+t('remote zonder upstream is een eigen geval', iGeenUpstream.gekoppeld === true && iGeenUpstream.volgt === false)
+
+const iDetached = G.indicator(G.maakStaat({ isRepo: true, remotes: ['origin'], branch: null }))
+t('detached HEAD toont HEAD', iDetached.branch === 'HEAD' && iDetached.losgekoppeld === true)
+
+t('geen repo heeft geen indicator', G.indicator(G.maakStaat({ isRepo: false })) === null)
+t('zonder git geen indicator', G.indicator(G.maakStaat({ beschikbaar: false })) === null)
+t('nog niet gemeten geen indicator', G.indicator(null) === null)
+
+// ── ronde 3: waarom is een project onveilig (basis voor ronde 5) ─────────────
+gelijk('schoon project geeft geen redenen',
+  G.onveiligeRedenen(G.maakStaat({ isRepo: true, remotes: ['origin'], branch: 'main', upstream: 'origin/main' })), [])
+gelijk('alleen achterlopen geeft geen reden',
+  G.onveiligeRedenen(G.maakStaat({ isRepo: true, remotes: ['origin'], branch: 'main', upstream: 'origin/main', behind: 3 })), [])
+gelijk('niet-vastgelegd werk', G.onveiligeRedenen(G.maakStaat({ isRepo: true, remotes: ['origin'], branch: 'main', vuil: 4 })),
+  [{ soort: 'niet-vastgelegd', aantal: 4 }])
+gelijk('allebei, in de volgorde waarin je het wilt horen',
+  G.onveiligeRedenen(G.maakStaat({ isRepo: true, remotes: ['origin'], branch: 'main', upstream: 'origin/main', vuil: 2, ahead: 5 })),
+  [{ soort: 'niet-vastgelegd', aantal: 2 }, { soort: 'niet-gepusht', aantal: 5 }])
+gelijk('een map zonder repo levert nooit een reden', G.onveiligeRedenen(G.maakStaat({ isRepo: false })), [])
+
 // ── bedrading naar de app ────────────────────────────────────────────────────
 // Zonder deze twee zie je de knoppen wel staan, maar grijs en zonder icoon —
 // ze lijken dan uitgeschakeld. Dat is precies wat er de eerste keer misging.
@@ -204,6 +256,11 @@ for (const d of G.GIT_CMD_DEFS) {
   t('vertaling ' + d.labelKey + ' bestaat in nl en en', !!nl[d.labelKey] && !!en[d.labelKey])
 }
 // Op de script-tags zelf kijken: renderer.js staat verderop ook in een comment.
+for (const sleutel of ['git.ind.aheadTitle', 'git.ind.behindTitle', 'git.ind.dirtyTitle',
+                       'git.ind.noRemote', 'git.ind.noUpstream']) {
+  t('indicator-tekst ' + sleutel + ' bestaat in nl en en', !!nl[sleutel] && !!en[sleutel])
+}
+
 for (const reden of ['schoon', 'geen-commits', 'niets-vooruit']) {
   t('melding voor "' + reden + '" bestaat in nl en en',
     !!nl['git.block.' + reden + 'Title'] && !!en['git.block.' + reden + 'Text'])

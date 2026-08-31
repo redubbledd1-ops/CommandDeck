@@ -10,8 +10,9 @@ Elke ronde is los af te maken en te gebruiken.
 | Deel | Wat | Ronde | Stand |
 |---|---|---|---|
 | **A** | Git-snelknoppen per project | 1, 2, 4 | ronde 1 en 2 af |
-| **B** | Branch- en status-indicator in de projectkop | 3 | volgende |
-| **C** | Afsluitcontrole: niet-gecommit / niet-gepusht werk | 5 | |
+| **B** | Branch- en status-indicator in de projectkop | 3 | **af** |
+| **C** | Afsluitcontrole: niet-gecommit / niet-gepusht werk | 5 | volgende |
+| **D** | Bij opstarten waarschuwen als de remote vóórloopt | nog te plannen | idee |
 
 De cache uit deel B is de basis voor deel C. Bouw dus B vóór C.
 
@@ -104,7 +105,22 @@ ongeluk 400 bestanden commit.
 
 ---
 
-## B. Branch- & status-indicator (ronde 3)
+## B. Branch- & status-indicator (ronde 3) — gebouwd
+
+Staat in de projectkop naast de naam. Grijs zolang alles ergens anders ook
+staat; hij kleurt amber zodra er werk is dat alleen op deze pc bestaat.
+Ververst elke 30 s, na elke git-actie, en bij het wisselen van locatie — maar
+niet als het venster verborgen is. Elke tiende ronde gaat hij ook langs de
+projecten die niet open staan, zodat ronde 5 straks over allemaal iets kan
+zeggen.
+
+`indicator(staat).onveilig` is de vraag waar ronde 5 op afgaat, en
+`onveiligeRedenen(staat)` geeft per project terug waaróm. Beide zijn getest.
+
+Wat er nog niet is: het poll-interval is een constante (`GIT_POLL_MS` in
+renderer.js), instelbaar maken hoort bij ronde 4.
+
+### Oorspronkelijke opzet
 
 In de projectkop: huidige branch + `↑x ↓y` (commits vóór/achter op de remote).
 
@@ -166,6 +182,33 @@ Deze cache is wat deel C uitleest. Zorg dat hij ook gevuld wordt voor projecten
 waarvan het tabblad niet open staat — anders mist de afsluitcontrole ze.
 
 ---
+
+## D. Achterlopen bij het opstarten — idee, nog niet gebouwd
+
+De spiegel van deel C. C vangt "je hebt werk dat nergens anders staat"; D vangt
+"er staat werk dat jij niet hebt". Precies wat er misging toen werk en thuis
+uit elkaar liepen.
+
+`indicator().achter` bestaat al en `behind` staat in de cache. Wat ontbreekt is
+dat de cijfers pas kloppen ná een `git fetch`. Zonder fetch blijft `↓0` staan,
+ook als er een uur geleden gepusht is.
+
+Dat is de hele beslissing:
+
+| Aanpak | Kosten | Nauwkeurigheid |
+|---|---|---|
+| Geen fetch, alleen tonen wat git al weet | niets | vaak ↓0 terwijl je achterloopt — misleidend |
+| Fetch bij het openen van één project | een paar seconden, één keer per project | goed, precies waar je het nodig hebt |
+| Fetch voor alle projecten bij het opstarten | netwerk voor tien repo's, trage start | het meest compleet |
+
+Een fetch kan bovendien om inloggegevens vragen als de credential manager de
+sessie kwijt is, en dat wil je niet als blokkerend venster bij het opstarten.
+Draai hem dus stil op de achtergrond en negeer een mislukking: dan blijft de
+indicator gewoon staan op wat hij wist.
+
+*Voorstel: fetch bij het openen van een project, stil, hoogstens één keer per
+tien minuten per repo. En bij `behind > 0` een melding met een pull-knop, geen
+automatische pull — de gebruiker moet weten dat zijn map verandert.*
 
 ## C. Afsluitcontrole (ronde 5)
 
