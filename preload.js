@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld('api', {
 
   gitInfo:       (p)     => ipcRenderer.invoke('git:info', p),
   gitGh:         ()      => ipcRenderer.invoke('git:gh'),
+  gitFetch:      (p)     => ipcRenderer.invoke('git:fetch', p),
   gitProjecten:  (l)     => ipcRenderer.send('git:projecten', l),
   gitStashMelding:()     => ipcRenderer.invoke('git:stashMelding'),
   opAfsluitControle: (f) => ipcRenderer.on('git:controleerVoorAfsluiten', () => f()),

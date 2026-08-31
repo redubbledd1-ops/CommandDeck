@@ -2368,6 +2368,10 @@ function selectProject(id) {
   cmdSorteerModus = ''
   bergVerkennerOp()
   activeId = id
+  // Stil kijken of de remote iets heeft wat jij niet hebt. Hoogstens eens per
+  // tien minuten per map, en een mislukking blijft onzichtbaar.
+  const geopend = projects.find(x => x.id === id)
+  if (geopend) setTimeout(() => controleerAchterstand(geopend), 400)
   if (splitAan()) {
     plaatsInSplit('project')
     const p = projects.find(x => x.id === id)
@@ -7180,6 +7184,13 @@ function renderSettingsPanel() {
           </select>
           <span class="instel-uitleg">${I18N.t('settings.git.desc')}</span>
         </div>
+        <div class="instel-rij">
+          <label class="bat-opt">
+            <input type="checkbox" id="set-git-fetch" ${(settings.git || {}).fetchBijOpenen !== false ? 'checked' : ''} />
+            ${I18N.t('settings.git.fetchLabel')}
+          </label>
+          <span class="instel-uitleg">${I18N.t('settings.git.fetchDesc')}</span>
+        </div>
       </div>
       <div>
         <div class="settings-section-title">${I18N.t('settings.section.deleteTitle')}</div>
@@ -7252,6 +7263,12 @@ function renderSettingsPanel() {
   const gitKeuze = document.getElementById('set-git-afsluiten')
   if (gitKeuze) gitKeuze.onchange = () => {
     settings.git = { ...(settings.git || {}), afsluiten: gitKeuze.value }
+    window.api.saveSettings(settings)
+  }
+
+  const gitFetchVak = document.getElementById('set-git-fetch')
+  if (gitFetchVak) gitFetchVak.onchange = (e) => {
+    settings.git = { ...(settings.git || {}), fetchBijOpenen: e.target.checked }
     window.api.saveSettings(settings)
   }
 
@@ -10563,6 +10580,63 @@ async function executeCmd(project, cmd, cmdKey = null) {
     cmdFlowActive = false
     isRunning = false
     updateRunBtnIfVisible()
+  }
+}
+
+// ── Achterlopen opmerken ─────────────────────────────────────────────────────
+// De spiegel van de afsluitcontrole: die vangt "je hebt werk dat nergens
+// anders staat", dit vangt "er staat werk dat jij niet hebt". Precies wat
+// misgaat als je op twee machines aan hetzelfde project werkt.
+const gitLaatsteFetch = {}     // pad -> tijdstip
+let achterstandBezig = false
+
+async function controleerAchterstand(p) {
+  if (achterstandBezig) return
+  if ((settings.git || {}).fetchBijOpenen === false) return
+
+  const pad = actieveLocPad(p)
+  if (!pad) return
+
+  const staat = gitStaten[pad] || await ververesGitPad(pad)
+  if (!GitTools.magFetchen(staat, gitLaatsteFetch[pad])) return
+
+  achterstandBezig = true
+  try {
+    // Ook bij een mislukte fetch de tijd bijwerken: anders probeert hij het
+    // bij elke klik opnieuw als je offline bent.
+    gitLaatsteFetch[pad] = Date.now()
+    const r = await window.api.gitFetch(pad)
+    if (!r || !r.ok) return
+
+    const na = await ververesGitPad(pad, true)
+    const melding = GitTools.achterstandMelding(na)
+    if (!melding) return
+    // Je kunt inmiddels ergens anders zijn; dan niet alsnog een venster
+    // openen over een project dat je niet meer voor je hebt.
+    if (activeId !== p.id) return
+
+    const regels = []
+    if (melding.uitEenLopend) regels.push(I18N.t('git.achter.uitEenLopend'))
+    if (melding.vuil) regels.push(I18N.t('git.achter.vuil', { aantal: melding.vuil }))
+
+    const keuze = await vraagKeuze({
+      titel: I18N.t('git.achter.titel', { aantal: melding.behind, branch: melding.branch }),
+      tekst: I18N.t(melding.uitEenLopend ? 'git.achter.tekstUitEen' : 'git.achter.tekst'),
+      regels,
+      knoppen: [
+        { label: I18N.t('git.achter.later'), waarde: '' },
+        { label: I18N.t('git.achter.nu'), waarde: 'pull', soort: melding.uitEenLopend || melding.vuil ? 'gevaar' : 'primair' },
+      ],
+    })
+    if (keuze !== 'pull') return
+
+    await executeCmd(p, GitTools.GIT_CMD_MAP['git-pull'], 'git-pull')
+    await ververesGitPad(pad, true)
+  } catch {
+    // Netwerk weg, remote onbereikbaar: de indicator blijft staan op wat hij
+    // wist. Dat is beter dan een foutmelding over iets waar je niet om vroeg.
+  } finally {
+    achterstandBezig = false
   }
 }
 

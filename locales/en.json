@@ -838,5 +838,14 @@
   "settings.git.desc": "Checks on close whether there is work that exists nowhere else. Also sees changes made outside CommandDeck.",
   "settings.git.off": "do not check",
   "settings.git.warn": "warn",
-  "settings.git.stash": "warn + stash on Windows shutdown"
+  "settings.git.stash": "warn + stash on Windows shutdown",
+  "git.achter.titel": "{aantal} commit(s) waiting on {branch}",
+  "git.achter.tekst": "The remote has work you do not have yet. Fetch it now?",
+  "git.achter.tekstUitEen": "You and the remote have diverged. A pull with --ff-only will refuse; you will have to merge or rebase yourself.",
+  "git.achter.uitEenLopend": "you also have commits the remote does not have",
+  "git.achter.vuil": "{aantal} changed file(s) — git refuses to overwrite those",
+  "git.achter.nu": "pull now",
+  "git.achter.later": "later",
+  "settings.git.fetchLabel": "On opening, check for new work on the remote",
+  "settings.git.fetchDesc": "Silently fetches what changed on the remote, at most once every ten minutes per project. Without this the counter stays at 0, even when something is waiting."
 }

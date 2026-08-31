@@ -203,6 +203,39 @@
     return uit
   }
 
+  // ── Achterlopen opmerken (deel D) ───────────────────────────────────────────
+  // `↓3 achter` weet git alleen ná een fetch. Zonder fetch staat er ↓0 terwijl
+  // er een uur geleden gepusht is — misleidender dan niets tonen. Dus fetchen
+  // we stil bij het openen van een project, maar niet vaker dan nodig: een
+  // fetch is netwerk, en tien projecten aanklikken mag geen tien
+  // netwerkrondes per minuut worden.
+  const FETCH_INTERVAL_MS = 10 * 60 * 1000
+
+  function magFetchen(staat, laatsteFetch, nu = Date.now(), interval = FETCH_INTERVAL_MS) {
+    if (!staat || !staat.beschikbaar || !staat.isRepo) return false
+    if (!staat.gekoppeld) return false        // niets om bij op te halen
+    if (!laatsteFetch) return true
+    return (nu - laatsteFetch) >= interval
+  }
+
+  // Melden we dat de remote vóórloopt? Alleen als er ook echt iets te halen
+  // valt. Loop je zelf ook vooruit, dan is het geen simpele pull meer maar
+  // een uiteenlopende geschiedenis — dat zeggen we er dan bij.
+  function achterstandMelding(staat) {
+    const i = indicator(staat)
+    if (!i || !i.behind) return null
+    return {
+      behind: i.behind,
+      branch: i.branch,
+      // Vooruit én achter: `pull --ff-only` gaat weigeren. Beter dat je dat
+      // vooraf weet dan dat je op een knop drukt die een foutmelding geeft.
+      uitEenLopend: i.ahead > 0,
+      // Niet-vastgelegd werk maakt een pull riskant: git weigert bestanden te
+      // overschrijven die je hebt aangepast.
+      vuil: i.vuil,
+    }
+  }
+
   // ── Afsluitcontrole (ronde 5) ───────────────────────────────────────────────
   // Twee heel verschillende momenten:
   //
@@ -368,7 +401,7 @@
     parseRemotes, parseBranch, parseStatusV2, maakStaat, zichtbareGitIds,
     koppelStap, koppelCommando, veiligeRepoNaam, normaliseerRepoUrl,
     veiligCommitBericht, commitCommando, pushCommando, stashCommando, blokkade,
-    indicator, onveiligeRedenen,
+    indicator, onveiligeRedenen, magFetchen, achterstandMelding, FETCH_INTERVAL_MS,
     teVragenProjecten, teStashenProjecten, afsluitSamenvatting, afsluitInstelling,
     AFSLUIT_UIT, AFSLUIT_WAARSCHUWEN, AFSLUIT_STASHEN, AFSLUIT_KEUZES,
     KOPPEL_INIT, KOPPEL_COMMIT, KOPPEL_GH, KOPPEL_URL, KOPPEL_AL_GEDAAN,

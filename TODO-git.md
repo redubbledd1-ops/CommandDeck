@@ -12,7 +12,7 @@ Elke ronde is los af te maken en te gebruiken.
 | **A** | Git-snelknoppen per project | 1, 2, 4 | ronde 1 en 2 af |
 | **B** | Branch- en status-indicator in de projectkop | 3 | **af** |
 | **C** | Afsluitcontrole: niet-gecommit / niet-gepusht werk | 5 | **af** |
-| **D** | Bij opstarten waarschuwen als de remote vóórloopt | nog te plannen | idee |
+| **D** | Waarschuwen als de remote vóórloopt | los | **af** |
 
 De cache uit deel B is de basis voor deel C. Bouw dus B vóór C.
 
@@ -183,7 +183,30 @@ waarvan het tabblad niet open staat — anders mist de afsluitcontrole ze.
 
 ---
 
-## D. Achterlopen bij het opstarten — idee, nog niet gebouwd
+## D. Achterlopen opmerken — gebouwd
+
+Gekozen aanpak: **stille fetch bij het openen van een project**, hoogstens eens
+per tien minuten per map. Uit te zetten in instellingen → Git.
+
+De fetch draait async (`execFile`, niet `execFileSync` zoals `git:info`) met een
+tijdslimiet van 15 s, en met `GIT_TERMINAL_PROMPT=0` plus de credential manager
+op non-interactief. Zonder dat laatste blijft er bij ontbrekende inloggegevens
+een onzichtbaar proces staan wachten op invoer die niemand ziet.
+
+Een mislukte fetch is stil: de indicator blijft staan op wat hij al wist. Wel
+wordt het tijdstip bijgewerkt, anders probeert hij het bij elke klik opnieuw
+als je offline bent.
+
+Loopt de remote voor, dan komt er een venster met **nu ophalen** / **later**.
+Twee gevallen krijgen een waarschuwing en een rode knop in plaats van een
+groene:
+
+- **uiteenlopend** (jij loopt óók vooruit) — `pull --ff-only` gaat weigeren
+- **vuile bestanden** — git weigert bestanden te overschrijven die je hebt aangepast
+
+Geen automatische pull: je map hoort niet onder je handen te veranderen.
+
+### Oorspronkelijke afweging
 
 De spiegel van deel C. C vangt "je hebt werk dat nergens anders staat"; D vangt
 "er staat werk dat jij niet hebt". Precies wat er misging toen werk en thuis

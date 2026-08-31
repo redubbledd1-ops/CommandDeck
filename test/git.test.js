@@ -287,6 +287,40 @@ t('undefined klapt niet', G.teVragenProjecten(undefined, 'waarschuwen').length =
 t('een project zonder staat klapt niet',
   G.teVragenProjecten([{ naam: 'x' }], 'waarschuwen').length === 0)
 
+// ── deel D: achterlopen opmerken ─────────────────────────────────────────────
+const NU = 1_700_000_000_000
+const TIEN_MIN = 10 * 60 * 1000
+const stGekoppeld = G.maakStaat({ ...BASIS })
+
+t('nooit eerder gefetcht mag altijd', G.magFetchen(stGekoppeld, null, NU) === true)
+t('net gefetcht mag niet opnieuw', G.magFetchen(stGekoppeld, NU - 60_000, NU) === false)
+t('precies op de grens mag wel', G.magFetchen(stGekoppeld, NU - TIEN_MIN, NU) === true)
+t('ruim over de grens mag ook', G.magFetchen(stGekoppeld, NU - 60 * 60_000, NU) === true)
+t('zonder remote valt er niets te halen',
+  G.magFetchen(G.maakStaat({ isRepo: true, remotes: [], branch: 'main' }), null, NU) === false)
+t('geen repo, geen fetch', G.magFetchen(G.maakStaat({ isRepo: false }), null, NU) === false)
+t('zonder git, geen fetch', G.magFetchen(G.maakStaat({ beschikbaar: false }), null, NU) === false)
+t('onbekende staat klapt niet', G.magFetchen(null, null, NU) === false)
+
+t('gelijk lopen levert geen melding',
+  G.achterstandMelding(G.maakStaat({ ...BASIS })) === null)
+t('vooruit lopen levert geen melding',
+  G.achterstandMelding(G.maakStaat({ ...BASIS, ahead: 3 })) === null)
+
+const mAchter = G.achterstandMelding(G.maakStaat({ ...BASIS, behind: 3 }))
+t('achterlopen levert wel een melding', mAchter.behind === 3 && mAchter.branch === 'main')
+t('en is dan een gewone pull', mAchter.uitEenLopend === false && mAchter.vuil === 0)
+
+const mUitEen = G.achterstandMelding(G.maakStaat({ ...BASIS, behind: 2, ahead: 1 }))
+t('vooruit én achter is uiteenlopend — ff-only gaat weigeren', mUitEen.uitEenLopend === true)
+
+const mVuil = G.achterstandMelding(G.maakStaat({ ...BASIS, behind: 2, vuil: 4 }))
+t('vuile bestanden worden meegegeven — git weigert die te overschrijven', mVuil.vuil === 4)
+t('maar dat maakt het nog geen uiteenlopende geschiedenis', mVuil.uitEenLopend === false)
+
+t('een repo zonder repo geeft geen melding',
+  G.achterstandMelding(G.maakStaat({ isRepo: false })) === null)
+
 // ── bedrading naar de app ────────────────────────────────────────────────────
 // Zonder deze twee zie je de knoppen wel staan, maar grijs en zonder icoon —
 // ze lijken dan uitgeschakeld. Dat is precies wat er de eerste keer misging.
@@ -311,6 +345,12 @@ for (const sleutel of ['git.afsluit.titel', 'git.afsluit.commitPush', 'git.afslu
                        'git.afsluit.reden.niet-gepusht', 'git.stashMelding.titel',
                        'settings.git.label', 'settings.git.off', 'settings.git.warn', 'settings.git.stash']) {
   t('afsluit-tekst ' + sleutel + ' bestaat in nl en en', !!nl[sleutel] && !!en[sleutel])
+}
+
+for (const sleutel of ['git.achter.titel', 'git.achter.tekst', 'git.achter.tekstUitEen',
+                       'git.achter.nu', 'git.achter.later', 'git.achter.uitEenLopend',
+                       'settings.git.fetchLabel']) {
+  t('achterstand-tekst ' + sleutel + ' bestaat in nl en en', !!nl[sleutel] && !!en[sleutel])
 }
 
 for (const reden of ['schoon', 'geen-commits', 'niets-vooruit']) {

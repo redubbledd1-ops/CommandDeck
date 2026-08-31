@@ -838,5 +838,14 @@
   "settings.git.desc": "Kijkt bij het sluiten of er werk is dat nergens anders staat. Ziet ook wijzigingen die buiten CommandDeck zijn gemaakt.",
   "settings.git.off": "niet controleren",
   "settings.git.warn": "waarschuwen",
-  "settings.git.stash": "waarschuwen + stashen bij Windows-afsluiten"
+  "settings.git.stash": "waarschuwen + stashen bij Windows-afsluiten",
+  "git.achter.titel": "{aantal} commit(s) klaar op {branch}",
+  "git.achter.tekst": "Op de remote staat werk dat jij nog niet hebt. Nu ophalen?",
+  "git.achter.tekstUitEen": "Jij en de remote lopen uit elkaar. Een pull met --ff-only zal weigeren; je moet dan zelf mergen of rebasen.",
+  "git.achter.uitEenLopend": "je hebt zelf ook commits die er nog niet zijn",
+  "git.achter.vuil": "{aantal} bestand(en) gewijzigd — git weigert die te overschrijven",
+  "git.achter.nu": "nu ophalen",
+  "git.achter.later": "later",
+  "settings.git.fetchLabel": "Bij openen kijken of er nieuw werk op de remote staat",
+  "settings.git.fetchDesc": "Haalt stil op wat er op de remote is veranderd, hoogstens eens per tien minuten per project. Zonder dit blijft de teller op ↓0 staan, ook als er wél iets klaarstaat."
 }

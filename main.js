@@ -3,7 +3,7 @@ const path = require('path')
 const fs = require('fs')
 const os = require('os')
 const crypto = require('crypto')
-const { spawn, execFileSync } = require('child_process')
+const { spawn, execFileSync, execFile } = require('child_process')
 const { analyzeFailure, isAutofixEligible, isFlutterCommand,
         looksLikeFlutterMissing, FLUTTER_MISSING_HELP } = require('./install-fixer')
 const { parseFlutterAndroidDevices } = require('./flutter-devices')
@@ -209,7 +209,7 @@ const DEFAULT_SETTINGS = {
   //   uit          niets doen
   //   waarschuwen  vragen bij het sluiten van het venster (standaard)
   //   stashen      idem, plus bij een Windows-shutdown automatisch stashen
-  git: { afsluiten: 'waarschuwen' },
+  git: { afsluiten: 'waarschuwen', fetchBijOpenen: true },
   // Volgorde van de knoppen onder het kopje "opdrachten" in de zijbalk
   navVolgorde: ['cmd', 'ps', 'bat', 'dict'],
   // Map met de broncode; wordt automatisch gevonden, hier alleen onthouden
@@ -987,6 +987,36 @@ ipcMain.handle('git:stashMelding', () => {
     return m
   } catch { return null }
 })
+
+// Stil ophalen wat er op de remote staat, zodat "↓3 achter" iets betekent.
+// Drie dingen zijn hier belangrijk:
+//
+//   async     dit mag het main-proces niet blokkeren, dus execFile en geen
+//             execFileSync zoals bij git:info
+//   geen vraag om inloggegevens: GIT_TERMINAL_PROMPT=0 en de credential
+//             manager op non-interactief. Anders blijft er een onzichtbaar
+//             proces staan wachten op invoer die niemand ziet
+//   tijdslimiet zodat een trage of onbereikbare remote niet blijft hangen
+ipcMain.handle('git:fetch', (_, dir) => new Promise((resolve) => {
+  if (!dir || !fs.existsSync(dir) || !heeftGit()) { resolve({ ok: false, reden: 'geen-repo' }); return }
+
+  execFile('git', ['fetch', '--prune'], {
+    cwd: dir,
+    windowsHide: true,
+    timeout: 15000,
+    env: childEnv({
+      GIT_TERMINAL_PROMPT: '0',
+      GCM_INTERACTIVE: 'never',
+      GIT_ASKPASS: '',
+      SSH_ASKPASS: '',
+    }),
+  }, (fout) => {
+    // Een mislukte fetch is geen ramp: de indicator blijft dan gewoon staan op
+    // wat hij al wist. Niets melden, niets blokkeren.
+    if (fout) { resolve({ ok: false, reden: fout.killed ? 'te-traag' : 'mislukt' }); return }
+    resolve({ ok: true })
+  })
+}))
 
 // Is de GitHub-CLI beschikbaar? Zo ja, dan kan de koppelknop de repo zelf
 // aanmaken; zo nee, dan vragen we de gebruiker om de url.
