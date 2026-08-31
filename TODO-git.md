@@ -7,11 +7,11 @@ Elke ronde is los af te maken en te gebruiken.
 
 ## In het kort
 
-| Deel | Wat | Ronde |
-|---|---|---|
-| **A** | Git-snelknoppen per project, naast de Flutter-knoppen | 1, 2, 4 |
-| **B** | Branch- en status-indicator in de projectkop | 3 |
-| **C** | Afsluitcontrole: niet-gecommit / niet-gepusht werk | 5 |
+| Deel | Wat | Ronde | Stand |
+|---|---|---|---|
+| **A** | Git-snelknoppen per project | 1, 2, 4 | ronde 1 en 2 af |
+| **B** | Branch- en status-indicator in de projectkop | 3 | volgende |
+| **C** | Afsluitcontrole: niet-gecommit / niet-gepusht werk | 5 | |
 
 De cache uit deel B is de basis voor deel C. Bouw dus B vóór C.
 
@@ -25,7 +25,38 @@ De cache uit deel B is de basis voor deel C. Bouw dus B vóór C.
   repo, CRLF in je working copy). Zonder dit ziet een tweede machine álle
   bestanden als gewijzigd.
 
-Wat nog moet: remote naar GitHub, en dan pas is "pull/push" in de app zinvol.
+Beide projecten staan op GitHub (privé). Resume als `redubbledd1-ops/Resume`.
+
+## 0b. Ronde 1 en 2 — gebouwd
+
+De knoppen staan in **uitvoeren**, niet in tools. Reden: `bepaalToolsVoorProject`
+(main-kant `renderer.js`) verbergt de tools-sectie standaard bij een
+niet-Flutter-project, en juist daar wil je git-knoppen — CommandDeck zelf is
+Electron.
+
+Welke knoppen je ziet, hangt af van wat ze nodig hebben:
+
+| Toestand | Knoppen |
+|---|---|
+| geen repo | `github koppelen` |
+| repo, geen remote | `github koppelen` + status, commit, stash, log |
+| gekoppeld | alles behalve koppelen |
+
+Commit hoort bewust al bij een repo zónder remote. In de eerste opzet niet, en
+toen stuurde de koppel-dialoog je naar "maak eerst een commit" zonder dat er
+een commit-knop was.
+
+`git-tools.js` (nieuw) is de enige bron voor de knoppen, de commando's en de
+beslislogica. Wordt geladen via `require()` (main.js, tests) én via een
+`<script>`-tag in index.html, vóór renderer.js.
+
+De statusparser leest `git status --porcelain=v2 --branch`: branch, upstream,
+vooruit/achter en de vuile bestanden in één aanroep. **Dat is de basis voor
+ronde 3** — de cache hoeft alleen nog periodiek ververst te worden.
+
+Wat nog niet af is aan deel A: ronde 4 (per-project aan/uit staat er al via de
+bestaande cmdVisibility, maar de instellingen-lijst toont knoppen die in dit
+project niet kunnen verschijnen — die zou je moeten doorstrepen met een reden).
 
 ---
 

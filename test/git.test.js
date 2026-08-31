@@ -35,12 +35,14 @@ t('remotes mag ook rauwe tekst zijn',
 
 // ── welke knoppen zie je ─────────────────────────────────────────────────────
 gelijk('geen repo -> alleen koppelen', G.zichtbareGitIds(geenRepo), ['git-koppelen'])
-gelijk('losse repo -> alleen koppelen', G.zichtbareGitIds(losseRepo), ['git-koppelen'])
-gelijk('gekoppeld -> de leesknoppen, koppelen valt weg',
-  G.zichtbareGitIds(gekoppeld), ['git-status', 'git-pull', 'git-fetch', 'git-log'])
+gelijk('losse repo -> koppelen plus wat lokaal werkt',
+  G.zichtbareGitIds(losseRepo), ['git-koppelen', 'git-status', 'git-commit', 'git-stash', 'git-log'])
+gelijk('gekoppeld -> alles, koppelen valt weg',
+  G.zichtbareGitIds(gekoppeld),
+  ['git-status', 'git-commit', 'git-push', 'git-pull', 'git-fetch', 'git-stash', 'git-log'])
 gelijk('nog niet gemeten -> geen enkele knop', G.zichtbareGitIds(null), [])
 gelijk('git ontbreekt -> geen enkele knop', G.zichtbareGitIds(geenGit), [])
-t('koppelen en de leesknoppen sluiten elkaar uit',
+t('koppelen verdwijnt zodra er een remote is',
   !G.zichtbareGitIds(gekoppeld).includes('git-koppelen'))
 
 // ── koppelstappen ────────────────────────────────────────────────────────────
@@ -71,10 +73,15 @@ t('pull is ff-only', G.GIT_CMD_MAP['git-pull'] === 'git pull --ff-only')
 t('fetch snoeit', G.GIT_CMD_MAP['git-fetch'] === 'git fetch --prune')
 t('log is een graaf', G.GIT_CMD_MAP['git-log'] === 'git log --graph --oneline --decorate -20')
 t('koppelen heeft geen vast commando', G.GIT_CMD_MAP['git-koppelen'] === undefined)
-t('elke leesknop heeft een commando',
-  G.zichtbareGitIds(gekoppeld).every(id => typeof G.GIT_CMD_MAP[id] === 'string'))
-t('ronde 1 schrijft nergens',
+// Elke knop komt óf uit de vaste lijst, óf wordt door een functie opgebouwd
+// omdat hij van de toestand afhangt. Geen enkele knop mag door de mazen vallen.
+t('elke zichtbare knop kan ergens vandaan komen',
+  G.zichtbareGitIds(gekoppeld).every(id =>
+    typeof G.GIT_CMD_MAP[id] === 'string' || G.isSchrijfKnop(id) || id === 'git-koppelen'))
+t('de vaste commandolijst schrijft nergens — alles wat schrijft gaat langs een vraag',
   Object.values(G.GIT_CMD_MAP).every(c => !/\b(commit|push|stash|reset|checkout|merge|rebase)\b/.test(c)))
+t('geen enkele knop kan zonder bevestiging schrijven',
+  G.GIT_CMD_DEFS.filter(d => d.schrijft).every(d => G.GIT_CMD_MAP[d.id] === undefined))
 
 // ── knop-definities ──────────────────────────────────────────────────────────
 t('elke knop heeft een icoon en een kleurklasse',
@@ -85,6 +92,103 @@ t('isGitId laat flutter-knoppen met rust',
   !G.isGitId('build-apk') && !G.isGitId('run-windows') && !G.isGitId('custom:abc'))
 t('elke zichtbare id bestaat ook als knop', [geenRepo, losseRepo, gekoppeld]
   .every(s => G.zichtbareGitIds(s).every(id => G.GIT_IDS.includes(id))))
+
+// ── ronde 2: de statusparser ─────────────────────────────────────────────────
+const VOL = [
+  '# branch.oid 718c29a659615b765800296610bc1968cf3be467',
+  '# branch.head main',
+  '# branch.upstream origin/main',
+  '# branch.ab +2 -1',
+  '1 .M N... 100644 100644 100644 aaa bbb renderer.js',
+  '1 M. N... 100644 100644 100644 ccc ddd main.js',
+  '? nieuw.txt',
+].join('\n')
+
+const st = G.parseStatusV2(VOL)
+t('branch uit de status', st.branch === 'main')
+t('upstream uit de status', st.upstream === 'origin/main')
+t('vooruit', st.ahead === 2)
+t('achter', st.behind === 1)
+t('commits aanwezig', st.commits === true)
+t('drie vuile bestanden', st.vuil === 3)
+gelijk('en hun paden', st.bestanden, ['renderer.js', 'main.js', 'nieuw.txt'])
+
+const stCrlf = G.parseStatusV2(VOL.split('\n').join('\r\n'))
+t('werkt ook met Windows-regeleindes', stCrlf.vuil === 3 && stCrlf.branch === 'main')
+
+const stSchoon = G.parseStatusV2('# branch.oid abc\n# branch.head main\n# branch.upstream origin/main\n# branch.ab +0 -0')
+t('schone repo heeft niets vuils', stSchoon.vuil === 0 && stSchoon.ahead === 0)
+
+const stVers = G.parseStatusV2('# branch.oid (initial)\n# branch.head main\n? a.txt')
+t('verse repo: geen commits', stVers.commits === false)
+t('verse repo: geen upstream', stVers.upstream === null)
+t('verse repo: wel een vuil bestand', stVers.vuil === 1)
+
+const stLos = G.parseStatusV2('# branch.oid abc\n# branch.head (detached)')
+t('detached HEAD geeft geen branch', stLos.branch === null)
+
+t('lege uitvoer klapt niet', G.parseStatusV2('').vuil === 0)
+t('hernoeming telt één bestand',
+  G.parseStatusV2('2 R. N... 100644 100644 100644 aaa bbb R100 nieuw.js\toud.js').bestanden[0] === 'nieuw.js')
+t('pad met spaties blijft heel',
+  G.parseStatusV2('? mijn map/bestand met spatie.txt').bestanden[0] === 'mijn map/bestand met spatie.txt')
+
+// ── ronde 2: welke knoppen bij welke toestand ────────────────────────────────
+const repoLos  = G.maakStaat({ isRepo: true, remotes: [], branch: 'main', vuil: 2 })
+const repoVol  = G.maakStaat({ isRepo: true, remotes: ['origin'], branch: 'main', upstream: 'origin/main', ahead: 1, vuil: 2 })
+const repoLeeg = G.maakStaat({ isRepo: false })
+
+t('zonder repo nog steeds alleen koppelen',
+  JSON.stringify(G.zichtbareGitIds(repoLeeg)) === JSON.stringify(['git-koppelen']))
+t('repo zonder remote kan wel committen',
+  G.zichtbareGitIds(repoLos).includes('git-commit'))
+t('repo zonder remote kan niet pushen, pullen of fetchen',
+  !['git-push', 'git-pull', 'git-fetch'].some(id => G.zichtbareGitIds(repoLos).includes(id)))
+t('repo zonder remote houdt de koppelknop',
+  G.zichtbareGitIds(repoLos).includes('git-koppelen'))
+t('gekoppeld: alles behalve koppelen',
+  G.zichtbareGitIds(repoVol).length === G.GIT_IDS.length - 1
+  && !G.zichtbareGitIds(repoVol).includes('git-koppelen'))
+t('de volgorde volgt de knoppenlijst',
+  G.zichtbareGitIds(repoVol).join() === G.GIT_IDS.filter(i => i !== 'git-koppelen').join())
+
+t('commit, push en stash schrijven',
+  ['git-commit', 'git-push', 'git-stash'].every(id => G.isSchrijfKnop(id)))
+t('de leesknoppen schrijven niet',
+  ['git-status', 'git-pull', 'git-fetch', 'git-log', 'git-koppelen'].every(id => !G.isSchrijfKnop(id)))
+t('alleen stash is als gevaarlijk gemarkeerd',
+  G.GIT_CMD_DEFS.filter(d => d.gevaar).map(d => d.id).join() === 'git-stash')
+
+// ── ronde 2: de commando's ───────────────────────────────────────────────────
+t('commit legt alles vast', G.commitCommando('fix: iets')
+  === 'git add -A && git commit -m "fix: iets"')
+t('leeg bericht wordt geweigerd', G.commitCommando('   ') === null)
+t('aanhalingstekens worden enkel — anders breekt de cmd-regel',
+  G.commitCommando('fix: de "rare" bug') === 'git add -A && git commit -m "fix: de \'rare\' bug"')
+t('regeleindes worden spaties',
+  G.commitCommando('eerste regel\ntweede regel') === 'git add -A && git commit -m "eerste regel tweede regel"')
+t('dubbele spaties worden er één', G.veiligCommitBericht('a    b') === 'a b')
+t('heel lang bericht wordt afgekapt op 200',
+  G.veiligCommitBericht('x'.repeat(500)).length === 200)
+
+t('push met upstream is gewoon push', G.pushCommando(repoVol) === 'git push')
+t('push zonder upstream zet hem meteen', G.pushCommando(repoLos.gekoppeld ? repoLos
+  : G.maakStaat({ isRepo: true, remotes: ['origin'], branch: 'master' })) === 'git push -u origin master')
+t('push zonder remote kan niet', G.pushCommando(repoLos) === null)
+t('push zonder branch kan niet',
+  G.pushCommando(G.maakStaat({ isRepo: true, remotes: ['origin'], branch: null })) === null)
+t('stash pakt ook nieuwe bestanden', G.stashCommando() === 'git stash -u')
+
+// ── ronde 2: wanneer een knop niets te doen heeft ────────────────────────────
+const schoon = G.maakStaat({ isRepo: true, remotes: ['origin'], branch: 'main', upstream: 'origin/main', vuil: 0, ahead: 0 })
+t('commit op een schone map wordt tegengehouden', G.blokkade('git-commit', schoon) === 'schoon')
+t('stash op een schone map ook', G.blokkade('git-stash', schoon) === 'schoon')
+t('push zonder iets vooruit wordt tegengehouden', G.blokkade('git-push', schoon) === 'niets-vooruit')
+t('push zonder commits wordt tegengehouden',
+  G.blokkade('git-push', G.maakStaat({ isRepo: true, remotes: ['origin'], commits: false })) === 'geen-commits')
+t('met wijzigingen mag commit gewoon', G.blokkade('git-commit', repoVol) === null)
+t('met commits vooruit mag push gewoon', G.blokkade('git-push', repoVol) === null)
+t('een leesknop wordt nooit tegengehouden', G.blokkade('git-log', schoon) === null)
 
 // ── bedrading naar de app ────────────────────────────────────────────────────
 // Zonder deze twee zie je de knoppen wel staan, maar grijs en zonder icoon —
@@ -100,6 +204,11 @@ for (const d of G.GIT_CMD_DEFS) {
   t('vertaling ' + d.labelKey + ' bestaat in nl en en', !!nl[d.labelKey] && !!en[d.labelKey])
 }
 // Op de script-tags zelf kijken: renderer.js staat verderop ook in een comment.
+for (const reden of ['schoon', 'geen-commits', 'niets-vooruit']) {
+  t('melding voor "' + reden + '" bestaat in nl en en',
+    !!nl['git.block.' + reden + 'Title'] && !!en['git.block.' + reden + 'Text'])
+}
+
 t('index.html laadt git-tools.js vóór renderer.js',
   html.indexOf('src="git-tools.js"') > 0
   && html.indexOf('src="git-tools.js"') < html.indexOf('src="renderer.js"'))

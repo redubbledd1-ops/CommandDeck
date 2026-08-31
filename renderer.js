@@ -131,6 +131,7 @@ const KLEUR_IDX = {
   android: 2, windows: 5, web: 3, info: 3, pub: 5, clean: 10, doctor: 8,
   apk: 9, buildweb: 0, buildwin: 11,
   gitlink: 4, gitread: 6, gitpull: 2, gitfetch: 7, gitlog: 1,
+  gitcommit: 9, gitpush: 3, gitstash: 8,
   'editor-vscode': 5, 'editor-cursor': 0, 'editor-claude': 4,
   'editor-android-studio': 2, 'editor-claude-desktop': 6,
   'merk-visualstudio': 1, 'merk-codex': 8, 'merk-openai': 8, 'merk-gemini': 5,
@@ -10465,12 +10466,63 @@ async function executeCmd(project, cmd, cmdKey = null) {
 
 async function runGitCmd(project, cmdKey) {
   if (cmdKey === 'git-koppelen') { await koppelGithub(project); return }
+  if (GitTools.isSchrijfKnop(cmdKey)) { await schrijfGitCmd(project, cmdKey); return }
 
   const cmd = GitTools.GIT_CMD_MAP[cmdKey]
   if (!cmd) return
   await executeCmd(project, cmd, cmdKey)
   // Een pull of fetch kan de toestand veranderen (eerste upstream, andere
   // branch), dus daarna opnieuw kijken.
+  await ververesGitStaat(project, true)
+}
+
+// Commit, push en stash veranderen iets. Ze vragen daarom eerst, en ze laten
+// in die vraag zien waar het over gaat: hoeveel bestanden, welke branch,
+// hoeveel commits vooruit. Zonder die cijfers klik je blind op ok.
+async function schrijfGitCmd(project, cmdKey) {
+  // De cijfers moeten kloppen op het moment van vragen, niet van tekenen.
+  const staat = await ververesGitStaat(project, true)
+  if (!staat || !staat.isRepo) return
+
+  const reden = GitTools.blokkade(cmdKey, staat)
+  if (reden) { await meldKort(I18N.t('git.block.' + reden + 'Title'), I18N.t('git.block.' + reden + 'Text')); return }
+
+  let cmd = null
+
+  if (cmdKey === 'git-commit') {
+    const bericht = await vraagTekst({
+      titel: I18N.t('git.commit.title'),
+      tekst: I18N.t('git.commit.text', { aantal: staat.vuil }),
+      placeholder: I18N.t('git.commit.placeholder'),
+      okLabel: I18N.t('git.commit.ok'),
+    })
+    if (!bericht) return
+    cmd = GitTools.commitCommando(bericht)
+    if (!cmd) return
+
+  } else if (cmdKey === 'git-push') {
+    // Zonder upstream is het een push -u; dat is een ander commando en de
+    // vraag zegt dat er ook bij, want daarna volgt je branch de remote.
+    const sleutel = staat.upstream ? 'git.push.text' : 'git.push.textEerste'
+    const ja = await vraagJaNee(
+      I18N.t('git.push.title'),
+      I18N.t(sleutel, { branch: staat.branch || '?', remote: staat.remote || 'origin', aantal: staat.ahead }),
+      I18N.t('git.push.ok'), 'primair')
+    if (!ja) return
+    cmd = GitTools.pushCommando(staat)
+    if (!cmd) return
+
+  } else if (cmdKey === 'git-stash') {
+    const ja = await vraagJaNee(
+      I18N.t('git.stash.title'),
+      I18N.t('git.stash.text', { aantal: staat.vuil }),
+      I18N.t('git.stash.ok'), 'gevaar', staat.bestanden)
+    if (!ja) return
+    cmd = GitTools.stashCommando()
+  }
+
+  if (!cmd) return
+  await executeCmd(project, cmd, cmdKey)
   await ververesGitStaat(project, true)
 }
 

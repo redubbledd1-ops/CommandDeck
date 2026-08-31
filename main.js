@@ -872,12 +872,18 @@ ipcMain.handle('git:info', (_, dir) => {
   const binnen = String(gitUit(dir, ['rev-parse', '--is-inside-work-tree']) || '').trim()
   if (binnen !== 'true') return GitTools.maakStaat({ beschikbaar: true, isRepo: false })
 
+  // Eén status-aanroep levert branch, vooruit/achter, of er al commits zijn en
+  // welke bestanden vuil zijn. `git remote` blijft apart nodig: een repo kan
+  // een remote hebben zonder dat de branch er al naartoe wijst — precies de
+  // situatie vlak na `gh repo create`, waar push -u voor bedoeld is.
   const remotes = GitTools.parseRemotes(gitUit(dir, ['remote']))
-  const branch = GitTools.parseBranch(gitUit(dir, ['rev-parse', '--abbrev-ref', 'HEAD']))
-  // Een verse `git init` heeft nog geen HEAD die ergens heen wijst.
-  const commits = String(gitUit(dir, ['rev-parse', '--verify', 'HEAD']) || '').trim().length > 0
+  const st = GitTools.parseStatusV2(gitUit(dir, ['status', '--porcelain=v2', '--branch']))
 
-  return GitTools.maakStaat({ beschikbaar: true, isRepo: true, remotes, branch, commits })
+  return GitTools.maakStaat({
+    beschikbaar: true, isRepo: true, remotes,
+    branch: st.branch, commits: st.commits, upstream: st.upstream,
+    ahead: st.ahead, behind: st.behind, vuil: st.vuil, bestanden: st.bestanden,
+  })
 })
 
 // Is de GitHub-CLI beschikbaar? Zo ja, dan kan de koppelknop de repo zelf

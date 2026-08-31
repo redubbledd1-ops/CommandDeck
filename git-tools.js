@@ -16,8 +16,11 @@
   const GIT_CMD_DEFS = [
     { id: 'git-koppelen', labelKey: 'git.btn.link',   label: 'github koppelen', icon: 'ti-brand-github', cls: 'gitlink'  },
     { id: 'git-status',   labelKey: 'git.btn.status', label: 'git status',      icon: 'ti-git-branch',   cls: 'gitread'  },
+    { id: 'git-commit',   labelKey: 'git.btn.commit', label: 'commit',          icon: 'ti-git-commit',   cls: 'gitcommit', schrijft: true },
+    { id: 'git-push',     labelKey: 'git.btn.push',   label: 'push',            icon: 'ti-arrow-up',     cls: 'gitpush',   schrijft: true },
     { id: 'git-pull',     labelKey: 'git.btn.pull',   label: 'git pull',        icon: 'ti-arrow-down',   cls: 'gitpull'  },
     { id: 'git-fetch',    labelKey: 'git.btn.fetch',  label: 'git fetch',       icon: 'ti-refresh',      cls: 'gitfetch' },
+    { id: 'git-stash',    labelKey: 'git.btn.stash',  label: 'stash',           icon: 'ti-archive',      cls: 'gitstash',  schrijft: true, gevaar: true },
     { id: 'git-log',      labelKey: 'git.btn.log',    label: 'git log',         icon: 'ti-history',      cls: 'gitlog'   },
   ]
 
@@ -50,6 +53,58 @@
     return naam
   }
 
+  // `git status --porcelain=v2 --branch` in één keer uitlezen. Dit formaat is
+  // machineleesbaar en verandert niet mee met de taal van de gebruiker of de
+  // git-versie — de gewone `git status`-tekst doet dat wel, dus die parsen we
+  // nooit.
+  //
+  //   # branch.oid <sha>        of (initial) bij een repo zonder commits
+  //   # branch.head <naam>      of (detached)
+  //   # branch.upstream <naam>  ontbreekt als de branch nergens naartoe wijst
+  //   # branch.ab +2 -0         ontbreekt dan ook
+  //   1/2/u/? <...> <pad>       één regel per gewijzigd of onbekend bestand
+  function parseStatusV2(uit) {
+    const r = { branch: null, upstream: null, ahead: 0, behind: 0, commits: false, vuil: 0, bestanden: [] }
+    for (const regel of String(uit || '').split('\n')) {
+      const r2 = regel.replace(/\r$/, '')
+      if (!r2) continue
+
+      if (r2.startsWith('# branch.oid ')) {
+        r.commits = r2.slice(13).trim() !== '(initial)'
+      } else if (r2.startsWith('# branch.head ')) {
+        const naam = r2.slice(14).trim()
+        r.branch = (naam && naam !== '(detached)') ? naam : null
+      } else if (r2.startsWith('# branch.upstream ')) {
+        r.upstream = r2.slice(18).trim() || null
+      } else if (r2.startsWith('# branch.ab ')) {
+        const m = r2.slice(12).trim().match(/^\+(\d+)\s+-(\d+)$/)
+        if (m) { r.ahead = parseInt(m[1], 10); r.behind = parseInt(m[2], 10) }
+      } else if (r2[0] === '#') {
+        continue
+      } else if ('12u?'.includes(r2[0]) && r2[1] === ' ') {
+        r.vuil++
+        const pad = padUitStatusRegel(r2)
+        if (pad && r.bestanden.length < 40) r.bestanden.push(pad)
+      }
+    }
+    return r
+  }
+
+  // Het pad staat achteraan, na een vast aantal velden dat per regeltype
+  // verschilt. Bij een hernoeming volgt na een tab het oude pad; dat laten we
+  // weg, we willen alleen weten wélk bestand het is.
+  function padUitStatusRegel(regel) {
+    const soort = regel[0]
+    const velden = regel.split(' ')
+    let vanaf = 0
+    if (soort === '?' || soort === '!') vanaf = 1
+    else if (soort === '1') vanaf = 8
+    else if (soort === '2') vanaf = 9
+    else if (soort === 'u') vanaf = 10
+    else return ''
+    return velden.slice(vanaf).join(' ').split('\t')[0].trim()
+  }
+
   // Alles bij elkaar tot één toestand waar de rest van de app op kan sturen.
   //
   //   beschikbaar  is git zelf te vinden op deze pc
@@ -57,7 +112,9 @@
   //   gekoppeld    hangt er een remote aan (dan pas is pull/fetch zinvol)
   //   branch       null bij detached HEAD of bij een repo zonder commits
   //   commits      false bij een verse `git init` zonder enkele commit
-  function maakStaat({ beschikbaar = true, isRepo = false, remotes = [], branch = null, commits = true } = {}) {
+  function maakStaat({ beschikbaar = true, isRepo = false, remotes = [], branch = null,
+                       commits = true, upstream = null, ahead = 0, behind = 0,
+                       vuil = 0, bestanden = [] } = {}) {
     const lijst = Array.isArray(remotes) ? remotes.filter(Boolean) : parseRemotes(remotes)
     return {
       beschikbaar: !!beschikbaar,
@@ -67,6 +124,11 @@
       remote: lijst.includes('origin') ? 'origin' : (lijst[0] || null),
       branch: branch || null,
       commits: !!commits,
+      upstream: upstream || null,
+      ahead: ahead || 0,
+      behind: behind || 0,
+      vuil: vuil || 0,
+      bestanden: Array.isArray(bestanden) ? bestanden : [],
     }
   }
 
@@ -74,12 +136,31 @@
   // Niet gekoppeld: alleen de koppelknop, anders sta je naar een push-knop te
   // kijken die nergens heen kan. Gekoppeld: de koppelknop valt weg en de
   // gewone git-knoppen komen ervoor in de plaats.
+  // Wat een knop nodig heeft, bepaalt of hij er staat:
+  //   geen repo   -> alleen koppelen
+  //   wel repo    -> ook alles wat lokaal werkt (status, commit, stash, log)
+  //   met remote  -> koppelen valt weg, push/pull/fetch komen erbij
+  // Commit hoort dus al bij een niet-gekoppelde repo. Anders stuurt de
+  // koppel-dialoog je naar "maak eerst een commit" zonder knop om dat te doen.
+  const LOKAAL = ['git-status', 'git-commit', 'git-stash', 'git-log']
+  const REMOTE = ['git-push', 'git-pull', 'git-fetch']
+
   function zichtbareGitIds(staat) {
     if (!staat || staat.gemeten === false) return []
     if (!staat.beschikbaar) return []
-    if (!staat.gekoppeld) return ['git-koppelen']
-    return ['git-status', 'git-pull', 'git-fetch', 'git-log']
+    if (!staat.isRepo) return ['git-koppelen']
+
+    const uit = staat.gekoppeld ? [] : ['git-koppelen']
+    for (const id of GIT_IDS) {
+      if (id === 'git-koppelen') continue
+      if (REMOTE.includes(id) && !staat.gekoppeld) continue
+      uit.push(id)
+    }
+    return uit
   }
+
+  const schrijftIds = GIT_CMD_DEFS.filter(d => d.schrijft).map(d => d.id)
+  const isSchrijfKnop = (id) => schrijftIds.includes(id)
 
   // ── Koppelen ────────────────────────────────────────────────────────────────
   // Twee stappen, bewust niet in één klik. Een map zonder repo krijgt eerst
@@ -115,6 +196,63 @@
     return null
   }
 
+  // ── Schrijven (ronde 2) ─────────────────────────────────────────────────────
+
+  // De commando's gaan naar cmd.exe (`spawn(cmd, [], { shell: true })`), en het
+  // bericht staat daar tussen dubbele aanhalingstekens. Eén " erin en de regel
+  // valt uit elkaar, dus die wordt een enkele. Regeleindes worden spaties:
+  // -m neemt maar één regel, en een meerregelig bericht hoort in ronde 4 met
+  // een echt tekstvlak. Let op: %NAAM% wordt door cmd.exe vervangen als die
+  // variabele bestaat — zeldzaam in een commit-bericht, maar het kan.
+  function veiligCommitBericht(bericht) {
+    return String(bericht || '')
+      .replace(/[\r\n\t]+/g, ' ')
+      .replace(/"/g, "'")
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 200)
+  }
+
+  // Alles in één regel, zodat je in de terminal precies ziet wat er gebeurde.
+  function commitCommando(bericht) {
+    const schoon = veiligCommitBericht(bericht)
+    if (!schoon) return null
+    return `git add -A && git commit -m "${schoon}"`
+  }
+
+  // Zonder upstream weigert `git push` met "no upstream branch". Dat weten we
+  // van tevoren uit branch.upstream, dus we sturen meteen de -u-variant in
+  // plaats van je eerst tegen een foutmelding aan te laten lopen.
+  function pushCommando(staat) {
+    if (!staat || !staat.gekoppeld) return null
+    if (staat.upstream) return 'git push'
+    const remote = staat.remote || 'origin'
+    const branch = staat.branch
+    if (!branch) return null
+    return `git push -u ${remote} ${branch}`
+  }
+
+  // -u pakt ook nieuwe bestanden mee. Dat is bijna altijd de bedoeling bij
+  // "even opzij zetten", maar het is wel het punt waarop werk uit beeld raakt.
+  function stashCommando() {
+    return 'git stash -u'
+  }
+
+  // Waarom een knop niet kan draaien, of null als er niets in de weg staat.
+  // De renderer zet dat om in een melding in plaats van een commando dat
+  // zichtbaar niets doet.
+  function blokkade(id, staat) {
+    if (!staat) return null
+    if (id === 'git-commit' || id === 'git-stash') {
+      if (!staat.vuil) return 'schoon'
+    }
+    if (id === 'git-push') {
+      if (!staat.commits) return 'geen-commits'
+      if (staat.upstream && staat.ahead === 0) return 'niets-vooruit'
+    }
+    return null
+  }
+
   // Een repo-naam die GitHub accepteert: letters, cijfers, punt, streepje,
   // liggend streepje. De rest wordt een streepje, spaties incluis.
   function veiligeRepoNaam(naam) {
@@ -134,9 +272,10 @@
   }
 
   return {
-    GIT_CMD_DEFS, GIT_CMD_MAP, GIT_IDS, isGitId,
-    parseRemotes, parseBranch, maakStaat, zichtbareGitIds,
+    GIT_CMD_DEFS, GIT_CMD_MAP, GIT_IDS, isGitId, isSchrijfKnop,
+    parseRemotes, parseBranch, parseStatusV2, maakStaat, zichtbareGitIds,
     koppelStap, koppelCommando, veiligeRepoNaam, normaliseerRepoUrl,
+    veiligCommitBericht, commitCommando, pushCommando, stashCommando, blokkade,
     KOPPEL_INIT, KOPPEL_COMMIT, KOPPEL_GH, KOPPEL_URL, KOPPEL_AL_GEDAAN,
   }
 })
