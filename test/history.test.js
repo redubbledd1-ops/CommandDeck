@@ -8,7 +8,7 @@ const handlers = {}
 
 const fakeElectron = {
   app: { getPath: () => TMP, whenReady: () => ({ then: () => {} }), on: () => {}, relaunch: () => {}, quit: () => {}, isPackaged: false, getAppPath: () => __dirname },
-  BrowserWindow: function () { this.loadFile = () => {}; this.webContents = { send: () => {} } },
+  BrowserWindow: function () { this.on = () => {}; this.close = () => {}; this.loadFile = () => {}; this.webContents = { send: () => {} } },
   ipcMain: { on: () => {}, handle: (n, f) => { handlers[n] = f } },
   dialog: { showOpenDialog: async () => ({ canceled: true }) },
   shell: { openPath: () => {} },

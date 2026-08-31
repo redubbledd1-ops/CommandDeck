@@ -242,6 +242,51 @@ gelijk('allebei, in de volgorde waarin je het wilt horen',
   [{ soort: 'niet-vastgelegd', aantal: 2 }, { soort: 'niet-gepusht', aantal: 5 }])
 gelijk('een map zonder repo levert nooit een reden', G.onveiligeRedenen(G.maakStaat({ isRepo: false })), [])
 
+// ── ronde 5: de afsluitcontrole ──────────────────────────────────────────────
+const mk = (naam, opties) => ({ id: naam, naam, pad: 'C:\\' + naam, staat: G.maakStaat(opties) })
+const BASIS = { isRepo: true, remotes: ['origin'], branch: 'main', upstream: 'origin/main' }
+
+const projecten = [
+  mk('vuil',      { ...BASIS, vuil: 3 }),
+  mk('vooruit',   { ...BASIS, ahead: 2 }),
+  mk('allebei',   { ...BASIS, vuil: 1, ahead: 1 }),
+  mk('schoon',    { ...BASIS }),
+  mk('achter',    { ...BASIS, behind: 5 }),
+  mk('geenrepo',  { isRepo: false }),
+]
+
+gelijk('waarschuwen: alleen wat nergens anders staat',
+  G.teVragenProjecten(projecten, 'waarschuwen').map(p => p.naam), ['vuil', 'vooruit', 'allebei'])
+gelijk('uit: nooit iets vragen', G.teVragenProjecten(projecten, 'uit'), [])
+gelijk('stashen vraagt óók bij het sluiten van het venster',
+  G.teVragenProjecten(projecten, 'stashen').map(p => p.naam), ['vuil', 'vooruit', 'allebei'])
+t('een achterlopend project houdt het afsluiten niet tegen',
+  !G.teVragenProjecten(projecten, 'waarschuwen').some(p => p.naam === 'achter'))
+t('een map zonder repo ook niet',
+  !G.teVragenProjecten(projecten, 'waarschuwen').some(p => p.naam === 'geenrepo'))
+
+gelijk('stashen pakt alleen niet-vastgelegd werk',
+  G.teStashenProjecten(projecten, 'stashen').map(p => p.naam), ['vuil', 'allebei'])
+t('niet-gepushte commits worden niet gestasht — die staan al veilig in de repo',
+  !G.teStashenProjecten(projecten, 'stashen').some(p => p.naam === 'vooruit'))
+gelijk('zonder de stash-instelling gebeurt er niets', G.teStashenProjecten(projecten, 'waarschuwen'), [])
+gelijk('en met de controle uit al helemaal niet', G.teStashenProjecten(projecten, 'uit'), [])
+
+t('onbekende instelling valt terug op waarschuwen', G.afsluitInstelling('onzin') === 'waarschuwen')
+t('ontbrekende instelling ook', G.afsluitInstelling(undefined) === 'waarschuwen')
+t('uit blijft uit', G.afsluitInstelling('uit') === 'uit')
+gelijk('de keuzes staan vast', G.AFSLUIT_KEUZES, ['uit', 'waarschuwen', 'stashen'])
+
+const sam = G.afsluitSamenvatting(mk('x', { ...BASIS, vuil: 2, ahead: 3 }))
+t('samenvatting noemt het project', sam.naam === 'x')
+gelijk('en beide redenen', sam.redenen,
+  [{ soort: 'niet-vastgelegd', aantal: 2 }, { soort: 'niet-gepusht', aantal: 3 }])
+
+t('lege lijst klapt niet', G.teVragenProjecten([], 'waarschuwen').length === 0)
+t('undefined klapt niet', G.teVragenProjecten(undefined, 'waarschuwen').length === 0)
+t('een project zonder staat klapt niet',
+  G.teVragenProjecten([{ naam: 'x' }], 'waarschuwen').length === 0)
+
 // ── bedrading naar de app ────────────────────────────────────────────────────
 // Zonder deze twee zie je de knoppen wel staan, maar grijs en zonder icoon —
 // ze lijken dan uitgeschakeld. Dat is precies wat er de eerste keer misging.
@@ -259,6 +304,13 @@ for (const d of G.GIT_CMD_DEFS) {
 for (const sleutel of ['git.ind.aheadTitle', 'git.ind.behindTitle', 'git.ind.dirtyTitle',
                        'git.ind.noRemote', 'git.ind.noUpstream']) {
   t('indicator-tekst ' + sleutel + ' bestaat in nl en en', !!nl[sleutel] && !!en[sleutel])
+}
+
+for (const sleutel of ['git.afsluit.titel', 'git.afsluit.commitPush', 'git.afsluit.terminal',
+                       'git.afsluit.tochAf', 'git.afsluit.reden.niet-vastgelegd',
+                       'git.afsluit.reden.niet-gepusht', 'git.stashMelding.titel',
+                       'settings.git.label', 'settings.git.off', 'settings.git.warn', 'settings.git.stash']) {
+  t('afsluit-tekst ' + sleutel + ' bestaat in nl en en', !!nl[sleutel] && !!en[sleutel])
 }
 
 for (const reden of ['schoon', 'geen-commits', 'niets-vooruit']) {

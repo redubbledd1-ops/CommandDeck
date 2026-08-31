@@ -83,7 +83,48 @@ function createWindow() {
     },
   })
   win.loadFile('index.html')
+
+  // Afsluitcontrole. Het sluiten wordt één keer tegengehouden; de renderer
+  // kijkt de projecten na, stelt zijn vragen en meldt zich terug. Zo lang
+  // wachten als nodig — behalve als er helemaal geen antwoord komt, want dan
+  // zou het venster onsluitbaar zijn. Vandaar de noodrem.
+  win.on('close', (e) => {
+    if (afsluitenBevestigd) return
+    if (loadSettings().git.afsluiten === 'uit') return
+    if (!win.webContents || win.webContents.isDestroyed()) return
+
+    e.preventDefault()
+    if (afsluitenGevraagd) return          // al bezig; niet nog een ronde starten
+    afsluitenGevraagd = true
+
+    win.webContents.send('git:controleerVoorAfsluiten')
+
+    // Antwoordt de renderer niet (fout in de controle, venster vastgelopen),
+    // dan sluiten we alsnog. Vastzitten in je eigen waarschuwing is erger dan
+    // de waarschuwing missen.
+    afsluitNoodrem = setTimeout(() => {
+      afsluitenBevestigd = true
+      try { win.close() } catch {}
+    }, 15000)
+  })
 }
+
+let afsluitenBevestigd = false
+let afsluitenGevraagd = false
+let afsluitNoodrem = null
+
+ipcMain.on('git:afsluitenMag', () => {
+  if (afsluitNoodrem) { clearTimeout(afsluitNoodrem); afsluitNoodrem = null }
+  afsluitenBevestigd = true
+  if (win && !win.isDestroyed()) win.close()
+})
+
+// De gebruiker koos "toch blijven": alles terugdraaien zodat een volgende
+// poging opnieuw wordt nagekeken.
+ipcMain.on('git:afsluitenAfgebroken', () => {
+  if (afsluitNoodrem) { clearTimeout(afsluitNoodrem); afsluitNoodrem = null }
+  afsluitenGevraagd = false
+})
 app.whenReady().then(createWindow)
 
 // De AI-kant registreert zijn eigen ipc-handlers. Alles wat dienst-specifiek is
@@ -164,6 +205,11 @@ const DEFAULT_SETTINGS = {
   },
   // Mapgroottes in de verkenner op de achtergrond uitrekenen
   mapGroottes: true,
+  // Afsluitcontrole op niet-vastgelegd of niet-gepusht werk.
+  //   uit          niets doen
+  //   waarschuwen  vragen bij het sluiten van het venster (standaard)
+  //   stashen      idem, plus bij een Windows-shutdown automatisch stashen
+  git: { afsluiten: 'waarschuwen' },
   // Volgorde van de knoppen onder het kopje "opdrachten" in de zijbalk
   navVolgorde: ['cmd', 'ps', 'bat', 'dict'],
   // Map met de broncode; wordt automatisch gevonden, hier alleen onthouden
@@ -280,6 +326,7 @@ function loadSettings() {
         ps:       { ...DEFAULT_SETTINGS.ps,       ...(s.ps       || {}) },
         lastView: { ...DEFAULT_SETTINGS.lastView, ...(s.lastView || {}) },
         bat:      { ...DEFAULT_SETTINGS.bat,      ...(s.bat      || {}) },
+        git:      { ...DEFAULT_SETTINGS.git,      ...(s.git      || {}) },
         editors: { ...DEFAULT_SETTINGS.editors, ...(s.editors || {}) },
         customEditors: migreerEigenEditors(s),
         termTabs: { ...DEFAULT_SETTINGS.termTabs, ...(s.termTabs || {}) },
@@ -884,6 +931,61 @@ ipcMain.handle('git:info', (_, dir) => {
     branch: st.branch, commits: st.commits, upstream: st.upstream,
     ahead: st.ahead, behind: st.behind, vuil: st.vuil, bestanden: st.bestanden,
   })
+})
+
+// ── Windows afsluiten of uitloggen ───────────────────────────────────────────
+// Hier is geen gesprek mogelijk: Windows geeft ongeveer vijf seconden en kapt
+// het proces daarna af. Geen renderer, geen dialoog, geen await — alles wat
+// hier gebeurt moet synchroon zijn en meteen af.
+//
+// Écht pauzeren zou de Windows-API ShutdownBlockReasonCreate vereisen, via een
+// native module of FFI. Dat is een extra build-stap die bij elke Electron-
+// upgrade kan breken, en zelfs dán kan de gebruiker "toch afsluiten" kiezen.
+// Het vangnet hieronder geeft het grootste deel van de waarde zonder dat.
+
+// De renderer houdt bij welke projecten een git-map hebben en hoe ze ervoor
+// staan. Die lijst zetten we hier klaar, want op het moment zelf kunnen we hem
+// niet meer opvragen.
+let gitProjectenVoorAfsluiten = []
+ipcMain.on('git:projecten', (_, lijst) => {
+  gitProjectenVoorAfsluiten = Array.isArray(lijst) ? lijst : []
+})
+
+const STASH_MELDING_FILE = path.join(app.getPath('userData'), 'git-stash-melding.json')
+
+app.on('session-end', () => {
+  try {
+    if (loadSettings().git.afsluiten !== 'stashen') return
+
+    const teStashen = GitTools.teStashenProjecten(gitProjectenVoorAfsluiten, 'stashen')
+    if (!teStashen.length) return
+
+    const gelukt = []
+    for (const p of teStashen) {
+      try {
+        execFileSync('git', ['stash', 'push', '-u', '-m', 'CommandDeck: automatisch bij afsluiten'], {
+          cwd: p.pad, encoding: 'utf8', timeout: 1500, windowsHide: true,
+          stdio: ['ignore', 'pipe', 'ignore'],
+        })
+        gelukt.push({ naam: p.naam, pad: p.pad })
+      } catch { /* geen tijd om iets te proberen; door naar het volgende */ }
+    }
+
+    if (gelukt.length) {
+      fs.writeFileSync(STASH_MELDING_FILE, JSON.stringify({ op: Date.now(), projecten: gelukt }))
+    }
+  } catch { /* nooit het afsluiten van Windows ophouden met een fout van ons */ }
+})
+
+// De renderer haalt dit bij de start op en laat het zien. Lezen wist het
+// bestand: de melding hoort één keer te komen, niet elke start opnieuw.
+ipcMain.handle('git:stashMelding', () => {
+  try {
+    if (!fs.existsSync(STASH_MELDING_FILE)) return null
+    const m = JSON.parse(fs.readFileSync(STASH_MELDING_FILE, 'utf8'))
+    try { fs.unlinkSync(STASH_MELDING_FILE) } catch {}
+    return m
+  } catch { return null }
 })
 
 // Is de GitHub-CLI beschikbaar? Zo ja, dan kan de koppelknop de repo zelf

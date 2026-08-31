@@ -203,6 +203,57 @@
     return uit
   }
 
+  // ── Afsluitcontrole (ronde 5) ───────────────────────────────────────────────
+  // Twee heel verschillende momenten:
+  //
+  //   Venster sluiten   volledig controleerbaar. We houden het sluiten tegen,
+  //                     stellen per project een vraag, en sluiten pas als de
+  //                     gebruiker klaar is. Zo lang wachten als nodig.
+  //   Windows afsluiten ~5 seconden, geen tijd voor een gesprek. Hoogstens
+  //                     synchroon iets veiligstellen en het achteraf melden.
+  //
+  // De instelling gaat alleen over dat tweede geval. Bij het sluiten van het
+  // venster krijg je altijd de vraag, tenzij de controle helemaal uit staat.
+  const AFSLUIT_UIT          = 'uit'
+  const AFSLUIT_WAARSCHUWEN  = 'waarschuwen'
+  const AFSLUIT_STASHEN      = 'stashen'
+  const AFSLUIT_KEUZES = [AFSLUIT_UIT, AFSLUIT_WAARSCHUWEN, AFSLUIT_STASHEN]
+
+  function afsluitInstelling(waarde) {
+    return AFSLUIT_KEUZES.includes(waarde) ? waarde : AFSLUIT_WAARSCHUWEN
+  }
+
+  // Welke projecten houden het sluiten van het venster tegen?
+  // `projecten` is [{ id, naam, pad, staat }].
+  function teVragenProjecten(projecten, instelling) {
+    if (afsluitInstelling(instelling) === AFSLUIT_UIT) return []
+    return (projecten || []).filter(p => {
+      const i = indicator(p && p.staat)
+      return !!(i && i.onveilig)
+    })
+  }
+
+  // Welke projecten kunnen bij een Windows-shutdown nog gestasht worden?
+  //
+  // Alleen projecten met niet-vastgelegde wijzigingen. `git stash` doet niets
+  // aan commits die nog niet gepusht zijn — die staan al veilig in je repo en
+  // gaan bij een shutdown ook niet verloren. Ze meenemen zou een stash maken
+  // die niets bevat.
+  function teStashenProjecten(projecten, instelling) {
+    if (afsluitInstelling(instelling) !== AFSLUIT_STASHEN) return []
+    return (projecten || []).filter(p => {
+      const i = indicator(p && p.staat)
+      return !!(i && i.vuil > 0)
+    })
+  }
+
+  // Korte samenvatting per project, zodat de popup en de melding bij de
+  // volgende start dezelfde woorden gebruiken.
+  function afsluitSamenvatting(project) {
+    const redenen = onveiligeRedenen(project && project.staat)
+    return { naam: (project && project.naam) || '', pad: (project && project.pad) || '', redenen }
+  }
+
   // ── Koppelen ────────────────────────────────────────────────────────────────
   // Twee stappen, bewust niet in één klik. Een map zonder repo krijgt eerst
   // alleen `git init`; wat er gecommit wordt bepaal je zelf, want zonder
@@ -318,6 +369,8 @@
     koppelStap, koppelCommando, veiligeRepoNaam, normaliseerRepoUrl,
     veiligCommitBericht, commitCommando, pushCommando, stashCommando, blokkade,
     indicator, onveiligeRedenen,
+    teVragenProjecten, teStashenProjecten, afsluitSamenvatting, afsluitInstelling,
+    AFSLUIT_UIT, AFSLUIT_WAARSCHUWEN, AFSLUIT_STASHEN, AFSLUIT_KEUZES,
     KOPPEL_INIT, KOPPEL_COMMIT, KOPPEL_GH, KOPPEL_URL, KOPPEL_AL_GEDAAN,
   }
 })

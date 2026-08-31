@@ -11,7 +11,7 @@ Elke ronde is los af te maken en te gebruiken.
 |---|---|---|---|
 | **A** | Git-snelknoppen per project | 1, 2, 4 | ronde 1 en 2 af |
 | **B** | Branch- en status-indicator in de projectkop | 3 | **af** |
-| **C** | Afsluitcontrole: niet-gecommit / niet-gepusht werk | 5 | volgende |
+| **C** | Afsluitcontrole: niet-gecommit / niet-gepusht werk | 5 | **af** |
 | **D** | Bij opstarten waarschuwen als de remote vóórloopt | nog te plannen | idee |
 
 De cache uit deel B is de basis voor deel C. Bouw dus B vóór C.
@@ -210,7 +210,42 @@ indicator gewoon staan op wat hij wist.
 tien minuten per repo. En bij `behind > 0` een melding met een pull-knop, geen
 automatische pull — de gebruiker moet weten dat zijn map verandert.*
 
-## C. Afsluitcontrole (ronde 5)
+## C. Afsluitcontrole (ronde 5) — gebouwd
+
+**Venster sluiten.** `win.on('close')` houdt het sluiten één keer tegen en
+vraagt de renderer na te kijken. Die ververst eerst alle projecten (de laatste
+poll kan dertig seconden oud zijn) en stelt per onveilig project een vraag met
+vier knoppen: commit & push, terminal openen, toch afsluiten, blijven.
+
+Na een commit & push wordt *nagekeken* of het werkelijk weg is. Mislukt de push
+— geen netwerk, geweigerd — dan zegt hij dat, in plaats van vrolijk af te
+sluiten met je werk nog op de schijf.
+
+Er zit een noodrem op: antwoordt de renderer binnen 15 seconden niet, dan
+sluit het venster alsnog. Vastzitten in je eigen waarschuwing is erger dan de
+waarschuwing missen.
+
+**Windows afsluiten.** `app.on('session-end')`, volledig synchroon: geen
+renderer, geen dialoog, geen await. Staat de instelling op *stashen*, dan gaat
+er per vuil project een `git stash push -u` overheen met een tijdslimiet van
+anderhalve seconde, en bij de volgende start krijg je te horen wat er is
+weggezet. De renderer duwt de projectlijst continu naar main, want op dat
+moment kan main niets meer opvragen.
+
+Stash pakt bewust **alleen niet-vastgelegde wijzigingen**. Niet-gepushte
+commits staan al veilig in je repo en gaan bij een shutdown niet verloren; die
+meenemen zou een lege stash opleveren.
+
+**Instelling** (instellingen → Git): niet controleren / waarschuwen /
+waarschuwen + stashen bij Windows-afsluiten. Standaard waarschuwen.
+
+**`pauzeren` is er bewust niet.** Dat vereist `ShutdownBlockReasonCreate` via
+een native module of FFI — een extra build-stap die bij elke Electron-upgrade
+kan breken — en zelfs dan kan de gebruiker in het Windows-scherm alsnog "toch
+afsluiten" kiezen. Windows geeft je uitstel, geen veto. Het stash-vangnet geeft
+het grootste deel van de waarde zonder dat risico.
+
+### Oorspronkelijke opzet
 
 Bij het sluiten van CommandDeck **en** bij Windows-afsluiten/uitloggen: kijk of
 er in een git-project niet-gecommit of niet-gepusht werk is. Zo ja → popup per

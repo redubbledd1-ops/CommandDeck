@@ -15,7 +15,7 @@ const prullenbak = []
 const verzonden = []
 const fake = {
   app: { getPath: () => TMP, whenReady: () => ({ then: (cb) => cb() }), on: () => {}, relaunch: () => {}, quit: () => {}, exit: () => {}, isPackaged: false, getAppPath: () => REAL },
-  BrowserWindow: function () { this.loadFile = () => {}; this.webContents = { send: (k, d) => verzonden.push({ k, d }) }; this.isDestroyed = () => false },
+  BrowserWindow: function () { this.on = () => {}; this.close = () => {}; this.loadFile = () => {}; this.webContents = { send: (k, d) => verzonden.push({ k, d }) }; this.isDestroyed = () => false },
   ipcMain: { on: () => {}, handle: (n, f) => { handlers[n] = f } },
   dialog: { showOpenDialog: async () => ({ canceled: true }) },
   shell: { openPath: () => {}, trashItem: async (p) => { prullenbak.push(p); fs.rmSync(p, { recursive: true, force: true }) } },

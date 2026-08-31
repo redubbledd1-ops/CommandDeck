@@ -42,6 +42,11 @@ contextBridge.exposeInMainWorld('api', {
 
   gitInfo:       (p)     => ipcRenderer.invoke('git:info', p),
   gitGh:         ()      => ipcRenderer.invoke('git:gh'),
+  gitProjecten:  (l)     => ipcRenderer.send('git:projecten', l),
+  gitStashMelding:()     => ipcRenderer.invoke('git:stashMelding'),
+  opAfsluitControle: (f) => ipcRenderer.on('git:controleerVoorAfsluiten', () => f()),
+  gitAfsluitenMag:  ()   => ipcRenderer.send('git:afsluitenMag'),
+  gitAfsluitenAf:   ()   => ipcRenderer.send('git:afsluitenAfgebroken'),
   listArchive:   (p)     => ipcRenderer.invoke('arch:list', p),
   openInArchive: (p)     => ipcRenderer.invoke('arch:open', p),
   archiveTool:   ()      => ipcRenderer.invoke('arch:tool'),

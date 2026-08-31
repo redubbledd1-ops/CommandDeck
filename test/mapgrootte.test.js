@@ -17,7 +17,7 @@ fs.writeFileSync(path.join(TMP, 'los.txt'), 'x'.repeat(50))
 const handlers = {}
 const fake = {
   app: { getPath: () => TMP, whenReady: () => ({ then: () => {} }), on: () => {}, relaunch: () => {}, quit: () => {}, exit: () => {}, isPackaged: false, getAppPath: () => REAL },
-  BrowserWindow: function () { this.loadFile = () => {}; this.webContents = { send: () => {} }; this.isDestroyed = () => false },
+  BrowserWindow: function () { this.on = () => {}; this.close = () => {}; this.loadFile = () => {}; this.webContents = { send: () => {} }; this.isDestroyed = () => false },
   ipcMain: { on: () => {}, handle: (n, f) => { handlers[n] = f } },
   dialog: { showOpenDialog: async () => ({ canceled: true }) },
   shell: { openPath: () => {} },

@@ -434,7 +434,10 @@ async function ververesGitPad(pad, forceer = false) {
     if (!staat) return null
     const oud = gitStaten[pad]
     gitStaten[pad] = staat
-    if (JSON.stringify(oud) !== JSON.stringify(staat) && view === 'project') renderMain()
+    if (JSON.stringify(oud) !== JSON.stringify(staat)) {
+      meldGitProjectenAanMain()
+      if (view === 'project') renderMain()
+    }
     return staat
   } catch {
     return null
@@ -456,6 +459,23 @@ async function ververesAlleGitStaten(forceer = false) {
     const pad = actieveLocPad(p)
     if (pad) await ververesGitPad(pad, forceer)
   }
+  meldGitProjectenAanMain()
+}
+
+// Bij een Windows-shutdown heeft het main-proces ~5 seconden en kan het niets
+// meer aan ons vragen. Daarom houden we de lijst daar continu bij.
+function gitProjectenLijst() {
+  const uit = []
+  for (const p of projects) {
+    const pad = actieveLocPad(p)
+    const staat = pad ? gitStaten[pad] : null
+    if (staat && staat.isRepo) uit.push({ id: p.id, naam: p.name, pad, staat })
+  }
+  return uit
+}
+
+function meldGitProjectenAanMain() {
+  try { window.api.gitProjecten(gitProjectenLijst()) } catch {}
 }
 
 // Achtergrondverversing. Het venster verbergen zet hem stil: anders draaien er
@@ -704,6 +724,10 @@ window.addEventListener('DOMContentLoaded', async () => {
   // van projecten die niet open staan: de afsluitcontrole moet straks over
   // allemaal iets kunnen zeggen, niet alleen over het laatst bekeken project.
   setTimeout(() => { ververesAlleGitStaten(true); startGitPolling() }, 1500)
+
+  // Het main-proces houdt het sluiten tegen en vraagt ons na te kijken.
+  try { window.api.opAfsluitControle(() => controleerVoorAfsluiten()) } catch {}
+  setTimeout(() => toonStashMeldingBijStart(), 2000)
 
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return
@@ -7053,6 +7077,10 @@ function saveAddBtnModal() {
 }
 
 // ── Settings panel ────────────────────────────────────────────────────────────
+function gitAfsluitWijze() {
+  return GitTools.afsluitInstelling((settings.git || {}).afsluiten)
+}
+
 function renderSettingsPanel() {
   const panel = document.getElementById('settings-panel')
   if (settingsSubPage === 'talen') { renderTalenSubPage(panel); return }
@@ -7142,6 +7170,18 @@ function renderSettingsPanel() {
         </button>
       </div>
       <div>
+        <div class="settings-section-title">${I18N.t('settings.section.gitTitle')}</div>
+        <div class="instel-rij">
+          <div class="editor-row-name"><i class="ti ti-git-branch"></i> ${I18N.t('settings.git.label')}</div>
+          <select class="loc-select" id="set-git-afsluiten">
+            <option value="uit" ${gitAfsluitWijze() === 'uit' ? 'selected' : ''}>${I18N.t('settings.git.off')}</option>
+            <option value="waarschuwen" ${gitAfsluitWijze() === 'waarschuwen' ? 'selected' : ''}>${I18N.t('settings.git.warn')}</option>
+            <option value="stashen" ${gitAfsluitWijze() === 'stashen' ? 'selected' : ''}>${I18N.t('settings.git.stash')}</option>
+          </select>
+          <span class="instel-uitleg">${I18N.t('settings.git.desc')}</span>
+        </div>
+      </div>
+      <div>
         <div class="settings-section-title">${I18N.t('settings.section.deleteTitle')}</div>
         <div class="instel-rij">
           <div class="editor-row-name"><i class="ti ti-trash"></i> ${I18N.t('settings.delete.label')}</div>
@@ -7208,6 +7248,12 @@ function renderSettingsPanel() {
   }
 
   document.getElementById('settings-cancel').onclick = toggleSettings
+
+  const gitKeuze = document.getElementById('set-git-afsluiten')
+  if (gitKeuze) gitKeuze.onchange = () => {
+    settings.git = { ...(settings.git || {}), afsluiten: gitKeuze.value }
+    window.api.saveSettings(settings)
+  }
 
   const wisKeuze = document.getElementById('set-wiswijze')
   if (wisKeuze) wisKeuze.onchange = () => {
@@ -10518,6 +10564,117 @@ async function executeCmd(project, cmd, cmdKey = null) {
     isRunning = false
     updateRunBtnIfVisible()
   }
+}
+
+// ── Afsluitcontrole ──────────────────────────────────────────────────────────
+// Het main-proces houdt het sluiten tegen en vraagt ons om te kijken. Wij
+// nemen de projecten door en melden ons pas terug als de gebruiker klaar is.
+//
+// Dit ziet ook werk dat buiten CommandDeck om is gemaakt: git kijkt naar de
+// bestanden, niet naar wie ze geschreven heeft. Bewerk je iets in VS Code en
+// sluit je daarna CommandDeck, dan staat het hier gewoon tussen.
+let afsluitControleBezig = false
+
+async function controleerVoorAfsluiten() {
+  if (afsluitControleBezig) return
+  afsluitControleBezig = true
+  try {
+    // Verse cijfers: de laatste poll kan dertig seconden oud zijn, en in die
+    // tijd kan er van alles gebeurd zijn.
+    await ververesAlleGitStaten(true)
+
+    const instelling = GitTools.afsluitInstelling((settings.git || {}).afsluiten)
+    const teVragen = GitTools.teVragenProjecten(gitProjectenLijst(), instelling)
+
+    for (const project of teVragen) {
+      const klaar = await vraagOverProject(project)
+      if (klaar === 'blijven') { window.api.gitAfsluitenAf(); return }
+    }
+    window.api.gitAfsluitenMag()
+  } catch (e) {
+    // Nooit door onze eigen fout het venster onsluitbaar maken.
+    window.api.gitAfsluitenMag()
+  } finally {
+    afsluitControleBezig = false
+  }
+}
+
+// Geeft 'door' (volgende project) of 'blijven' (afsluiten afbreken).
+async function vraagOverProject(project) {
+  const redenen = GitTools.onveiligeRedenen(project.staat)
+  const regels = redenen.map(r => I18N.t('git.afsluit.reden.' + r.soort, { aantal: r.aantal }))
+  if (project.staat.bestanden && project.staat.bestanden.length) {
+    regels.push('', ...project.staat.bestanden.slice(0, 12))
+  }
+
+  const keuze = await vraagKeuze({
+    titel: I18N.t('git.afsluit.titel', { project: project.naam }),
+    tekst: I18N.t('git.afsluit.tekst'),
+    regels,
+    knoppen: [
+      { label: I18N.t('git.afsluit.blijven'), waarde: 'blijven' },
+      { label: I18N.t('git.afsluit.terminal'), waarde: 'terminal' },
+      { label: I18N.t('git.afsluit.tochAf'), waarde: 'door', soort: 'gevaar' },
+      { label: I18N.t('git.afsluit.commitPush'), waarde: 'commitpush', soort: 'primair' },
+    ],
+  })
+
+  if (!keuze || keuze === 'blijven') return 'blijven'
+  if (keuze === 'door') return 'door'
+
+  if (keuze === 'terminal') {
+    // Zelf regelen in een echte terminal. Het afsluiten gaat niet door — de
+    // gebruiker is nu juist aan het werk in dat project.
+    try { await window.api.openCmd({ cwd: project.pad }) } catch {}
+    return 'blijven'
+  }
+
+  // Commit en push in één keer. We tonen het in de terminal van de app zodat
+  // je ziet wat er gebeurt, en kijken daarna of het gelukt is.
+  const p = projects.find(x => x.id === project.id)
+  if (!p) return 'door'
+
+  if (project.staat.vuil > 0) {
+    const bericht = await vraagTekst({
+      titel: I18N.t('git.commit.title'),
+      tekst: I18N.t('git.commit.text', { aantal: project.staat.vuil }),
+      placeholder: I18N.t('git.commit.placeholder'),
+      okLabel: I18N.t('git.afsluit.commitPush'),
+    })
+    if (!bericht) return 'blijven'
+    selectProject(p.id)
+    await executeCmd(p, GitTools.commitCommando(bericht), 'git-commit')
+  }
+
+  const na = await ververesGitStaat(p, true)
+  const pushCmd = GitTools.pushCommando(na)
+  if (pushCmd) await executeCmd(p, pushCmd, 'git-push')
+
+  // Nagekeken in plaats van aangenomen: als de push mislukte (geen netwerk,
+  // geweigerd) staat het werk er nog steeds, en dan hoor je dat te weten.
+  const eind = await ververesGitStaat(p, true)
+  const nog = GitTools.indicator(eind)
+  if (nog && nog.onveilig) {
+    const toch = await vraagJaNee(
+      I18N.t('git.afsluit.misluktTitel'),
+      I18N.t('git.afsluit.misluktTekst', { project: project.naam }),
+      I18N.t('git.afsluit.tochAf'), 'gevaar')
+    return toch ? 'door' : 'blijven'
+  }
+  return 'door'
+}
+
+// Bij de vorige Windows-shutdown is er werk opzijgezet. Dat hoor je te weten,
+// anders zoek je je een ongeluk naar wijzigingen die "opeens weg" zijn.
+async function toonStashMeldingBijStart() {
+  try {
+    const m = await window.api.gitStashMelding()
+    if (!m || !m.projecten || !m.projecten.length) return
+    await meldKort(
+      I18N.t('git.stashMelding.titel'),
+      I18N.t('git.stashMelding.tekst'),
+      m.projecten.map(p => p.naam + ' — git stash pop'))
+  } catch {}
 }
 
 // ── Git-knoppen ──────────────────────────────────────────────────────────────
