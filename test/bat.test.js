@@ -6,7 +6,11 @@ let ok = true
 const t = (l, c) => { console.log((c ? 'PASS  ' : 'FAIL  ') + l); if (!c) ok = false }
 
 // ── sjabloon + naamgeving (uit renderer.js) ──────────────────────────────────
-const src = fs.readFileSync(path.join(REAL, 'renderer.js'), 'utf8')
+// Regeleindes eerst gelijktrekken. Op Windows checkt git renderer.js met CRLF
+// uit, en in een regex matcht . geen \r — dan vindt /const X = .*\n/ niets en
+// klapt deze hele test eruit op een verschil dat niets met bat-bestanden te
+// maken heeft. De regels hieronder zoeken in de tekst, niet in de opmaak.
+const src = fs.readFileSync(path.join(REAL, 'renderer.js'), 'utf8').replace(/\r\n/g, '\n')
 eval(src.match(/const BAT_DEFAULTS = \{[\s\S]*?\n\}/)[0].replace('const','var'))
 eval(src.match(/const BAT_KOPREGELS = .*\n/)[0].replace('const', 'var'))
 eval(src.match(/const BAT_STAARTREGELS = .*\n/)[0].replace('const', 'var'))

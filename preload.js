@@ -39,6 +39,9 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeListener('fs:zoekTreffers', h)
   },
   projectSoort:  (p)     => ipcRenderer.invoke('fs:projectSoort', p),
+
+  gitInfo:       (p)     => ipcRenderer.invoke('git:info', p),
+  gitGh:         ()      => ipcRenderer.invoke('git:gh'),
   listArchive:   (p)     => ipcRenderer.invoke('arch:list', p),
   openInArchive: (p)     => ipcRenderer.invoke('arch:open', p),
   archiveTool:   ()      => ipcRenderer.invoke('arch:tool'),

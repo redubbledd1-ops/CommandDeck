@@ -85,7 +85,11 @@ const EMOJIS = ['📱','💰','🎵','🏠','🚀','💎','🎮','🔥','⚡','�
 
 // Uitvoeren is voor programma's, AI en eigen snelkoppelingen.
 // Flutter-run hoort bij tools, naast devices / pub / build.
-const RUN_CMD_DEFS = []
+// Git hoort bij uitvoeren en niet bij tools: de tools-sectie wordt bij een
+// niet-Flutter-project standaard verborgen (zie bepaalToolsVoorProject), en
+// juist daar wil je git-knoppen hebben. De definities staan in git-tools.js,
+// zodat main.js en de tests dezelfde lijst gebruiken.
+const RUN_CMD_DEFS = GitTools.GIT_CMD_DEFS.map(d => ({ ...d }))
 
 const TOOLS_CMD_DEFS = [
   { id: 'run-android',   label: 'run android',     icon: 'ti-device-mobile-android', cls: 'android' },
@@ -126,6 +130,7 @@ const AI_MERK_KLEUR = {
 const KLEUR_IDX = {
   android: 2, windows: 5, web: 3, info: 3, pub: 5, clean: 10, doctor: 8,
   apk: 9, buildweb: 0, buildwin: 11,
+  gitlink: 4, gitread: 6, gitpull: 2, gitfetch: 7, gitlog: 1,
   'editor-vscode': 5, 'editor-cursor': 0, 'editor-claude': 4,
   'editor-android-studio': 2, 'editor-claude-desktop': 6,
   'merk-visualstudio': 1, 'merk-codex': 8, 'merk-openai': 8, 'merk-gemini': 5,
@@ -176,6 +181,14 @@ function hashKleur(s) {
   let h = 0
   for (const c of String(s)) h = (Math.imul(h, 31) + c.charCodeAt(0)) | 0
   return Math.abs(h) % PROG_KLEUR_AANTAL
+}
+
+// Vaste knoppen mogen een vertaalsleutel hebben; die wint van het kale label.
+function defLabel(def) {
+  if (!def) return ''
+  if (!def.labelKey) return def.label
+  const t = I18N.t(def.labelKey)
+  return (t && t !== def.labelKey) ? t : def.label
 }
 
 function knopKleurSpec(id, p) {
@@ -388,6 +401,48 @@ async function keurProjectenNa() {
   if (veranderd && view === 'project') renderMain()
 }
 
+// ── Git-toestand per locatie ─────────────────────────────────────────────────
+// De git-knoppen hangen af van de map waar je in staat: nog geen repo, wel een
+// repo maar niet gekoppeld, of gekoppeld. Dat opvragen kost een paar korte
+// git-aanroepen, dus we onthouden het antwoord per pad en tekenen opnieuw
+// zodra het binnen is.
+let gitStaten = {}        // pad -> staat uit git-tools
+const gitBezig = new Set()
+
+function actieveLocPad(p) {
+  const loc = p && p.locations ? (p.locations[p.activeLocation] || p.locations[0]) : null
+  return (loc && loc.path) || ''
+}
+
+function gitStaatVan(p) {
+  const pad = actieveLocPad(p)
+  return pad ? (gitStaten[pad] || null) : null
+}
+
+// Zonder `forceer` gebeurt er niets als we het antwoord al hebben. Dat is wat
+// het opnieuw tekenen laat stoppen: de eerste ronde haalt op en tekent, de
+// tweede vindt de cache en doet niets meer.
+async function ververesGitStaat(p, forceer = false) {
+  const pad = actieveLocPad(p)
+  if (!pad || !window.api || !window.api.gitInfo) return null
+  if (!forceer && gitStaten[pad]) return gitStaten[pad]
+  if (gitBezig.has(pad)) return gitStaten[pad] || null
+
+  gitBezig.add(pad)
+  try {
+    const staat = await window.api.gitInfo(pad)
+    if (!staat) return null
+    const oud = gitStaten[pad]
+    gitStaten[pad] = staat
+    if (JSON.stringify(oud) !== JSON.stringify(staat) && view === 'project') renderMain()
+    return staat
+  } catch {
+    return null
+  } finally {
+    gitBezig.delete(pad)
+  }
+}
+
 // Eigen knoppen die de gebruiker vanuit het woordenboek heeft toegevoegd.
 // Ze horen bij een project en staan in de sectie 'run' (uitvoeren) of 'tools'.
 function customCmdsOf(p, section) {
@@ -425,7 +480,14 @@ function cmdVolgordeLijst(bron, sectie) {
 }
 
 function zichtbareCmdVolgorde(bron, sectie, zichtbaar = null) {
-  return cmdVolgordeLijst(bron, sectie).filter(id => cmdZichtbaar(bron, id, zichtbaar))
+  const ids = cmdVolgordeLijst(bron, sectie).filter(id => cmdZichtbaar(bron, id, zichtbaar))
+  // Een niet-gekoppeld project ziet alleen de koppelknop; een gekoppeld
+  // project ziet de rest en de koppelknop niet meer. Zolang we de toestand
+  // nog niet weten tonen we geen enkele git-knop: liever even niets dan een
+  // knop die een seconde later weer verspringt.
+  if (!ids.some(id => GitTools.isGitId(id))) return ids
+  const toon = GitTools.zichtbareGitIds(gitStaatVan(bron))
+  return ids.filter(id => !GitTools.isGitId(id) || toon.includes(id))
 }
 
 function verplaatsCmdVolgorde(bron, sectie, van, naar, zichtbaar = null) {
@@ -441,7 +503,7 @@ function verplaatsCmdVolgorde(bron, sectie, van, naar, zichtbaar = null) {
 function cmdKnopHtmlMap(p) {
   const map = {}
   for (const def of RUN_CMD_DEFS) {
-    map[def.id] = `<button class="cmd-btn" data-cmd="${def.id}" data-volgorde-id="${def.id}"><i class="ti ${def.icon}"></i> ${def.label}</button>`
+    map[def.id] = `<button class="cmd-btn" data-cmd="${def.id}" data-volgorde-id="${def.id}"><i class="ti ${def.icon}"></i> ${esc(defLabel(def))}</button>`
   }
   eigenEditors().forEach(e => {
     const id = 'editor:custom:' + e.id
@@ -454,7 +516,7 @@ function cmdKnopHtmlMap(p) {
     map[id] = `<button class="cmd-btn custom" data-custom="${esc(c.id)}" data-volgorde-id="${esc(id)}" title="${esc(c.cmd)}"><i class="ti ${esc(c.icon || 'ti-player-play')}"></i> ${esc(c.label || c.cmd)}</button>`
   })
   for (const def of TOOLS_CMD_DEFS) {
-    map[def.id] = `<button class="cmd-btn" data-cmd="${def.id}" data-volgorde-id="${def.id}"><i class="ti ${def.icon}"></i> ${def.label}</button>`
+    map[def.id] = `<button class="cmd-btn" data-cmd="${def.id}" data-volgorde-id="${def.id}"><i class="ti ${def.icon}"></i> ${esc(defLabel(def))}</button>`
   }
   customCmdsOf(p, 'tools').forEach(c => {
     const id = 'custom:' + c.id
@@ -489,7 +551,7 @@ function cmdvisRijen(sectie) {
   const ctx = modalProjectCtx()
   if (sectie === 'run') {
     const vaste = RUN_CMD_DEFS
-      .map(def => ({ id: def.id, label: def.label, icon: def.icon }))
+      .map(def => ({ id: def.id, label: defLabel(def), icon: def.icon }))
     const editors = eigenEditors().map((e, i) => ({
       id: 'editor:custom:' + e.id, label: e.label || 'editor', icon: progIcoon(e), kleurCls: progKleurCls(e, i),
     }))
@@ -502,7 +564,7 @@ function cmdvisRijen(sectie) {
     const map = Object.fromEntries([...vaste, ...editors, ...ai, ...customs].map(r => [r.id, r]))
     return cmdVolgordeLijst(ctx, 'run').map(id => map[id]).filter(Boolean)
   }
-  const vaste = TOOLS_CMD_DEFS.map(def => ({ id: def.id, label: def.label, icon: def.icon }))
+  const vaste = TOOLS_CMD_DEFS.map(def => ({ id: def.id, label: defLabel(def), icon: def.icon }))
   const customs = pendingCustomCmds.filter(c => c.section === 'tools').map(c => ({
     id: 'custom:' + c.id, custom: c, label: c.label || c.cmd, icon: c.icon || 'ti-player-play',
   }))
@@ -953,6 +1015,44 @@ function vraagJaNee(titel, tekst, jaLabel = I18N.t('common.yes'), soort = 'prima
       { label: jaLabel, waarde: true, soort },
     ],
   })
+}
+
+// Eén regel tekst vragen. Geeft de ingevoerde tekst terug, of null bij
+// annuleren. Enter bevestigt, Escape annuleert.
+function vraagTekst({ titel, tekst = '', waarde = '', placeholder = '', okLabel = '', soort = 'primair' }) {
+  return new Promise(resolve => {
+    vraagKlaar = resolve
+    document.getElementById('vraag-titel').textContent = titel
+    const uitleg = document.getElementById('vraag-tekst')
+    uitleg.textContent = tekst
+    uitleg.hidden = !tekst
+
+    const lijst = document.getElementById('vraag-lijst')
+    lijst.hidden = false
+    lijst.innerHTML = `<input type="text" class="vraag-invoer" id="vraag-invoer" placeholder="${esc(placeholder)}" />`
+    const invoer = lijst.querySelector('#vraag-invoer')
+    invoer.value = waarde
+
+    const vak = document.getElementById('vraag-knoppen')
+    vak.innerHTML = `<button class="btn-ghost" data-v="0">${esc(I18N.t('common.cancel'))}</button>`
+      + `<button class="${soort === 'gevaar' ? 'btn-danger' : 'btn-primary'}" data-v="1">${esc(okLabel || I18N.t('common.ok'))}</button>`
+
+    const af = (bevestigd) => sluitVraag(bevestigd ? invoer.value.trim() : null)
+    vak.querySelector('[data-v="0"]').onclick = () => af(false)
+    vak.querySelector('[data-v="1"]').onclick = () => af(true)
+    invoer.onkeydown = (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); af(true) }
+      else if (e.key === 'Escape') { e.preventDefault(); af(false) }
+    }
+
+    document.getElementById('modal-vraag').hidden = false
+    requestAnimationFrame(() => { invoer.focus(); invoer.select() })
+  })
+}
+
+// Kort iets melden met alleen een ok-knop.
+function meldKort(titel, tekst, regels = []) {
+  return vraagKeuze({ titel, tekst, regels, knoppen: [{ label: I18N.t('common.ok'), waarde: true, soort: 'primair' }] })
 }
 
 // ── Rechtsklikmenu ────────────────────────────────────────────────────────────
@@ -2366,7 +2466,7 @@ function knopOmschrijving(id) {
     return (e && (e.label || e.cmd)) || id
   }
   const def = [...RUN_CMD_DEFS, ...TOOLS_CMD_DEFS].find(d => d.id === id)
-  return def ? def.label : id
+  return def ? defLabel(def) : id
 }
 
 // Bestaat deze knop maar op één plek? Dan is "globaal weghalen" echt weghalen.
@@ -2520,6 +2620,9 @@ function renderMain() {
   }
 
   const activeLoc  = p.locations[p.activeLocation] || p.locations[0]
+
+  // Nog niet gemeten? Dan halen we het op en tekent die aanroep zelf opnieuw.
+  ververesGitStaat(p)
 
   const runGridHtml  = cmdGridHtml(p, 'run')
   const toolsGridHtml = cmdGridHtml(p, 'tools')
@@ -10358,7 +10461,120 @@ async function executeCmd(project, cmd, cmdKey = null) {
   }
 }
 
+// ── Git-knoppen ──────────────────────────────────────────────────────────────
+
+async function runGitCmd(project, cmdKey) {
+  if (cmdKey === 'git-koppelen') { await koppelGithub(project); return }
+
+  const cmd = GitTools.GIT_CMD_MAP[cmdKey]
+  if (!cmd) return
+  await executeCmd(project, cmd, cmdKey)
+  // Een pull of fetch kan de toestand veranderen (eerste upstream, andere
+  // branch), dus daarna opnieuw kijken.
+  await ververesGitStaat(project, true)
+}
+
+// Koppelen doen we in stappen en niet in één klik. Een map die nog helemaal
+// niet onder git staat krijgt eerst alleen `git init`: wat er in je eerste
+// commit belandt bepaal je zelf, want zonder .gitignore staat node_modules
+// zo in je geschiedenis en krijg je hem er nooit meer netjes uit.
+async function koppelGithub(project) {
+  const pad = actieveLocPad(project)
+  if (!pad) return
+
+  const staat = await ververesGitStaat(project, true)
+  if (!staat) return
+  if (!staat.beschikbaar) {
+    await meldKort(I18N.t('git.link.noGitTitle'), I18N.t('git.link.noGitText'))
+    return
+  }
+
+  const ghKlaar = await window.api.gitGh()
+  const stap = GitTools.koppelStap(staat, ghKlaar)
+
+  if (stap === GitTools.KOPPEL_AL_GEDAAN) {
+    await meldKort(I18N.t('git.link.doneTitle'), I18N.t('git.link.doneText', { remote: staat.remote || 'origin' }))
+    renderMain()
+    return
+  }
+
+  if (stap === GitTools.KOPPEL_INIT) {
+    const ja = await vraagJaNee(I18N.t('git.link.initTitle'), I18N.t('git.link.initText'), I18N.t('git.link.initOk'))
+    if (!ja) return
+    await executeCmd(project, GitTools.koppelCommando(GitTools.KOPPEL_INIT), 'git-koppelen')
+    await ververesGitStaat(project, true)
+    return
+  }
+
+  if (stap === GitTools.KOPPEL_COMMIT) {
+    await meldKort(I18N.t('git.link.commitTitle'), I18N.t('git.link.commitText'))
+    return
+  }
+
+  if (stap === GitTools.KOPPEL_GH) {
+    const naam = await vraagTekst({
+      titel: I18N.t('git.link.nameTitle'),
+      tekst: I18N.t('git.link.nameText'),
+      waarde: GitTools.veiligeRepoNaam(project.name),
+      okLabel: I18N.t('common.next'),
+    })
+    if (!naam) return
+
+    const zicht = await vraagKeuze({
+      titel: I18N.t('git.link.visTitle'),
+      tekst: I18N.t('git.link.visText', { naam: GitTools.veiligeRepoNaam(naam) }),
+      knoppen: [
+        { label: I18N.t('common.cancel'), waarde: '' },
+        { label: I18N.t('git.link.public'), waarde: 'publiek' },
+        { label: I18N.t('git.link.private'), waarde: 'prive', soort: 'primair' },
+      ],
+    })
+    if (!zicht) return
+
+    const cmd = GitTools.koppelCommando(GitTools.KOPPEL_GH, {
+      naam: GitTools.veiligeRepoNaam(naam), prive: zicht === 'prive',
+    })
+    await executeCmd(project, cmd, 'git-koppelen')
+    await ververesGitStaat(project, true)
+    return
+  }
+
+  // Geen gh op deze pc: dan maakt de gebruiker de repo zelf aan in de browser
+  // en plakt hij het adres. Dat is één stap meer, maar het werkt overal.
+  const keuze = await vraagKeuze({
+    titel: I18N.t('git.link.ghMissingTitle'),
+    tekst: I18N.t('git.link.ghMissingText'),
+    knoppen: [
+      { label: I18N.t('common.cancel'), waarde: '' },
+      { label: I18N.t('git.link.openGithub'), waarde: 'open' },
+      { label: I18N.t('git.link.haveUrl'), waarde: 'url', soort: 'primair' },
+    ],
+  })
+  if (!keuze) return
+  if (keuze === 'open') { await window.api.openUrl('https://github.com/new'); return }
+
+  const ruw = await vraagTekst({
+    titel: I18N.t('git.link.urlTitle'),
+    tekst: I18N.t('git.link.urlText'),
+    placeholder: 'https://github.com/gebruiker/repo.git',
+    okLabel: I18N.t('git.link.linkOk'),
+  })
+  if (!ruw) return
+
+  const url = GitTools.normaliseerRepoUrl(ruw)
+  if (!url) { await meldKort(I18N.t('git.link.urlBadTitle'), I18N.t('git.link.urlBadText')); return }
+
+  await executeCmd(project, GitTools.koppelCommando(GitTools.KOPPEL_URL, {
+    url, branch: staat.branch || 'main',
+  }), 'git-koppelen')
+  await ververesGitStaat(project, true)
+}
+
 async function runCmd(project, cmdKey) {
+  // Git heeft zijn eigen route: koppelen vraagt eerst iets, en na afloop kan
+  // de knoppenrij er anders uitzien dan ervoor.
+  if (GitTools.isGitId(cmdKey)) { await runGitCmd(project, cmdKey); return }
+
   const releaseFlag = project.release === true ? ' --release' : ''
 
   // Meerdere telefoons/emulators tegelijk aangesloten? Dan is 'de' Android-

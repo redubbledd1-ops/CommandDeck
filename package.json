@@ -10,13 +10,14 @@
     "build:installer": "set CSC_IDENTITY_AUTO_DISCOVERY=false&& electron-builder --win nsis --x64",
     "build:portable": "set CSC_IDENTITY_AUTO_DISCOVERY=false&& electron-builder --win portable --x64",
     "build:dir": "set CSC_IDENTITY_AUTO_DISCOVERY=false&& electron-builder --win dir --x64",
-    "test": "node test/history.test.js && node test/library.test.js && node test/seed.test.js && node test/shell.test.js && node test/ps-launch.test.js && node test/ai.test.js && node test/editors.test.js && node test/editorscan.test.js && node test/archive.test.js && node test/bewerken.test.js && node test/shortenpath.test.js && node test/batexe.test.js && node test/icon.test.js && node test/bat.test.js && node test/sourcedir.test.js && node test/update.test.js && node test/klembord.test.js && node test/mapgrootte.test.js && node test/fluttermissing.test.js && node test/flutter-devices.test.js && node test/ui.test.js",
+    "test": "node test/history.test.js && node test/library.test.js && node test/seed.test.js && node test/shell.test.js && node test/ps-launch.test.js && node test/ai.test.js && node test/editors.test.js && node test/editorscan.test.js && node test/archive.test.js && node test/bewerken.test.js && node test/shortenpath.test.js && node test/batexe.test.js && node test/icon.test.js && node test/bat.test.js && node test/sourcedir.test.js && node test/update.test.js && node test/klembord.test.js && node test/mapgrootte.test.js && node test/fluttermissing.test.js && node test/flutter-devices.test.js && node test/git.test.js && node test/ui.test.js",
     "test:ui": "node test/ui.test.js",
     "test:history": "node test/history.test.js",
     "test:update": "node test/sourcedir.test.js && node test/update.test.js",
     "test:bat": "node test/bat.test.js",
     "test:archive": "node test/archive.test.js",
     "test:flutter": "node test/fluttermissing.test.js && node test/flutter-devices.test.js",
+    "test:git": "node test/git.test.js",
     "test:ai": "node test/ai.test.js"
   },
   "build": {

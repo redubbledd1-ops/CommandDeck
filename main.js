@@ -11,6 +11,7 @@ const { buildSed } = require('./bat-exe')
 const { BUILTIN_COMMANDS } = require('./cmd-library')
 const { psCommandLaunch, psWindowLaunch } = require('./ps-launch')
 const { EDITORS } = require('./editor-catalog')
+const GitTools = require('./git-tools')
 const { maakAi } = require('./ai-runtime')
 const { SUPPORTED_LANGUAGES } = require('./locales/languages')
 const { isArchief, isZipArchief, leesZip, pakZipUit,
@@ -830,10 +831,66 @@ ipcMain.handle('fs:projectSoort', (_, dir) => {
       dart: pubspec,
       node: heeft('package.json'),
       pubspec,
+      git: heeft('.git'),
     }
   } catch (e) {
     return { ok: false, reason: e.message }
   }
+})
+
+// ── Git ───────────────────────────────────────────────────────────────────────
+// De knoppen in de app moeten weten of een map onder versiebeheer staat en of
+// er een remote aan hangt. Dat is drie keer een kort commando; we vragen het
+// stil op (niet in de terminal) zodat het tijdens het tekenen kan.
+
+// Kort en met een harde tijdslimiet: dit draait tijdens het renderen en mag
+// het venster nooit laten wachten. Geeft null terug als git zelf ontbreekt.
+function gitUit(dir, args) {
+  try {
+    return execFileSync('git', args, {
+      cwd: dir, encoding: 'utf8', timeout: 4000, windowsHide: true,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+  } catch (e) {
+    // ENOENT = git staat niet in PATH. Al het andere is een gewone git-fout
+    // (geen repo, geen commits) en betekent alleen 'geen antwoord'.
+    if (e && e.code === 'ENOENT') return null
+    return ''
+  }
+}
+
+let gitAanwezig = null
+function heeftGit() {
+  if (gitAanwezig === null) gitAanwezig = gitUit(os.homedir(), ['--version']) !== null
+  return gitAanwezig
+}
+
+ipcMain.handle('git:info', (_, dir) => {
+  if (!dir || !fs.existsSync(dir)) return GitTools.maakStaat({ beschikbaar: heeftGit(), isRepo: false })
+  if (!heeftGit()) return GitTools.maakStaat({ beschikbaar: false })
+
+  const binnen = String(gitUit(dir, ['rev-parse', '--is-inside-work-tree']) || '').trim()
+  if (binnen !== 'true') return GitTools.maakStaat({ beschikbaar: true, isRepo: false })
+
+  const remotes = GitTools.parseRemotes(gitUit(dir, ['remote']))
+  const branch = GitTools.parseBranch(gitUit(dir, ['rev-parse', '--abbrev-ref', 'HEAD']))
+  // Een verse `git init` heeft nog geen HEAD die ergens heen wijst.
+  const commits = String(gitUit(dir, ['rev-parse', '--verify', 'HEAD']) || '').trim().length > 0
+
+  return GitTools.maakStaat({ beschikbaar: true, isRepo: true, remotes, branch, commits })
+})
+
+// Is de GitHub-CLI beschikbaar? Zo ja, dan kan de koppelknop de repo zelf
+// aanmaken; zo nee, dan vragen we de gebruiker om de url.
+let ghAanwezig = null
+ipcMain.handle('git:gh', () => {
+  if (ghAanwezig === null) {
+    try {
+      execFileSync('gh', ['--version'], { encoding: 'utf8', timeout: 4000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] })
+      ghAanwezig = true
+    } catch { ghAanwezig = false }
+  }
+  return ghAanwezig
 })
 
 // ── Mapgroottes ───────────────────────────────────────────────────────────────
