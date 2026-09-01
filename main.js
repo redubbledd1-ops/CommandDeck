@@ -986,6 +986,14 @@ ipcMain.handle('git:accountInfo', (_, dir) => {
 
 // Wat er in de stash staat, met datum en branch. Alleen op aanvraag: dit hangt
 // aan een klik en niet aan het tekenen, dus hier mag het iets meer kosten.
+// Alle branches, lokaal en op de remote. Alleen op aanvraag: dit hangt aan een
+// knop en hoeft niet mee te draaien in de achtergrondverversing.
+ipcMain.handle('git:branches', (_, dir) => {
+  if (!dir || !fs.existsSync(dir) || !heeftGit()) return []
+  return GitTools.parseBranches(
+    gitUit(dir, ['branch', '-a', '--format=%(HEAD)%09%(refname)%09%(refname:short)%09%(upstream:short)']))
+})
+
 ipcMain.handle('git:stashLijst', (_, dir) => {
   if (!dir || !fs.existsSync(dir) || !heeftGit()) return []
   const lijst = GitTools.parseStashLijst(gitUit(dir, ['stash', 'list', '--pretty=%gd%x09%cs%x09%gs']))

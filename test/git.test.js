@@ -36,10 +36,11 @@ t('remotes mag ook rauwe tekst zijn',
 // ── welke knoppen zie je ─────────────────────────────────────────────────────
 gelijk('geen repo -> alleen koppelen', G.zichtbareGitIds(geenRepo), ['git-koppelen'])
 gelijk('losse repo -> koppelen plus wat lokaal werkt',
-  G.zichtbareGitIds(losseRepo), ['git-koppelen', 'git-status', 'git-commit', 'git-stash', 'git-log'])
+  G.zichtbareGitIds(losseRepo),
+  ['git-koppelen', 'git-status', 'git-commit', 'git-stash', 'git-branch', 'git-log'])
 gelijk('gekoppeld -> alles, koppelen valt weg',
   G.zichtbareGitIds(gekoppeld),
-  ['git-status', 'git-commit', 'git-push', 'git-pull', 'git-fetch', 'git-stash', 'git-log'])
+  ['git-status', 'git-commit', 'git-push', 'git-pull', 'git-fetch', 'git-stash', 'git-branch', 'git-log'])
 gelijk('nog niet gemeten -> geen enkele knop', G.zichtbareGitIds(null), [])
 gelijk('git ontbreekt -> geen enkele knop', G.zichtbareGitIds(geenGit), [])
 t('koppelen verdwijnt zodra er een remote is',
@@ -166,7 +167,8 @@ t('alleen stash is als gevaarlijk gemarkeerd',
 // ── fase 1: knoppen die standaard uit staan ──────────────────────────────────
 // Uit staan is niet hetzelfde als niet bestaan. Deze twee blijven gewoon in de
 // lijst zitten, zodat de instellingen ze kunnen tonen en je ze aan kunt zetten.
-gelijk('fetch en stash staan standaard uit', G.STANDAARD_UIT_IDS, ['git-fetch', 'git-stash'])
+gelijk('fetch, stash en branches staan standaard uit',
+  G.STANDAARD_UIT_IDS, ['git-fetch', 'git-stash', 'git-branch'])
 t('standaard uit staat alleen op knoppen die ook echt bestaan',
   G.STANDAARD_UIT_IDS.every(id => G.GIT_IDS.includes(id)))
 t('de dagelijkse lus staat gewoon aan',
@@ -653,6 +655,86 @@ t('en de locIndex blijft bewaard, anders commit je in de verkeerde map',
 gelijk('stashen pakt alleen de locatie met niet-vastgelegd werk',
   G.teStashenProjecten(tweeLocs, 'stashen').map(x => x.naam), ['resume — main'])
 
+// ── branches ─────────────────────────────────────────────────────────────────
+// Zoals `git branch -a --format=...` het echt teruggeeft. De vólledige refnaam
+// is nodig: refname:short geeft voor een remote-tak gewoon 'origin/main', en
+// dan is die niet te onderscheiden van een lokale tak met een / in de naam.
+const BR = [
+  '*\trefs/heads/main\tmain\torigin/main',
+  ' \trefs/heads/feature/knoppen\tfeature/knoppen\t',
+  ' \trefs/remotes/origin/HEAD\torigin/HEAD\t',
+  ' \trefs/remotes/origin/main\torigin/main\t',
+  ' \trefs/remotes/origin/experiment\torigin/experiment\t',
+].join('\n')
+
+const br = G.parseBranches(BR)
+t('vier branches, HEAD-verwijzing eruit', br.length === 4)
+t('de huidige branch is gemarkeerd', G.huidigeBranch(br).naam === 'main')
+t('upstream komt mee', br[0].upstream === 'origin/main')
+t('een lokale tak met een / erin is geen remote-tak',
+  br.find(b => b.naam === 'feature/knoppen').remote === false)
+t('een remote-tak is wél als remote gemerkt',
+  br.find(b => b.naam === 'origin/experiment').remote === true)
+gelijk('lokale takken', G.lokaleBranches(br).map(b => b.naam), ['main', 'feature/knoppen'])
+gelijk('alleen origin/experiment bestaat nog niet lokaal',
+  G.nieuweRemoteBranches(br).map(b => b.naam), ['origin/experiment'])
+t('werkt met Windows-regeleindes', G.parseBranches(BR.split('\n').join('\r\n')).length === 4)
+t('lege uitvoer klapt niet', G.parseBranches('').length === 0)
+t('een halve regel wordt overgeslagen', G.parseBranches('* \tref').length === 0)
+
+t('lokaal wisselen is gewoon checkout',
+  G.checkoutCommando({ naam: 'feature/knoppen', remote: false }) === 'git checkout feature/knoppen')
+t('een remote-tak wordt lokaal aangemaakt en volgt hem',
+  G.checkoutCommando({ naam: 'origin/experiment', remote: true })
+  === 'git checkout -b experiment --track origin/experiment')
+t('zonder branch geen commando', G.checkoutCommando(null) === null)
+
+t('nieuwe branch', G.nieuweBranchCommando('feature/x') === 'git checkout -b feature/x')
+t('spaties worden streepjes', G.nieuweBranchCommando('mijn nieuwe tak') === 'git checkout -b mijn-nieuwe-tak')
+t('onbruikbare naam levert niets op', G.nieuweBranchCommando('...') === null)
+
+t('verwijderen is standaard voorzichtig', G.verwijderBranchCommando('oud') === 'git branch -d oud')
+t('forceren is een aparte keuze', G.verwijderBranchCommando('oud', true) === 'git branch -D oud')
+t('remote verwijderen gaat via push --delete',
+  G.verwijderRemoteBranchCommando('origin', 'origin/oud') === 'git push origin --delete oud')
+t('merge', G.mergeCommando('feature/x') === 'git merge feature/x')
+t('merge van een remote-tak mag ook', G.mergeCommando('origin/main') === 'git merge origin/main')
+
+// Namen die git weigert horen we tegen te houden vóór het commando draait.
+for (const slecht of ['mijn tak', 'a..b', 'a~b', 'a^b', 'a:b', 'a?b', 'a*b', 'a[b',
+                      '-begin', '.begin', 'eind.', 'eind.lock', 'HEAD', '/a', 'a/', 'a//b', '', '   ']) {
+  t('geweigerd: ' + JSON.stringify(slecht), G.geldigeBranchNaam(slecht) === false)
+}
+for (const goed of ['main', 'feature/x', 'fix-123', 'v1.2.3', 'a/b/c']) {
+  t('toegestaan: ' + goed, G.geldigeBranchNaam(goed) === true)
+}
+t('opschonen maakt er iets bruikbaars van',
+  G.veiligeBranchNaam('  Mijn Nieuwe Tak!  ') === 'Mijn-Nieuwe-Tak!')
+t('opschonen haalt verboden tekens weg', G.veiligeBranchNaam('a~b^c:d') === 'abcd')
+t('opschonen geeft leeg terug als er niets bruikbaars over is',
+  G.veiligeBranchNaam('...') === '')
+
+const vuilSt = G.maakStaat({ ...BASIS, vuil: 3 })
+const schoonSt = G.maakStaat({ ...BASIS })
+t('wisselen met vuil werk wordt gemeld', G.wisselBlokkade(vuilSt, 'anders') === 'vuil')
+t('naar dezelfde branch wisselen heeft geen zin', G.wisselBlokkade(schoonSt, 'main') === 'zelfde')
+t('schoon en een andere branch mag gewoon', G.wisselBlokkade(schoonSt, 'anders') === null)
+t('geen repo, geen wissel', G.wisselBlokkade(G.maakStaat({ isRepo: false }), 'x') === 'geen-repo')
+
+t('de branch-knop staat standaard uit',
+  G.GIT_CMD_DEFS.find(d => d.id === 'git-branch').standaardUit === true)
+t('branches werken ook zonder remote',
+  G.zichtbareGitIds(G.maakStaat({ isRepo: true, remotes: [], branch: 'main' })).includes('git-branch'))
+t('maar niet in een repo zonder commits',
+  !G.zichtbareGitIds(G.maakStaat({ isRepo: true, remotes: [], branch: 'main', commits: false })).includes('git-branch'))
+
+t('conflicten worden uit de status gehaald',
+  G.parseStatusV2('# branch.oid a\n# branch.head main\nu UU N... 1 2 3 4 a b c x.js\n1 .M N... 1 2 3 a b y.js').conflicten === 1)
+t('en tellen ook gewoon als vuil',
+  G.parseStatusV2('# branch.oid a\n# branch.head main\nu UU N... 1 2 3 4 a b c x.js').vuil === 1)
+t('zonder conflict is het nul',
+  G.parseStatusV2('# branch.oid a\n# branch.head main\n1 .M N... 1 2 3 a b y.js').conflicten === 0)
+
 // ── bedrading naar de app ────────────────────────────────────────────────────
 // Zonder deze twee zie je de knoppen wel staan, maar grijs en zonder icoon —
 // ze lijken dan uitgeschakeld. Dat is precies wat er de eerste keer misging.
@@ -677,6 +759,12 @@ for (const sleutel of ['git.afsluit.titel', 'git.afsluit.commitPush', 'git.afslu
                        'git.afsluit.reden.niet-gepusht', 'git.stashMelding.titel',
                        'settings.git.label', 'settings.git.off', 'settings.git.warn', 'settings.git.stash']) {
   t('afsluit-tekst ' + sleutel + ' bestaat in nl en en', !!nl[sleutel] && !!en[sleutel])
+}
+
+for (const sleutel of ['git.btn.branch', 'git.branch.titel', 'git.branch.nieuw', 'git.branch.wisselen',
+                       'git.branch.samenvoegen', 'git.branch.verwijderen', 'git.branch.conflictTitel',
+                       'git.branch.vuilTekst', 'git.branch.wegRemoteBevestig']) {
+  t('branch-tekst ' + sleutel + ' bestaat in nl en en', !!nl[sleutel] && !!en[sleutel])
 }
 
 for (const sleutel of ['git.achter.titel', 'git.achter.tekst', 'git.achter.tekstUitEen',

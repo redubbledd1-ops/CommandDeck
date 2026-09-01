@@ -30,6 +30,10 @@
     // niet iets wat je dagelijks nodig hebt.
     { id: 'git-fetch',    labelKey: 'git.btn.fetch',  label: 'git fetch',       icon: 'ti-refresh',      cls: 'gitfetch', standaardUit: true },
     { id: 'git-stash',    labelKey: 'git.btn.stash',  label: 'stash',           icon: 'ti-archive',      cls: 'gitstash',  schrijft: true, gevaar: true, standaardUit: true },
+    // Branches: één knop die een overzicht opent, geen rij losse knoppen.
+    // Wisselen, maken, samenvoegen en verwijderen horen bij elkaar, en de
+    // meeste mensen die in hun eentje werken openen dit nooit.
+    { id: 'git-branch',   labelKey: 'git.btn.branch', label: 'branches',        icon: 'ti-git-fork',     cls: 'gitbranch', schrijft: true, standaardUit: true },
     // Terughalen staat wél aan, en verschijnt vanzelf zodra er iets in de
     // stash zit — ook als dat er door de afsluitcontrole in is gezet en je
     // de stash-knop nooit hebt aangeraakt. Dit is de weg terug; die mag nooit
@@ -173,7 +177,7 @@
   //   met remote  -> koppelen valt weg, push/pull/fetch komen erbij
   // Commit hoort dus al bij een niet-gekoppelde repo. Anders stuurt de
   // koppel-dialoog je naar "maak eerst een commit" zonder knop om dat te doen.
-  const LOKAAL = ['git-status', 'git-commit', 'git-stash', 'git-log']
+  const LOKAAL = ['git-status', 'git-commit', 'git-stash', 'git-branch', 'git-log']
   const REMOTE = ['git-push', 'git-pull', 'git-fetch']
 
   function zichtbareGitIds(staat) {
@@ -189,6 +193,9 @@
       // het antwoord op de vraag "is er iets weggezet?" — staat hij er, dan
       // ligt er werk; staat hij er niet, dan is er niets kwijt.
       if (id === 'git-stash-lijst' && !(staat.stashes > 0)) continue
+      // Zonder commit bestaat er nog geen branch om iets mee te doen: git
+      // heeft dan wel een naam voor HEAD, maar nog geen tak.
+      if (id === 'git-branch' && !staat.commits) continue
       uit.push(id)
     }
     return uit
@@ -269,6 +276,130 @@
       // overschrijven die je hebt aangepast.
       vuil: i.vuil,
     }
+  }
+
+  // ── Branches ────────────────────────────────────────────────────────────────
+  // Uitgelezen met:
+  //   git branch -a --format=%(HEAD)%09%(refname)%09%(refname:short)%09%(upstream:short)
+  //
+  // De vólledige refnaam moet erbij. `refname:short` geeft voor een remote-tak
+  // gewoon 'origin/main' — niet 'remotes/origin/main' — en dan is een tak met
+  // een schuine streep in de naam niet te onderscheiden van een remote-tak.
+  // refs/heads/ tegenover refs/remotes/ is wél ondubbelzinnig.
+  //
+  // Tabs als scheiding: een branchnaam mag geen witruimte bevatten.
+  // %(HEAD) is '*' voor de huidige branch en anders een spatie.
+  function parseBranches(uit) {
+    const lijst = []
+    for (const regel of String(uit || '').split('\n')) {
+      const r = regel.replace(/\r$/, '')
+      if (!r.trim()) continue
+
+      const velden = r.split('\t')
+      if (velden.length < 3) continue
+
+      const vlag = velden[0]
+      const vol = String(velden[1] || '').trim()
+      const kort = String(velden[2] || '').trim()
+      const upstream = String(velden[3] || '').trim()
+      if (!kort) continue
+
+      // 'origin/HEAD' wijst alleen maar naar de standaardtak; geen echte branch.
+      if (kort.endsWith('/HEAD') || kort.includes(' -> ')) continue
+
+      lijst.push({
+        naam: kort,
+        huidig: String(vlag || '').trim() === '*',
+        upstream: upstream || null,
+        remote: vol.startsWith('refs/remotes/'),
+      })
+    }
+    return lijst
+  }
+
+  const lokaleBranches = (lijst) => (lijst || []).filter(b => !b.remote)
+  const huidigeBranch = (lijst) => (lijst || []).find(b => b.huidig) || null
+
+  // Remote-takken waar nog geen lokale tegenhanger van bestaat. Dat zijn de
+  // enige waarvoor uitchecken iets nieuws oplevert; de rest heb je al.
+  function nieuweRemoteBranches(lijst) {
+    const lokaal = new Set(lokaleBranches(lijst).map(b => b.naam))
+    return (lijst || []).filter(b => b.remote && !lokaal.has(b.naam.replace(/^[^/]+\//, '')))
+  }
+
+  // De regels van git zelf, voor zover ze hier toe doen. Fout gaan betekent een
+  // foutmelding uit git die niemand leest, dus liever vooraf tegenhouden.
+  function geldigeBranchNaam(naam) {
+    const n = String(naam || '').trim()
+    if (!n) return false
+    if (n.length > 200) return false
+    if (/[\s~^:?*\[\\]/.test(n)) return false     // witruimte en de tekens die git verbiedt
+    if (n.includes('..') || n.includes('@{')) return false
+    if (n.startsWith('/') || n.endsWith('/') || n.includes('//')) return false
+    if (n.startsWith('-') || n.startsWith('.') || n.endsWith('.')) return false
+    if (n.endsWith('.lock')) return false
+    if (n === 'HEAD') return false
+    return true
+  }
+
+  // Wat mensen typen omzetten naar iets dat git accepteert: spaties worden
+  // streepjes, verboden tekens verdwijnen.
+  function veiligeBranchNaam(naam) {
+    const n = String(naam || '').trim()
+      .replace(/\s+/g, '-')
+      .replace(/[~^:?*\[\\]/g, '')
+      .replace(/\.\.+/g, '.')
+      .replace(/\/{2,}/g, '/')
+      .replace(/^[-./]+|[-./]+$/g, '')
+      .slice(0, 200)
+    return geldigeBranchNaam(n) ? n : ''
+  }
+
+  // Een remote-tak uitchecken maakt er een lokale van die hem volgt; daarna
+  // werken push en pull vanzelf. Een lokale tak is gewoon wisselen.
+  function checkoutCommando(branch) {
+    if (!branch || !branch.naam) return null
+    if (!branch.remote) return `git checkout ${branch.naam}`
+    const lokaal = branch.naam.replace(/^[^/]+\//, '')
+    if (!lokaal) return null
+    return `git checkout -b ${lokaal} --track ${branch.naam}`
+  }
+
+  function nieuweBranchCommando(naam) {
+    const n = veiligeBranchNaam(naam)
+    return n ? `git checkout -b ${n}` : null
+  }
+
+  // -d weigert als de branch niet is samengevoegd; -D gooit hem hoe dan ook
+  // weg. Dat verschil hoort een bewuste keuze te zijn, geen vlag die we stil
+  // meesturen.
+  function verwijderBranchCommando(naam, geforceerd = false) {
+    const n = String(naam || '').trim()
+    if (!geldigeBranchNaam(n)) return null
+    return `git branch ${geforceerd ? '-D' : '-d'} ${n}`
+  }
+
+  function verwijderRemoteBranchCommando(remote, naam) {
+    const r = String(remote || '').trim()
+    const n = String(naam || '').replace(/^[^/]+\//, '').trim()
+    if (!r || !geldigeBranchNaam(n)) return null
+    return `git push ${r} --delete ${n}`
+  }
+
+  function mergeCommando(naam) {
+    const n = String(naam || '').trim()
+    if (!geldigeBranchNaam(n) && !/^[\w.-]+\/[\w./-]+$/.test(n)) return null
+    return `git merge ${n}`
+  }
+
+  // Waarom je nu niet kunt wisselen. Git weigert bij vuile bestanden die de
+  // andere tak ook aanraakt — maar wélke dat zijn weet git pas als het misgaat,
+  // dus we waarschuwen bij alles wat vuil is.
+  function wisselBlokkade(staat, doelNaam) {
+    if (!staat || !staat.isRepo) return 'geen-repo'
+    if (doelNaam && staat.branch === doelNaam) return 'zelfde'
+    if (staat.vuil > 0) return 'vuil'
+    return null
   }
 
   // ── Locaties van een project ────────────────────────────────────────────────
@@ -792,6 +923,9 @@
     identiteitCommando, profielCommando, ghSwitchCommando, vraagtOmInloggen,
     INLOG_ONTHOUDEN, INLOG_VRAGEN, INLOG_KEUZES,
     indicator, onveiligeRedenen, magFetchen, achterstandMelding, FETCH_INTERVAL_MS,
+    parseBranches, lokaleBranches, huidigeBranch, nieuweRemoteBranches,
+    geldigeBranchNaam, veiligeBranchNaam, checkoutCommando, nieuweBranchCommando,
+    verwijderBranchCommando, verwijderRemoteBranchCommando, mergeCommando, wisselBlokkade,
     projectLocaties, locatieNaam,
     teVragenProjecten, teStashenProjecten, afsluitSamenvatting, afsluitInstelling,
     AFSLUIT_UIT, AFSLUIT_WAARSCHUWEN, AFSLUIT_STASHEN, AFSLUIT_KEUZES,

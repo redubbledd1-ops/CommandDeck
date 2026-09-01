@@ -167,7 +167,7 @@ const KLEUR_IDX = {
   android: 2, windows: 5, web: 3, info: 3, pub: 5, clean: 10, doctor: 8,
   apk: 9, buildweb: 0, buildwin: 11,
   gitlink: 4, gitread: 6, gitpull: 2, gitfetch: 7, gitlog: 1,
-  gitcommit: 9, gitpush: 3, gitstash: 8, gitstashlijst: 10,
+  gitcommit: 9, gitpush: 3, gitstash: 8, gitstashlijst: 10, gitbranch: 5,
   'editor-vscode': 5, 'editor-cursor': 0, 'editor-claude': 4,
   'editor-android-studio': 2, 'editor-claude-desktop': 6,
   'merk-visualstudio': 1, 'merk-codex': 8, 'merk-openai': 8, 'merk-gemini': 5,
@@ -11180,6 +11180,7 @@ async function runGitCmd(project, cmdKey) {
   // Terughalen schrijft ook, maar het is geen commando met één vaste vraag
   // ervoor: eerst moet je zien wat er ligt. Dus een eigen weg, net als koppelen.
   if (cmdKey === 'git-stash-lijst') { await stashOverzicht(project); return }
+  if (cmdKey === 'git-branch') { await branchOverzicht(project); return }
   if (GitTools.isSchrijfKnop(cmdKey)) { await schrijfGitCmd(project, cmdKey); return }
 
   const cmd = GitTools.GIT_CMD_MAP[cmdKey]
@@ -11273,6 +11274,193 @@ function stashLabel(s) {
     ? s.bericht
     : I18N.t('git.stashLijst.wijzigingenOp', { branch: s.branch || '?' })
   return s.datum ? `${wat} — ${s.datum}` : wat
+}
+
+// ── Branches ─────────────────────────────────────────────────────────────────
+// Eén ingang voor wisselen, maken, samenvoegen en verwijderen. Conflicten
+// lossen we niet zelf op: die melden we en dan gaat de map open in een echte
+// terminal. Een merge-tool bouwen hoort niet in een launcher thuis.
+
+function branchLabel(b, huidig) {
+  const merk = b.naam === huidig ? '● ' : (b.remote ? '☁ ' : '')
+  return merk + b.naam
+}
+
+// Kiezen uit een lijst branches, in dezelfde vorm als de stash-lijst: de
+// items zijn de knoppen. Geeft de gekozen branch terug, of null.
+async function kiesBranch(lijst, titel, tekst, soort = '') {
+  if (!lijst.length) { await meldKort(titel, I18N.t('git.branch.geenKeuze')); return null }
+  if (lijst.length === 1) return lijst[0]
+
+  const tonen = lijst.slice(0, 8)
+  const knoppen = [{ label: I18N.t('common.cancel'), waarde: '' }]
+  // column-reverse: achterste eerst, zodat de eerste uit de lijst bovenaan komt.
+  for (let i = tonen.length - 1; i >= 0; i--) {
+    knoppen.push({ label: tonen[i].naam, waarde: tonen[i].naam, soort: i === 0 ? soort : '' })
+  }
+  const naam = await vraagKeuze({
+    titel,
+    tekst: lijst.length > tonen.length
+      ? I18N.t('git.branch.kiesMeer', { aantal: lijst.length, getoond: tonen.length })
+      : tekst,
+    knoppen,
+  })
+  return naam ? lijst.find(b => b.naam === naam) || null : null
+}
+
+async function branchOverzicht(project) {
+  const pad = actieveLocPad(project)
+  if (!pad) return
+
+  const staat = await ververesGitStaat(project, true)
+  if (!staat || !staat.isRepo) return
+
+  let lijst = []
+  try { lijst = await window.api.gitBranches(pad) } catch {}
+  if (!lijst.length) { await meldKort(I18N.t('git.branch.titel'), I18N.t('git.branch.geenBranches')); return }
+
+  const huidig = staat.branch || (GitTools.huidigeBranch(lijst) || {}).naam || ''
+  const lokaal = GitTools.lokaleBranches(lijst)
+  const opRemote = GitTools.nieuweRemoteBranches(lijst)
+  const anderen = lokaal.filter(b => b.naam !== huidig)
+
+  const regels = [
+    ...anderen.map(b => branchLabel(b, huidig)),
+    ...opRemote.map(b => branchLabel(b, huidig)),
+  ].slice(0, 12)
+
+  const keuze = await vraagKeuze({
+    titel: I18N.t('git.branch.titel'),
+    tekst: I18N.t('git.branch.tekst', {
+      branch: huidig || '?', lokaal: lokaal.length, remote: opRemote.length,
+    }),
+    regels,
+    knoppen: [
+      { label: I18N.t('common.cancel'), waarde: '' },
+      { label: I18N.t('git.branch.verwijderen'), waarde: 'weg', soort: 'gevaar' },
+      { label: I18N.t('git.branch.samenvoegen'), waarde: 'merge' },
+      { label: I18N.t('git.branch.wisselen'), waarde: 'wissel' },
+      { label: I18N.t('git.branch.nieuw'), waarde: 'nieuw', soort: 'primair' },
+    ],
+  })
+  if (!keuze) return
+
+  if (keuze === 'nieuw')  return branchNieuw(project, staat)
+  if (keuze === 'wissel') return branchWisselen(project, staat, [...anderen, ...opRemote])
+  if (keuze === 'merge')  return branchSamenvoegen(project, [...anderen, ...opRemote], huidig)
+  if (keuze === 'weg')    return branchVerwijderen(project, [...anderen, ...opRemote], huidig)
+}
+
+async function branchNieuw(project, staat) {
+  const ruw = await vraagTekst({
+    titel: I18N.t('git.branch.nieuwTitel'),
+    tekst: I18N.t('git.branch.nieuwTekst', { branch: staat.branch || '?' }),
+    placeholder: 'feature/mijn-wijziging',
+    okLabel: I18N.t('git.branch.nieuw'),
+  })
+  if (!ruw) return
+
+  const naam = GitTools.veiligeBranchNaam(ruw)
+  if (!naam) { await meldKort(I18N.t('git.branch.naamFoutTitel'), I18N.t('git.branch.naamFoutTekst')); return }
+
+  // Opgeschoond? Dat moet je zien voordat het gebeurt, niet erna in de log.
+  if (naam !== ruw.trim()) {
+    const ja = await vraagJaNee(I18N.t('git.branch.naamAangepastTitel'),
+      I18N.t('git.branch.naamAangepastTekst', { ingevoerd: ruw.trim(), naam }),
+      I18N.t('git.branch.nieuw'), 'primair')
+    if (!ja) return
+  }
+
+  await executeCmd(project, GitTools.nieuweBranchCommando(naam), 'git-branch')
+  await ververesGitStaat(project, true)
+}
+
+async function branchWisselen(project, staat, kandidaten) {
+  const doel = await kiesBranch(kandidaten, I18N.t('git.branch.wisselTitel'),
+    I18N.t('git.branch.wisselTekst'), 'primair')
+  if (!doel) return
+
+  const blok = GitTools.wisselBlokkade(staat, doel.naam)
+  if (blok === 'zelfde') { await meldKort(I18N.t('git.branch.zelfdeTitel'), I18N.t('git.branch.zelfdeTekst')); return }
+
+  if (blok === 'vuil') {
+    // Git weigert alleen als de andere tak dezelfde bestanden aanraakt, en dat
+    // weet git zelf pas tijdens het wisselen. Dus waarschuwen bij alles wat
+    // vuil is, en de gebruiker laten beslissen.
+    const ja = await vraagJaNee(I18N.t('git.branch.vuilTitel'),
+      I18N.t('git.branch.vuilTekst', { aantal: staat.vuil, branch: doel.naam }),
+      I18N.t('git.branch.tochWisselen'), 'gevaar', staat.bestanden.slice(0, 10))
+    if (!ja) return
+  }
+
+  await executeCmd(project, GitTools.checkoutCommando(doel), 'git-branch')
+  await ververesGitStaat(project, true)
+}
+
+async function branchSamenvoegen(project, kandidaten, huidig) {
+  const bron = await kiesBranch(kandidaten, I18N.t('git.branch.mergeTitel'),
+    I18N.t('git.branch.mergeKies', { branch: huidig }), 'primair')
+  if (!bron) return
+
+  const ja = await vraagJaNee(I18N.t('git.branch.mergeTitel'),
+    I18N.t('git.branch.mergeBevestig', { bron: bron.naam, doel: huidig }),
+    I18N.t('git.branch.samenvoegen'), 'primair')
+  if (!ja) return
+
+  await executeCmd(project, GitTools.mergeCommando(bron.naam), 'git-branch')
+
+  // Conflicten halen we uit de status en niet uit de uitvoer van het commando:
+  // die tekst verandert per taal en per git-versie, de status niet.
+  const na = await ververesGitStaat(project, true)
+  if (na && na.conflicten > 0) {
+    const keuze = await vraagKeuze({
+      titel: I18N.t('git.branch.conflictTitel'),
+      tekst: I18N.t('git.branch.conflictTekst', { aantal: na.conflicten }),
+      regels: (na.bestanden || []).slice(0, 12),
+      knoppen: [
+        { label: I18N.t('common.ok'), waarde: 'ok' },
+        { label: I18N.t('git.afsluit.terminal'), waarde: 'terminal', soort: 'primair' },
+      ],
+    })
+    if (keuze === 'terminal') {
+      try { await window.api.openCmd({ cwd: actieveLocPad(project) }) } catch {}
+    }
+  }
+}
+
+async function branchVerwijderen(project, kandidaten, huidig) {
+  const doel = await kiesBranch(kandidaten, I18N.t('git.branch.wegTitel'),
+    I18N.t('git.branch.wegKies'), 'gevaar')
+  if (!doel) return
+  if (doel.naam === huidig) { await meldKort(I18N.t('git.branch.wegTitel'), I18N.t('git.branch.wegHuidig')); return }
+
+  const opRemote = !!doel.remote
+  const ja = await vraagJaNee(I18N.t('git.branch.wegTitel'),
+    I18N.t(opRemote ? 'git.branch.wegRemoteBevestig' : 'git.branch.wegBevestig', { naam: doel.naam }),
+    I18N.t('git.branch.verwijderen'), 'gevaar')
+  if (!ja) return
+
+  const cmd = opRemote
+    ? GitTools.verwijderRemoteBranchCommando(doel.naam.replace(/\/.*$/, ''), doel.naam)
+    : GitTools.verwijderBranchCommando(doel.naam, false)
+  if (!cmd) return
+  await executeCmd(project, cmd, 'git-branch')
+
+  if (opRemote) { await ververesGitStaat(project, true); return }
+
+  // `git branch -d` weigert als de tak nog niet is samengevoegd. Staat hij er
+  // daarna nog, dan is dat wat er gebeurd is — en dan pas bieden we -D aan,
+  // met erbij wat dat betekent. Nooit stilletjes forceren.
+  let na = []
+  try { na = await window.api.gitBranches(actieveLocPad(project)) } catch {}
+  if (!na.some(b => !b.remote && b.naam === doel.naam)) { await ververesGitStaat(project, true); return }
+
+  const forceren = await vraagJaNee(I18N.t('git.branch.wegNietSamengevoegdTitel'),
+    I18N.t('git.branch.wegNietSamengevoegdTekst', { naam: doel.naam }),
+    I18N.t('git.branch.wegForceren'), 'gevaar')
+  if (!forceren) return
+  await executeCmd(project, GitTools.verwijderBranchCommando(doel.naam, true), 'git-branch')
+  await ververesGitStaat(project, true)
 }
 
 async function stashOverzicht(project) {

@@ -553,6 +553,8 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
 .cmd-btn.gitcommit:hover { background: rgba(52,211,153,0.1); border-color: #34d399; }
 .cmd-btn.gitpush { border-color: rgba(167,139,250,0.4); color: #a78bfa; }
 .cmd-btn.gitpush:hover { background: rgba(167,139,250,0.12); border-color: #a78bfa; }
+.cmd-btn.gitbranch { border-color: rgba(148,163,184,0.4); color: #cbd5e1; }
+.cmd-btn.gitbranch:hover { background: rgba(148,163,184,0.12); border-color: #cbd5e1; }
 .cmd-btn.gitstash { border-color: rgba(248,113,113,0.4); color: #f87171; }
 .cmd-btn.gitstash:hover { background: rgba(248,113,113,0.12); border-color: #f87171; }
 /* Onder wiens naam commit je. Staat naast de branch-indicator, want dat is waar
