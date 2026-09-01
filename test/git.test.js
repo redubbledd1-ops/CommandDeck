@@ -724,6 +724,27 @@ t('zonder profiel valt er niets te activeren',
 t('een profiel zonder GitHub-account zet alleen de naam',
   G.accountActiveerStappen({ ...prof, ghGebruiker: '' }, true).map(x => x.soort).join() === 'identiteit')
 
+// ── de koppelknop in het project lost het zelf op ────────────────────────────
+// Hij keek alleen of gh geïnstalleerd was. Wie hem niet had, of hem wel had
+// maar nooit inlogde, kreeg meteen de omweg via de browser — terwijl de app
+// het allebei kan oplossen. En wie helemaal geen GitHub-account had, hoorde
+// nergens dat dát de eerste stap is.
+const rendererBron2 = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer.js'), 'utf8')
+const zorgBlok = (rendererBron2.match(/async function zorgVoorGithub\(\)[\s\S]*?\n\}/) || [''])[0]
+
+t('de koppelknop vraagt eerst of GitHub klaarstaat',
+  /const ghKlaar = await zorgVoorGithub\(\)/.test(rendererBron2))
+t('en stopt netjes als je afbreekt', /ghKlaar === 'gestopt'/.test(rendererBron2))
+
+t('er is een uitweg voor ontbrekende gh', /installeerGh\(\)/.test(zorgBlok))
+t('een uitweg voor niet ingelogd', /githubInloggen\(\{ stil: true \}\)/.test(zorgBlok))
+t('en een uitweg voor wie nog helemaal geen GitHub heeft',
+  /github\.com\/signup/.test(zorgBlok))
+t('zelf doen blijft mogelijk — dat is de oude weg met de url',
+  /keuze === 'zelf'/.test(zorgBlok))
+t('ingelogd? dan meteen door, zonder venster',
+  /if \(st\.ingelogd\) return true/.test(zorgBlok))
+
 // ── inloggen is interactief; de app voert die dialoog ────────────────────────
 // `gh auth login --web` toont een code en wacht op Enter. In de gewone terminal
 // van de app kun je niets typen en de uitvoer niet selecteren — daar liep het
@@ -1194,6 +1215,200 @@ t('gebruiker/repo wordt een url',
   G.normaliseerRepoUrl('redubbledd1-ops/Resume') === 'https://github.com/redubbledd1-ops/Resume.git')
 t('onzin wordt geweigerd', G.normaliseerRepoUrl('zomaar wat') === null)
 t('leeg wordt geweigerd', G.normaliseerRepoUrl('') === null)
+
+
+// ── Een koppeling die geen koppeling is ──────────────────────────────────────
+// De aanleiding: een project met een remote in .git/config naar een repo die
+// nooit is aangemaakt. De app zei "gekoppeld", haalde de koppelknop weg en zette
+// er push/pull/fetch voor in de plaats — knoppen die alleen een foutmelding
+// konden geven. Een adres is geen bewijs; deze tests bewaken dat verschil.
+
+const repoMetRemote = (extra = {}) => G.maakStaat(Object.assign(
+  { beschikbaar: true, isRepo: true, remotes: ['origin'], branch: 'main', commits: true }, extra))
+
+t('remote maar nog niet nagekeken heet onbekend',
+  repoMetRemote().koppeling === 'onbekend')
+t('en telt dan gewoon als gekoppeld',
+  repoMetRemote().gekoppeld === true)
+t('geen remote blijft geen',
+  G.maakStaat({ isRepo: true, remotes: [] }).koppeling === 'geen')
+t('nagekeken en goed is ok',
+  repoMetRemote({ remoteOk: true }).koppeling === 'ok')
+t('nagekeken en fout is stuk',
+  repoMetRemote({ remoteOk: false, remoteReden: 'weg' }).koppeling === 'stuk')
+
+t('een kapotte koppeling telt niet als gekoppeld',
+  repoMetRemote({ remoteOk: false }).gekoppeld === false)
+t('maar er stáát wel een remote — dat is iets anders',
+  repoMetRemote({ remoteOk: false }).heeftRemote === true)
+t('zonder repo staat er ook geen remote',
+  G.maakStaat({ isRepo: false, remotes: ['origin'] }).heeftRemote === false)
+
+// Dit is de knoppenrij waar de gebruiker over viel.
+{
+  const stuk = repoMetRemote({ remoteOk: false, remoteReden: 'weg', vuil: 0 })
+  const ids = G.zichtbareGitIds(stuk)
+  t('bij een kapotte koppeling komt de koppelknop terug', ids.includes('git-koppelen'))
+  t('en push staat er niet meer', !ids.includes('git-push'))
+  t('pull ook niet', !ids.includes('git-pull'))
+  t('fetch ook niet', !ids.includes('git-fetch'))
+  t('de lokale knoppen blijven wel', ids.includes('git-commit') && ids.includes('git-log'))
+}
+{
+  const ids = G.zichtbareGitIds(repoMetRemote({ remoteOk: true }))
+  t('een werkende koppeling laat de koppelknop weg', !ids.includes('git-koppelen'))
+  t('en zet push erbij', ids.includes('git-push'))
+}
+{
+  // Zonder deze regel is elke gebruiker zonder internet zijn push-knop kwijt.
+  const ids = G.zichtbareGitIds(repoMetRemote())
+  t('ongecontroleerd houdt push gewoon zichtbaar', ids.includes('git-push'))
+  t('en laat de koppelknop weg', !ids.includes('git-koppelen'))
+}
+
+// ── De uitslag lezen ─────────────────────────────────────────────────────────
+t('geen verbinding is netwerk', G.remoteFoutReden('fatal: unable to access: Could not resolve host: github.com') === 'netwerk')
+t('timeout is netwerk', G.remoteFoutReden('Failed to connect: Operation timed out') === 'netwerk')
+t('repo niet gevonden is weg', G.remoteFoutReden('remote: Repository not found.') === 'weg')
+t('geen inlog is inloggen', G.remoteFoutReden('fatal: could not read Username for https://github.com') === 'inloggen')
+t('geweigerde inlog is inloggen', G.remoteFoutReden('remote: Invalid username or password') === 'inloggen')
+t('iets anders is onbekend', G.remoteFoutReden('fatal: iets raars') === 'onbekend')
+
+t('exit 0 is goed', G.remoteUitslag(0, '').ok === true)
+// Het belangrijkste van de hele controle: zonder internet mag hij niets
+// concluderen. Anders halen we knoppen weg omdat de wifi even wegviel.
+t('geen netwerk is geen oordeel', G.remoteUitslag(128, 'Could not resolve host: github.com').ok === null)
+t('onbekende fout is ook geen oordeel', G.remoteUitslag(1, 'iets raars').ok === null)
+t('repo weg is wel een oordeel', G.remoteUitslag(128, 'Repository not found').ok === false)
+t('geen toegang is wel een oordeel', G.remoteUitslag(128, 'could not read Username').ok === false)
+t('een netwerkfout laat de staat op onbekend',
+  repoMetRemote({ remoteOk: G.remoteUitslag(128, 'Could not resolve host').ok }).koppeling === 'onbekend')
+
+t('ls-remote vraagt niet om tags', G.lsRemoteArgs('origin').join(' ') === 'ls-remote -h -- origin')
+t('en gebruikt de meegegeven remote', G.lsRemoteArgs('github').includes('github'))
+
+// ── Welke remote is "de" remote ──────────────────────────────────────────────
+// Het echte project had er twee: origin en github, met de branch die github
+// volgde. Blind naar origin pushen zet je werk in de verkeerde repo.
+t('de remote van de upstream wint van origin',
+  G.maakStaat({ isRepo: true, remotes: ['origin', 'github'], upstream: 'github/master' }).remote === 'github')
+t('zonder upstream is origin de keuze',
+  G.maakStaat({ isRepo: true, remotes: ['github', 'origin'] }).remote === 'origin')
+t('en anders gewoon de eerste',
+  G.maakStaat({ isRepo: true, remotes: ['github'] }).remote === 'github')
+t('een upstream die niet in de lijst staat telt niet mee',
+  G.maakStaat({ isRepo: true, remotes: ['origin'], upstream: 'weg/main' }).remote === 'origin')
+
+// ── Herstellen ───────────────────────────────────────────────────────────────
+t('kapot gaat vóór alle andere stappen',
+  G.koppelStap(repoMetRemote({ remoteOk: false }), true) === G.KOPPEL_HERSTEL)
+t('ook zonder gh', G.koppelStap(repoMetRemote({ remoteOk: false }), false) === G.KOPPEL_HERSTEL)
+t('een werkende koppeling is gewoon klaar',
+  G.koppelStap(repoMetRemote({ remoteOk: true }), true) === 'gekoppeld')
+
+{
+  const stuk = repoMetRemote({ remotes: ['origin', 'github'], upstream: 'github/main',
+                               remoteOk: false, remoteReden: 'weg', remoteUrl: 'https://github.com/a/b.git' })
+  // Zonder het weghalen van de oude remote loopt gh repo create stuk op
+  // "remote origin already exists" — en dan is er niets opgelost.
+  const nieuw = G.herstelCommando(stuk, { naam: 'DayKit' })
+  t('opnieuw aanmaken haalt eerst het dode adres weg', nieuw.startsWith('git remote remove github &&'))
+  t('en maakt hem privé aan', nieuw.includes('gh repo create DayKit --private --source=. --push'))
+  t('publiek kan ook', G.herstelCommando(stuk, { naam: 'DayKit', prive: false }).includes('--public'))
+  t('een rare naam wordt opgeschoond', G.herstelCommando(stuk, { naam: 'Day Kit!' }).includes('gh repo create Day-Kit '))
+
+  const ander = G.herstelCommando(stuk, { url: 'redubbledd1-ops/DayKit' })
+  t('een ander adres wordt gezet, niet toegevoegd', ander.startsWith('git remote set-url github https://github.com/redubbledd1-ops/DayKit.git'))
+  t('en meteen gepusht met upstream', ander.includes('&& git push -u github main'))
+  t('een onzin-adres levert geen commando', G.herstelCommando(stuk, { url: 'zomaar wat' }) === null)
+  t('zonder naam en zonder adres ook niet', G.herstelCommando(stuk, {}) === null)
+
+  t('ontkoppelen haalt de juiste remote weg', G.ontkoppelCommando(stuk) === 'git remote remove github')
+  t('zonder remote valt er niets te ontkoppelen', G.ontkoppelCommando(G.maakStaat({ isRepo: true })) === null)
+
+  const pro = G.koppelingProbleem(stuk)
+  t('het probleem noemt de remote', pro.remote === 'github')
+  t('en het adres', pro.url === 'https://github.com/a/b.git')
+  t('en wijst naar de juiste tekst', pro.sleutel === 'git.koppel.stuk.weg')
+  t('bij geen toegang naar de andere tekst',
+    G.koppelingProbleem(repoMetRemote({ remoteOk: false, remoteReden: 'inloggen' })).sleutel === 'git.koppel.stuk.inloggen')
+  t('een gezonde koppeling heeft geen probleem', G.koppelingProbleem(repoMetRemote({ remoteOk: true })) === null)
+}
+
+// De reden hoort alleen bij een kapotte koppeling. Blijft hij hangen bij een
+// herstelde, dan blijft de app een probleem melden dat er niet meer is.
+t('de reden verdwijnt zodra het weer werkt',
+  repoMetRemote({ remoteOk: true, remoteReden: 'weg' }).remoteReden === '')
+
+// ── Wat de rest van de app ermee doet ────────────────────────────────────────
+t('de indicator meldt een kapotte koppeling',
+  G.indicator(repoMetRemote({ remoteOk: false })).koppelingStuk === true)
+t('en zwijgt als het goed is',
+  G.indicator(repoMetRemote({ remoteOk: true })).koppelingStuk === false)
+// Een dood adres fetchen levert alleen maar foutmeldingen op.
+t('een kapotte koppeling wordt niet gefetcht',
+  G.magFetchen(repoMetRemote({ remoteOk: false }), 0) === false)
+t('een werkende wel', G.magFetchen(repoMetRemote({ remoteOk: true }), 0) === true)
+// Werk dat alleen hier staat blijft onveilig, ook als de koppeling stuk is —
+// juist dan, want er is geen enkele plek waar het nog staat.
+t('niet-gepusht werk blijft onveilig bij een kapotte koppeling',
+  G.indicator(repoMetRemote({ remoteOk: false, ahead: 3 })).onveilig === true)
+t('pushen kan niet zonder werkende koppeling',
+  G.pushCommando(repoMetRemote({ remoteOk: false })) === null)
+
+// ── De teksten bestaan ───────────────────────────────────────────────────────
+for (const sleutel of ['git.ind.broken', 'git.ind.brokenTitle', 'git.repair.title',
+                       'git.repair.new', 'git.repair.url', 'git.repair.drop',
+                       'git.repair.dropTitle', 'git.repair.dropText',
+                       'git.koppel.stuk.weg', 'git.koppel.stuk.inloggen']) {
+  t('tekst ' + sleutel + ' staat in nl en en', !!nl[sleutel] && !!en[sleutel])
+}
+t('de kapotte-koppeling-indicator heeft opmaak in style.css',
+  fs.readFileSync(path.join(APP, 'style.css'), 'utf8').includes('.git-ind-stuk'))
+
+// ── De bedrading ─────────────────────────────────────────────────────────────
+// Deze controle kost netwerk. Staat hij in git:info, dan draait hij mee met de
+// poll-lus en doet de app om de dertig seconden een netwerkaanroep per project.
+{
+  const main = fs.readFileSync(path.join(APP, 'main.js'), 'utf8')
+  t('main heeft een aparte controle-aanroep', main.includes("ipcMain.handle('git:remoteCheck'"))
+  t('en een manier om het oordeel te vergeten', main.includes("ipcMain.handle('git:remoteVergeet'"))
+  t('de controle vraagt nooit om een wachtwoord', main.includes('GIT_TERMINAL_PROMPT'))
+  t('en heeft een tijdslimiet', /timeout:\s*15000/.test(main))
+  // Alleen de body van de handler telt; onze eigen uitleg erboven noemt hem wel.
+  const infoBody = main.slice(main.indexOf("ipcMain.handle('git:info'"))
+    .slice(0, main.slice(main.indexOf("ipcMain.handle('git:info'")).indexOf('\n})'))
+  t('git:info bestaat nog', infoBody.length > 200)
+  t('git:info doet zelf geen netwerkaanroep', !infoBody.includes('controleerRemote'))
+  t('git:info leest wel wat er al bekend is', infoBody.includes('remoteUitCache'))
+
+  const pre = fs.readFileSync(path.join(APP, 'preload.js'), 'utf8')
+  t('de renderer kan erbij', pre.includes('gitRemoteCheck') && pre.includes('gitRemoteVergeet'))
+
+  const ren = fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8')
+  t('de renderer controleert koppelingen', ren.includes('async function controleerKoppeling'))
+  t('en doet dat voor alle projecten na het laden', ren.includes('controleerAlleKoppelingen()'))
+  t('koppelen heeft een eigen herstelweg', ren.includes('async function herstelKoppeling'))
+  // Wie alleen het adres wil verbeteren, hoeft daar geen gh voor te installeren.
+  // Wie alleen het adres verbetert of de koppeling weghaalt, hoeft daar geen
+  // gh voor te installeren: die wegen zijn klaar vóór gh ter sprake komt.
+  {
+    const body = ren.slice(ren.indexOf('async function herstelKoppeling'))
+    const gh = body.indexOf('zorgVoorGithub')
+    t('herstellen vraagt uiteindelijk wel om gh', gh > 0)
+    for (const weg of ["keuze === 'los'", "keuze === 'url'"]) {
+      const i = body.indexOf(weg)
+      t('herstelweg ' + weg + ' komt vóór gh', i > 0 && i < gh)
+      t('en is daarvoor al klaar', body.slice(i, gh).includes('return'))
+    }
+  }
+  t('herstellen biedt aan het dode adres weg te halen', ren.includes('GitTools.ontkoppelCommando'))
+  t('en biedt een nieuwe repo of een ander adres', ren.includes('GitTools.herstelCommando'))
+  t('eerste opzet regelt gh zelf', ren.includes('async function zorgVoorGithub'))
+  t('na een mislukte push wordt opnieuw gekeken',
+    /git-push[\s\S]{0,200}controleerKoppeling/.test(ren))
+  t('bij het wisselen van account vervalt wat we wisten', ren.includes('gitRemoteGedaan.clear()'))
+}
 
 console.log(ok ? '\nALLE GIT-TESTS OK' : '\nER ZIJN GIT-TESTS GEZAKT')
 process.exit(ok ? 0 : 1)

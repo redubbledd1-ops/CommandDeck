@@ -1062,5 +1062,22 @@
   "git.inlog.codeTitel": "Enter this code on GitHub",
   "git.inlog.codeTekst": "Click open: the code goes to your clipboard and github.com/login/device opens. Paste it there and confirm. This window can stay open.",
   "git.inlog.codeOpen": "copy and open",
-  "git.inlog.codeSluit": "close"
+  "git.inlog.codeSluit": "close",
+  "git.zorg.titel": "GitHub account needed",
+  "git.zorg.tekstGeenGh": "To link this project to GitHub the app has to be able to log in. The GitHub CLI is not on this pc yet; I can install it and then let you log in through your browser.",
+  "git.zorg.tekstNietIngelogd": "To link this project to GitHub you have to be logged in. I will open your browser to do that — after that the app creates the repository itself.",
+  "git.zorg.installerenEnInloggen": "install and log in",
+  "git.zorg.geenAccount": "I do not have GitHub yet",
+  "git.zorg.zelfDoen": "create a repo myself",
+  "git.zorg.naAanmelden": "Your browser is open on the sign-up page. Create your account there and come back — press link github once more and the rest happens on its own.",
+  "git.ind.broken": "link broken",
+  "git.ind.brokenTitle": "there is an address, but it does not answer — click link to github to repair it",
+  "git.koppel.stuk.inloggen": "This project points at an address git cannot reach. The repository may no longer exist, or it belongs to an account you are not signed in to.",
+  "git.koppel.stuk.weg": "This project points at an address that does not exist. The repository was probably never created, or it was renamed or deleted.",
+  "git.repair.title": "Link is not working",
+  "git.repair.new": "Create a new repository",
+  "git.repair.url": "Enter a different address",
+  "git.repair.drop": "Remove the link",
+  "git.repair.dropTitle": "Remove the link?",
+  "git.repair.dropText": "The address '{remote}' will be removed. Your commits and history stay put — only the pointer to GitHub goes away, and you can link again afterwards."
 }

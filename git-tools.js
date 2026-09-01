@@ -144,11 +144,65 @@
     return velden.slice(vanaf).join(' ').split('\t')[0].trim()
   }
 
+  // ── Is de koppeling ook echt een koppeling? ─────────────────────────────────
+  // Een remote in .git/config is een adres, geen bewijs. De repo kan nooit
+  // aangemaakt zijn, hernoemd zijn, van een ander account zijn, of weggegooid.
+  // Dan staat er wel een remote, maar loopt elke push stuk. Vandaar vier
+  // toestanden in plaats van een ja/nee:
+  //
+  //   'geen'      geen repo, of een repo zonder remote      -> koppelknop
+  //   'onbekend'  er is een remote, nog niet nagekeken      -> gewoon gebruiken
+  //   'ok'        nagekeken en het adres antwoordt          -> gewoon gebruiken
+  //   'stuk'      nagekeken en het adres antwoordt niet     -> koppelknop terug
+  //
+  // 'onbekend' telt bewust als bruikbaar. Het alternatief zou betekenen dat je
+  // zonder internet je push-knop kwijt bent, en dat is precies het moment
+  // waarop je wél wilt kunnen committen en straks pushen. Alleen een aantoonbaar
+  // kapot adres haalt de knoppen weg.
+  const KOPPELING_GEEN     = 'geen'
+  const KOPPELING_ONBEKEND = 'onbekend'
+  const KOPPELING_OK       = 'ok'
+  const KOPPELING_STUK     = 'stuk'
+
+  // Waarom liep de controle stuk? Alleen de eerste twee zijn een kapotte
+  // koppeling; de rest zegt iets over deze pc op dit moment en mag de knoppen
+  // niet weghalen.
+  //
+  //   'inloggen'  git mag er niet bij (geen of verkeerde inlog)
+  //   'weg'       het adres bestaat niet (meer)
+  //   'netwerk'   geen verbinding — zegt niets over de koppeling
+  //   'onbekend'  iets anders; we gokken niet
+  function remoteFoutReden(tekst) {
+    const t = String(tekst || '').toLowerCase()
+    if (/could not resolve host|couldn't resolve host|timed out|connection refused|network is unreachable|temporary failure in name resolution|operation timed out/.test(t)) return 'netwerk'
+    if (/not found|does not exist|repository .* not found|remote: repository not found|404/.test(t)) return 'weg'
+    if (/could not read username|could not read password|authentication failed|invalid username or password|terminal prompts disabled|permission denied|access denied|403|401|no such device or address/.test(t)) return 'inloggen'
+    return 'onbekend'
+  }
+
+  // De uitslag van één controle omzetten naar iets waar maakStaat mee verder
+  // kan. `ok: null` betekent: we weten het nog steeds niet. Dat is geen fout,
+  // dat is eerlijk — en het laat de knoppen staan.
+  function remoteUitslag(code, tekst) {
+    if (code === 0) return { ok: true, reden: '' }
+    const reden = remoteFoutReden(tekst)
+    if (reden === 'netwerk' || reden === 'onbekend') return { ok: null, reden }
+    return { ok: false, reden }
+  }
+
+  // Het commando dat de controle doet. --exit-code maakt een lege repo ook een
+  // fout op zich, dus die vragen we niet; we willen alleen weten of het adres
+  // antwoordt. -h houdt het antwoord klein bij een repo met veel tags.
+  function lsRemoteArgs(remote) {
+    return ['ls-remote', '-h', '--', String(remote || 'origin')]
+  }
+
   // Alles bij elkaar tot één toestand waar de rest van de app op kan sturen.
   //
   //   beschikbaar  is git zelf te vinden op deze pc
   //   isRepo       staat deze map onder versiebeheer
-  //   gekoppeld    hangt er een remote aan (dan pas is pull/fetch zinvol)
+  //   gekoppeld    hangt er een remote aan die ook echt werkt
+  //   koppeling    geen | onbekend | ok | stuk (zie hierboven)
   //   branch       null bij detached HEAD of bij een repo zonder commits
   //   commits      false bij een verse `git init` zonder enkele commit
   //   stashes      hoeveel er opzij staat; 0 laat de terughaalknop weg
@@ -159,14 +213,41 @@
                        commits = true, upstream = null, ahead = 0, behind = 0,
                        vuil = 0, conflicten = 0, nieuw = 0, stashes = 0,
                        bestanden = [], nieuweBestanden = [],
+                       remoteOk = null, remoteReden = '', remoteUrl = '',
                        naam = '', email = '' } = {}) {
     const lijst = Array.isArray(remotes) ? remotes.filter(Boolean) : parseRemotes(remotes)
+    const heeftRemote = !!isRepo && lijst.length > 0
+
+    // Welke remote is "de" remote? Niet blind origin: een repo kan er meer
+    // hebben, en dan is degene waar de branch naartoe wijst de enige juiste.
+    // Pushen naar origin terwijl je master origin niet volgt maar github, is
+    // hoe werk in de verkeerde repo belandt.
+    const uitUpstream = String(upstream || '').split('/')[0]
+    const remote = heeftRemote
+      ? (lijst.includes(uitUpstream) ? uitUpstream
+         : (lijst.includes('origin') ? 'origin' : lijst[0]))
+      : null
+
+    const koppeling = !heeftRemote ? KOPPELING_GEEN
+      : remoteOk === true  ? KOPPELING_OK
+      : remoteOk === false ? KOPPELING_STUK
+      : KOPPELING_ONBEKEND
+
     return {
       beschikbaar: !!beschikbaar,
       isRepo: !!isRepo,
-      gekoppeld: !!isRepo && lijst.length > 0,
+      // Alleen een aantoonbaar kapotte koppeling telt niet mee. Ongecontroleerd
+      // blijft bruikbaar — zie de uitleg bij KOPPELING_ONBEKEND.
+      gekoppeld: koppeling === KOPPELING_OK || koppeling === KOPPELING_ONBEKEND,
+      koppeling,
+      koppelingStuk: koppeling === KOPPELING_STUK,
+      // Er stáát wel een adres, ook als het niet werkt. Dat verschil heeft de
+      // herstelknop nodig: een dood adres moet weg vóór je een nieuw aanmaakt.
+      heeftRemote,
+      remoteReden: koppeling === KOPPELING_STUK ? String(remoteReden || '') : '',
+      remoteUrl: String(remoteUrl || ''),
       remotes: lijst,
-      remote: lijst.includes('origin') ? 'origin' : (lijst[0] || null),
+      remote,
       branch: branch || null,
       commits: !!commits,
       upstream: upstream || null,
@@ -241,6 +322,10 @@
       branch: staat.branch || 'HEAD',
       losgekoppeld: !staat.branch,          // detached HEAD
       gekoppeld: !!staat.gekoppeld,
+      // Er staat een adres, maar het antwoordt niet. Dat moet je in de kop
+      // kunnen zien: anders lijkt het project keurig bij te zijn terwijl het
+      // al weken nergens naartoe gaat.
+      koppelingStuk: !!staat.koppelingStuk,
       volgt: !!staat.upstream,              // wijst deze branch ergens naartoe
       ahead, behind, vuil,
       // Niets te doen: niets gewijzigd, niets vooruit, niets achter.
@@ -606,14 +691,61 @@
   const KOPPEL_COMMIT    = 'commit'    // repo zonder commits: eerst iets vastleggen
   const KOPPEL_GH        = 'gh'        // gh staat klaar: repo aanmaken en pushen
   const KOPPEL_URL       = 'url'       // geen gh: url vragen en handmatig koppelen
+  const KOPPEL_HERSTEL   = 'herstel'   // er staat een adres, maar het werkt niet
   const KOPPEL_AL_GEDAAN = 'gekoppeld' // niets te doen
 
   function koppelStap(staat, ghAanwezig) {
     if (!staat || !staat.beschikbaar) return null
+    // Kapot gaat vóór klaar: er staat wel een remote, dus KOPPEL_GH zou hier
+    // stukloopen op "remote origin already exists". Eerst opruimen.
+    if (staat.koppelingStuk) return KOPPEL_HERSTEL
     if (staat.gekoppeld) return KOPPEL_AL_GEDAAN
     if (!staat.isRepo) return KOPPEL_INIT
     if (!staat.commits) return KOPPEL_COMMIT
     return ghAanwezig ? KOPPEL_GH : KOPPEL_URL
+  }
+
+  // Wat er mis is, in woorden die iets voorstellen. De sleutel wijst naar de
+  // vertaling; de app plakt er zelf het adres bij.
+  function koppelingProbleem(staat) {
+    if (!staat || !staat.koppelingStuk) return null
+    const reden = staat.remoteReden || 'onbekend'
+    return {
+      reden,
+      sleutel: 'git.koppel.stuk.' + (reden === 'weg' ? 'weg' : 'inloggen'),
+      remote: staat.remote || 'origin',
+      url: staat.remoteUrl || '',
+    }
+  }
+
+  // Herstellen kan op twee manieren, en welke het wordt bepaalt de gebruiker,
+  // niet wij: het adres verbeteren (de repo bestaat, hij heette anders) of
+  // opnieuw beginnen (de repo is er nooit gekomen). Allebei halen we eerst het
+  // oude adres weg — een remote die blijft staan is precies hoe deze situatie
+  // ontstond.
+  function herstelCommando(staat, opties = {}) {
+    const { naam = '', url = '', prive = true } = opties
+    const remote = (staat && staat.remote) || 'origin'
+    const branch = (staat && staat.branch) || 'main'
+    if (url) {
+      const schoon = normaliseerRepoUrl(url)
+      if (!schoon) return null
+      return `git remote set-url ${remote} ${schoon} && git push -u ${remote} ${branch}`
+    }
+    if (naam) {
+      const repo = veiligeRepoNaam(naam)
+      if (!repo) return null
+      return `git remote remove ${remote} && gh repo create ${repo} ${prive ? '--private' : '--public'} --source=. --push`
+    }
+    return null
+  }
+
+  // Losmaken zonder iets nieuws: het adres eraf, de geschiedenis blijft.
+  // Daarna staat de gewone koppelknop er weer en begin je schoon opnieuw.
+  function ontkoppelCommando(staat) {
+    const remote = (staat && staat.remote) || null
+    if (!remote) return null
+    return `git remote remove ${remote}`
   }
 
   // De commandoregel die bij een stap hoort. Eén regel, zodat hij in de
@@ -1151,6 +1283,9 @@
     GIT_CMD_DEFS, GIT_CMD_MAP, GIT_IDS, isGitId, isSchrijfKnop, STANDAARD_UIT_IDS,
     parseRemotes, parseBranch, parseStatusV2, maakStaat, zichtbareGitIds,
     koppelStap, koppelCommando, veiligeRepoNaam, normaliseerRepoUrl,
+    KOPPELING_GEEN, KOPPELING_ONBEKEND, KOPPELING_OK, KOPPELING_STUK,
+    remoteFoutReden, remoteUitslag, lsRemoteArgs, koppelingProbleem,
+    herstelCommando, ontkoppelCommando, KOPPEL_HERSTEL,
     veiligCommitBericht, automatischCommitBericht, commitCommando, pushCommando, stashCommando, blokkade,
     parseStashAantal, parseStashLijst, parseStashOnderwerp, stashRefGeldig,
     stashPopCommando, stashDropCommando, botsendeBestanden,

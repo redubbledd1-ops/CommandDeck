@@ -1098,6 +1098,90 @@ function heeftGit() {
   return gitAanwezig
 }
 
+// ── Werkt de koppeling ook echt? ─────────────────────────────────────────────
+// Een remote in .git/config is een adres, geen bewijs. Of dat adres bestaat en
+// of je erbij mag, weet alleen de andere kant — dus dat moet over het netwerk.
+// Daarom staat het niet in git:info: die draait elke paar seconden, en een
+// netwerkaanroep per project per keer is niet uit te leggen. git:info leest
+// alleen wat hier al een keer is uitgezocht.
+//
+// De uitkomst blijft een half uur staan. Korter en je zit alsnog te wachten na
+// elke herstart; langer en een repo die je net hebt aangemaakt blijft "stuk".
+// Na een geslaagd koppelen of herstellen gooit git:remoteVergeet hem meteen weg.
+const REMOTE_TTL = 30 * 60 * 1000
+const remoteCache = new Map()   // sleutel: map + url  ->  { ok, reden, tijd }
+
+function remoteSleutel(dir, url) { return String(dir) + '\u0000' + String(url || '') }
+
+function remoteUitCache(dir, url) {
+  if (!url) return null
+  const hit = remoteCache.get(remoteSleutel(dir, url))
+  if (!hit) return null
+  if (Date.now() - hit.tijd > REMOTE_TTL) { remoteCache.delete(remoteSleutel(dir, url)); return null }
+  return hit
+}
+
+// De controle zelf. Twee dingen zijn hier belangrijker dan de uitslag:
+//
+//  1. Hij mag nóóit om een wachtwoord vragen. Zonder GIT_TERMINAL_PROMPT=0 en
+//     GCM_INTERACTIVE=never opent Windows een inlogvenster of blijft git
+//     hangen op een prompt die niemand ziet — en dan hangt de app.
+//  2. Hij mag niet lang duren. 15 seconden is ruim voor een handshake en kort
+//     genoeg om niet als vastloper te voelen.
+function controleerRemote(dir, remote) {
+  const env = childEnv({ GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' })
+  // Leegmaken is niet genoeg: een lege GIT_ASKPASS laat git alsnog iets
+  // proberen te starten. Ze moeten wég, anders opent er een inlogvenster dat
+  // niemand verwacht bij een achtergrondcontrole.
+  delete env.GIT_ASKPASS
+  delete env.SSH_ASKPASS
+  try {
+    execFileSync('git', GitTools.lsRemoteArgs(remote), {
+      cwd: dir, encoding: 'utf8', timeout: 15000, windowsHide: true, env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    return GitTools.remoteUitslag(0, '')
+  } catch (e) {
+    if (e && e.code === 'ENOENT') return { ok: null, reden: 'onbekend' }
+    // Een timeout zegt niets over de koppeling — dat is deze pc op dit moment.
+    if (e && (e.signal === 'SIGTERM' || e.killed)) return { ok: null, reden: 'netwerk' }
+    const tekst = String((e && e.stderr) || '') + ' ' + String((e && e.message) || '')
+    return GitTools.remoteUitslag(e && typeof e.status === 'number' ? e.status : 1, tekst)
+  }
+}
+
+// De renderer vraagt dit los aan, per project, op een rustig moment — niet in
+// de poll-lus. Antwoord is dezelfde vorm als wat git:info meestuurt.
+ipcMain.handle('git:remoteCheck', async (_, dir) => {
+  if (!padToegestaan(dir)) return { ok: null, reden: 'onbekend' }
+  if (!dir || !fs.existsSync(dir) || !heeftGit()) return { ok: null, reden: 'onbekend' }
+
+  const remotes = GitTools.parseRemotes(gitUit(dir, ['remote']))
+  if (!remotes.length) return { ok: null, reden: '', geen: true }
+
+  const st = GitTools.parseStatusV2(gitUit(dir, ['status', '--porcelain=v2', '--branch']))
+  const staat = GitTools.maakStaat({ beschikbaar: true, isRepo: true, remotes, upstream: st.upstream })
+  const remote = staat.remote
+  const url = String(gitUit(dir, ['remote', 'get-url', remote]) || '').trim()
+
+  const bekend = remoteUitCache(dir, url)
+  if (bekend) return { ok: bekend.ok, reden: bekend.reden, remote, url, uitCache: true }
+
+  const uitslag = controleerRemote(dir, remote)
+  remoteCache.set(remoteSleutel(dir, url), { ok: uitslag.ok, reden: uitslag.reden, tijd: Date.now() })
+  return { ok: uitslag.ok, reden: uitslag.reden, remote, url }
+})
+
+// Na koppelen, herstellen of een mislukte push wil je niet nog een half uur
+// naar het oude oordeel kijken.
+ipcMain.handle('git:remoteVergeet', (_, dir) => {
+  const voor = String(dir || '') + '\u0000'
+  for (const sleutel of [...remoteCache.keys()]) {
+    if (!dir || sleutel.startsWith(voor)) remoteCache.delete(sleutel)
+  }
+  return true
+})
+
 // ── Wat mag dit account zien? ────────────────────────────────────────────────
 // Niet tegen meelezen — dat kan de app niet, alles staat in de map van de
 // Windows-gebruiker. Dit gaat over iets anders en dat kán wel sluitend: er mag
@@ -1148,12 +1232,24 @@ ipcMain.handle('git:info', (_, dir) => {
   // je vóór het typen van een bericht weten en niet erna.
   const ident = GitTools.parseIdentiteit(gitUit(dir, ['config', '--get-regexp', '^user\\.(name|email)$']))
 
+  // Werkt dat adres ook? Dat weet alleen git:remoteCheck, en die kost netwerk.
+  // Hier lezen we alleen wat daar al uit kwam. Nog niets gecontroleerd betekent
+  // remoteOk: null, en dan blijft de koppeling gewoon bruikbaar.
+  let remoteOk = null, remoteReden = '', remoteUrl = ''
+  if (remotes.length) {
+    const kies = GitTools.maakStaat({ beschikbaar: true, isRepo: true, remotes, upstream: st.upstream })
+    remoteUrl = String(gitUit(dir, ['remote', 'get-url', kies.remote]) || '').trim()
+    const bekend = remoteUitCache(dir, remoteUrl)
+    if (bekend) { remoteOk = bekend.ok; remoteReden = bekend.reden }
+  }
+
   return GitTools.maakStaat({
     beschikbaar: true, isRepo: true, remotes,
     branch: st.branch, commits: st.commits, upstream: st.upstream,
     nieuw: st.nieuw, nieuweBestanden: st.nieuweBestanden,
     ahead: st.ahead, behind: st.behind, vuil: st.vuil,
     conflicten: st.conflicten, stashes, bestanden: st.bestanden,
+    remoteOk, remoteReden, remoteUrl,
     naam: ident.naam, email: ident.email,
   })
 })

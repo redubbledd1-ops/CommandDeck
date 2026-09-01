@@ -425,6 +425,9 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
 .git-ind-behind { color: #60a5fa; }
 .git-ind-dirty  { color: var(--amber); }
 .git-ind-los    { color: var(--muted); font-style: italic; }
+/* De remote bestaat wel in .git/config maar antwoordt niet. Rood, want dit is
+   geen ontbrekende koppeling maar een kapotte: er stáát iets, en het werkt niet. */
+.git-ind-stuk   { color: #f87171; font-weight: 600; }
 /* Een andere locatie van dit project heeft ook werk staan. */
 .git-ind-anders { color: var(--amber); opacity: 0.85; }
 

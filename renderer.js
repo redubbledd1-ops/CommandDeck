@@ -511,6 +511,59 @@ async function ververesAlleGitStaten(forceer = false) {
     for (const loc of projectLocaties(p)) await ververesGitPad(loc.pad, forceer)
   }
   meldGitProjectenAanMain()
+  // Niet awaiten: het opstarten mag niet wachten op een netwerkaanroep per
+  // project. Wat eruit komt, komt vanzelf binnen en tekent dan opnieuw.
+  controleerAlleKoppelingen()
+}
+
+// ── Klopt de koppeling nog? ─────────────────────────────────────────────────
+// git:info kijkt alleen in .git/config. Daar kan een adres staan van een repo
+// die nooit is aangemaakt, hernoemd is, of van een account waar je niet meer
+// bij kunt. Dan lijkt het project gekoppeld, valt de koppelknop weg, en staan
+// er push- en pull-knoppen die alleen maar een foutmelding geven.
+//
+// Alleen de andere kant weet of het adres bestaat, dus dit kost netwerk. Het
+// hoort daarom niet in de poll-lus: één keer per project nadat alles geladen
+// is, en verder alleen als er iets misgaat of iets verandert. Main onthoudt de
+// uitslag een half uur, dus een tweede ronde kost meestal niets.
+const gitRemoteGedaan = new Set()
+let gitControleBezig = false
+
+async function controleerKoppeling(pad, opnieuw = false) {
+  if (!pad || !window.api || !window.api.gitRemoteCheck) return null
+  if (opnieuw) {
+    gitRemoteGedaan.delete(pad)
+    try { await window.api.gitRemoteVergeet(pad) } catch {}
+  }
+  gitRemoteGedaan.add(pad)
+  try {
+    const uit = await window.api.gitRemoteCheck(pad)
+    // De uitslag zit nu in de cache van main; git:info pikt hem daar op.
+    await ververesGitPad(pad, true)
+    return uit
+  } catch {
+    return null
+  }
+}
+
+// Eén voor één, en alleen waar er iets te controleren valt. Tien projecten
+// tegelijk zijn tien netwerkaanroepen, en dat is precies het moment waarop de
+// app traag aanvoelt bij het opstarten.
+async function controleerAlleKoppelingen() {
+  if (gitControleBezig) return
+  gitControleBezig = true
+  try {
+    for (const p of projects) {
+      for (const loc of projectLocaties(p)) {
+        const staat = gitStaten[loc.pad]
+        if (!staat || !staat.isRepo || !staat.heeftRemote) continue
+        if (gitRemoteGedaan.has(loc.pad)) continue
+        await controleerKoppeling(loc.pad)
+      }
+    }
+  } finally {
+    gitControleBezig = false
+  }
 }
 
 // Bij een Windows-shutdown heeft het main-proces ~5 seconden en kan het niets
@@ -594,7 +647,8 @@ function gitIndicatorHtml(p) {
   if (i.ahead)  delen.push(`<span class="git-ind-ahead" title="${esc(I18N.t('git.ind.aheadTitle'))}">↑${i.ahead}</span>`)
   if (i.behind) delen.push(`<span class="git-ind-behind" title="${esc(I18N.t('git.ind.behindTitle'))}">↓${i.behind}</span>`)
   if (i.vuil)   delen.push(`<span class="git-ind-dirty" title="${esc(I18N.t('git.ind.dirtyTitle'))}">${i.vuil}${esc(I18N.t('git.ind.dirtyShort'))}</span>`)
-  if (!i.gekoppeld) delen.push(`<span class="git-ind-los" title="${esc(I18N.t('git.ind.noRemoteTitle'))}">${esc(I18N.t('git.ind.noRemote'))}</span>`)
+  if (i.koppelingStuk) delen.push(`<span class="git-ind-stuk" title="${esc(I18N.t('git.ind.brokenTitle'))}">${esc(I18N.t('git.ind.broken'))}</span>`)
+  else if (!i.gekoppeld) delen.push(`<span class="git-ind-los" title="${esc(I18N.t('git.ind.noRemoteTitle'))}">${esc(I18N.t('git.ind.noRemote'))}</span>`)
   else if (!i.volgt) delen.push(`<span class="git-ind-los" title="${esc(I18N.t('git.ind.noUpstreamTitle'))}">${esc(I18N.t('git.ind.noUpstream'))}</span>`)
 
   const anders = andereLocatiesOnveilig(p)
@@ -7347,6 +7401,51 @@ async function vraagGitIdentiteit(accountNaam, huidig) {
 // juiste pagina opent.
 let ghCodeVenster = null
 
+// Zorgt dat er een bruikbaar GitHub-account klaarstaat, of geeft eerlijk terug
+// dat het er niet is. Drie situaties, elk met een uitweg:
+//   gh ontbreekt      -> aanbieden te installeren
+//   niet ingelogd     -> inloggen via de browser
+//   geen account      -> naar github.com om er een te maken
+//
+// Geeft true (klaar), false (verder zonder gh) of 'gestopt' (afgebroken).
+async function zorgVoorGithub() {
+  let st = { geinstalleerd: false, ingelogd: false }
+  try { st = await window.api.gitGhStatus() } catch {}
+  if (st.ingelogd) return true
+
+  const keuze = await vraagKeuze({
+    titel: I18N.t('git.zorg.titel'),
+    tekst: I18N.t(st.geinstalleerd ? 'git.zorg.tekstNietIngelogd' : 'git.zorg.tekstGeenGh'),
+    knoppen: [
+      { label: I18N.t('common.cancel'), waarde: '' },
+      { label: I18N.t('git.zorg.geenAccount'), waarde: 'nieuw' },
+      { label: I18N.t('git.zorg.zelfDoen'), waarde: 'zelf' },
+      { label: I18N.t(st.geinstalleerd ? 'accounts.gitInloggenEnOphalen' : 'git.zorg.installerenEnInloggen'),
+        waarde: 'inloggen', soort: 'primair' },
+    ],
+  })
+  if (!keuze) return 'gestopt'
+
+  // Nog helemaal geen GitHub-account: dat maak je daar, niet hier. Daarna kan
+  // je gewoon terugkomen en op dezelfde knop drukken.
+  if (keuze === 'nieuw') {
+    await window.api.openUrl('https://github.com/signup')
+    await meldKort(I18N.t('git.zorg.titel'), I18N.t('git.zorg.naAanmelden'))
+    return 'gestopt'
+  }
+
+  // "zelf doen" = de oude weg: repo met de hand aanmaken en de url plakken.
+  if (keuze === 'zelf') return false
+
+  if (!st.geinstalleerd) {
+    const gelukt = await installeerGh()
+    if (!gelukt) return false
+  }
+
+  const ingelogd = await githubInloggen({ stil: true })
+  return ingelogd ? true : false
+}
+
 async function startGhLogin() {
   ghCodeVenster = null
   try {
@@ -7577,6 +7676,7 @@ async function wisselAccount(id, pin = null) {
   projects = r.projects || []
   settings = r.settings || settings
   gitStaten = {}
+  gitRemoteGedaan.clear()
   for (const k of Object.keys(gitLaatsteFetch)) delete gitLaatsteFetch[k]
   meldGitPadenAanMain()
   await activeerGitVoorAccount()
@@ -11783,6 +11883,12 @@ async function runGitCmd(project, cmdKey) {
   // Een pull of fetch kan de toestand veranderen (eerste upstream, andere
   // branch), dus daarna opnieuw kijken.
   await ververesGitStaat(project, true)
+  // Ging het naar de remote, dan is dit ook het moment waarop we merken dat
+  // het adres niet meer werkt. Opnieuw controleren, zodat de koppelknop
+  // terugkomt in plaats van dat je de fout nog eens uitlokt.
+  if (['git-pull', 'git-fetch', 'git-push'].includes(cmdKey)) {
+    await controleerKoppeling(actieveLocPad(project), true)
+  }
 }
 
 // Vraagt git bij dit commando zelf om inloggegevens? Dan heeft het een echt
@@ -11869,6 +11975,10 @@ async function schrijfGitCmd(project, cmdKey) {
   if (!cmd) return
   await executeCmd(project, cmd, cmdKey, { eigenTerminal: eigenTerminalNodig(project, cmdKey) })
   await ververesGitStaat(project, true)
+  // Een push is de eerste keer dat we écht met de remote praten. Lukt dat niet,
+  // dan hoort de koppelknop terug te komen in plaats van dat je het morgen
+  // nog eens probeert.
+  if (cmdKey === 'git-push') await controleerKoppeling(actieveLocPad(project), true)
 }
 
 // ── De stash terughalen ──────────────────────────────────────────────────────
@@ -12349,19 +12459,128 @@ async function stashOverzicht(project) {
 // niet onder git staat krijgt eerst alleen `git init`: wat er in je eerste
 // commit belandt bepaal je zelf, want zonder .gitignore staat node_modules
 // zo in je geschiedenis en krijg je hem er nooit meer netjes uit.
+// Er staat een adres in .git/config, maar het antwoordt niet: de repo is er
+// nooit gekomen, is hernoemd, of staat op een account waar je niet meer bij
+// kunt. `gh repo create` zou hier stuklopen op "remote origin already exists",
+// dus dit is een eigen weg — en de gebruiker kiest wat er gebeurt, want alleen
+// die weet wat er met die repo is.
+async function herstelKoppeling(project, pad, staat) {
+  const probleem = GitTools.koppelingProbleem(staat)
+  if (!probleem) return
+
+  const keuze = await vraagKeuze({
+    titel: I18N.t('git.repair.title'),
+    tekst: I18N.t(probleem.sleutel, { remote: probleem.remote }),
+    regels: [probleem.url || probleem.remote],
+    knoppen: [
+      { label: I18N.t('common.cancel'), waarde: '' },
+      { label: I18N.t('git.repair.new'), waarde: 'nieuw', soort: 'primair' },
+      { label: I18N.t('git.repair.url'), waarde: 'url' },
+      { label: I18N.t('git.repair.drop'), waarde: 'los', soort: 'gevaar' },
+    ],
+  })
+  if (!keuze) return
+
+  // Alleen het adres eraf. De commits en de geschiedenis blijven staan, en
+  // daarna staat de gewone koppelknop er weer.
+  if (keuze === 'los') {
+    const ja = await vraagJaNee(I18N.t('git.repair.dropTitle'),
+      I18N.t('git.repair.dropText', { remote: probleem.remote }), I18N.t('git.repair.drop'), 'gevaar')
+    if (!ja) return
+    await executeCmd(project, GitTools.ontkoppelCommando(staat), 'git-koppelen')
+    await controleerKoppeling(pad, true)
+    return
+  }
+
+  // Het adres verbeteren: de repo bestaat wel, hij heet alleen anders.
+  if (keuze === 'url') {
+    const ruw = await vraagTekst({
+      titel: I18N.t('git.link.urlTitle'),
+      tekst: I18N.t('git.link.urlText'),
+      waarde: probleem.url || '',
+      placeholder: 'https://github.com/gebruiker/repo.git',
+      okLabel: I18N.t('git.link.linkOk'),
+    })
+    if (!ruw) return
+    const cmd = GitTools.herstelCommando(staat, { url: ruw })
+    if (!cmd) { await meldKort(I18N.t('git.link.urlBadTitle'), I18N.t('git.link.urlBadText')); return }
+    await executeCmd(project, cmd, 'git-koppelen')
+    await controleerKoppeling(pad, true)
+    return
+  }
+
+  // Opnieuw aanmaken. Hiervoor is gh wel nodig — installeren en inloggen doet
+  // zorgVoorGithub, met dezelfde vragen als bij een eerste koppeling.
+  const ghKlaar = await zorgVoorGithub()
+  if (ghKlaar !== true) {
+    if (ghKlaar === 'gestopt') return
+    // Zonder gh kan de app geen repo aanmaken. Dan blijft het handwerk over:
+    // zelf aanmaken op github.com en het adres hier invullen.
+    const open = await vraagJaNee(I18N.t('git.link.ghMissingTitle'),
+      I18N.t('git.link.ghMissingText'), I18N.t('git.link.openGithub'))
+    if (open) await window.api.openUrl('https://github.com/new')
+    return
+  }
+
+  const naam = await vraagTekst({
+    titel: I18N.t('git.link.nameTitle'),
+    tekst: I18N.t('git.link.nameText'),
+    waarde: GitTools.veiligeRepoNaam(project.name),
+    okLabel: I18N.t('common.next'),
+  })
+  if (!naam) return
+
+  const zicht = await vraagKeuze({
+    titel: I18N.t('git.link.visTitle'),
+    tekst: I18N.t('git.link.visText', { naam: GitTools.veiligeRepoNaam(naam) }),
+    knoppen: [
+      { label: I18N.t('common.cancel'), waarde: '' },
+      { label: I18N.t('git.link.public'), waarde: 'publiek' },
+      { label: I18N.t('git.link.private'), waarde: 'prive', soort: 'primair' },
+    ],
+  })
+  if (!zicht) return
+
+  // Het dode adres gaat er in hetzelfde commando af, zodat je nooit met twee
+  // remotes achterblijft waarvan er één niet werkt.
+  await executeCmd(project, GitTools.herstelCommando(staat, { naam, prive: zicht === 'prive' }), 'git-koppelen')
+  await controleerKoppeling(pad, true)
+}
+
 async function koppelGithub(project) {
   const pad = actieveLocPad(project)
   if (!pad) return
 
-  const staat = await ververesGitStaat(project, true)
+  let staat = await ververesGitStaat(project, true)
   if (!staat) return
   if (!staat.beschikbaar) {
     await meldKort(I18N.t('git.link.noGitTitle'), I18N.t('git.link.noGitText'))
     return
   }
 
-  const ghKlaar = await window.api.gitGh()
-  const stap = GitTools.koppelStap(staat, ghKlaar)
+  // Staat er een adres dat we nog niet nagekeken hebben? Dan eerst kijken, want
+  // "al gekoppeld" tegen iemand zeggen van wie de push straks stukloopt is
+  // precies het probleem dat we hier oplossen. En andersom: een oordeel van een
+  // half uur geleden is oud genoeg om opnieuw te controleren voordat we met een
+  // herstelvraag komen.
+  if (staat.heeftRemote) {
+    await controleerKoppeling(pad, true)
+    staat = gitStaten[pad] || staat
+  }
+
+  // Kapot heeft zijn eigen weg. Die vraagt niet eerst naar gh: wie alleen het
+  // adres wil verbeteren hoeft daar niets voor te installeren.
+  if (staat.koppelingStuk) { await herstelKoppeling(project, pad, staat); return }
+
+  // Hier stond alleen "is gh geïnstalleerd". Maar wie hem niet heeft, of hem
+  // wel heeft maar nooit inlogde, kreeg meteen de omweg via de browser
+  // voorgeschoteld — terwijl de app dat allebei kan oplossen. En wie helemaal
+  // nog geen GitHub-account heeft, kreeg nergens te horen dat dat de eerste
+  // stap is.
+  const ghKlaar = await zorgVoorGithub()
+  if (ghKlaar === 'gestopt') return
+
+  const stap = GitTools.koppelStap(staat, ghKlaar === true)
 
   if (stap === GitTools.KOPPEL_AL_GEDAAN) {
     await meldKort(I18N.t('git.link.doneTitle'), I18N.t('git.link.doneText', { remote: staat.remote || 'origin' }))
@@ -12406,7 +12625,7 @@ async function koppelGithub(project) {
       naam: GitTools.veiligeRepoNaam(naam), prive: zicht === 'prive',
     })
     await executeCmd(project, cmd, 'git-koppelen')
-    await ververesGitStaat(project, true)
+    await controleerKoppeling(pad, true)
     return
   }
 
@@ -12438,7 +12657,7 @@ async function koppelGithub(project) {
   await executeCmd(project, GitTools.koppelCommando(GitTools.KOPPEL_URL, {
     url, branch: staat.branch || 'main',
   }), 'git-koppelen')
-  await ververesGitStaat(project, true)
+  await controleerKoppeling(pad, true)
 }
 
 async function runCmd(project, cmdKey) {

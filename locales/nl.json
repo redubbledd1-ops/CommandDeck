@@ -1062,5 +1062,22 @@
   "git.inlog.codeTitel": "Vul deze code in op GitHub",
   "git.inlog.codeTekst": "Klik op openen: de code gaat naar je klembord en github.com/login/device gaat open. Plak hem daar en bevestig. Dit venster mag open blijven staan.",
   "git.inlog.codeOpen": "kopiëren en openen",
-  "git.inlog.codeSluit": "sluiten"
+  "git.inlog.codeSluit": "sluiten",
+  "git.zorg.titel": "GitHub-account nodig",
+  "git.zorg.tekstGeenGh": "Om dit project aan GitHub te koppelen moet de app kunnen inloggen. De GitHub-CLI staat nog niet op deze pc; ik kan hem installeren en je daarna via je browser laten inloggen.",
+  "git.zorg.tekstNietIngelogd": "Om dit project aan GitHub te koppelen moet je ingelogd zijn. Ik open je browser om dat te doen — daarna maakt de app de repository zelf aan.",
+  "git.zorg.installerenEnInloggen": "installeren en inloggen",
+  "git.zorg.geenAccount": "ik heb nog geen GitHub",
+  "git.zorg.zelfDoen": "zelf een repo aanmaken",
+  "git.zorg.naAanmelden": "Je browser staat open op de aanmeldpagina. Maak daar je account aan en kom hier terug — druk daarna nog een keer op github koppelen, dan gaat de rest vanzelf.",
+  "git.ind.broken": "koppeling stuk",
+  "git.ind.brokenTitle": "er staat wel een adres, maar het antwoordt niet — klik op github koppelen om het te herstellen",
+  "git.koppel.stuk.inloggen": "Dit project wijst naar een adres waar git niet bij kan. De repo bestaat misschien niet meer, of hij staat op een account waar je nu niet mee bent ingelogd.",
+  "git.koppel.stuk.weg": "Dit project wijst naar een adres dat niet bestaat. Waarschijnlijk is de repo nooit aangemaakt, of is hij hernoemd of verwijderd.",
+  "git.repair.title": "Koppeling werkt niet",
+  "git.repair.new": "Nieuwe repository aanmaken",
+  "git.repair.url": "Ander adres invullen",
+  "git.repair.drop": "Koppeling weghalen",
+  "git.repair.dropTitle": "Koppeling weghalen?",
+  "git.repair.dropText": "Het adres '{remote}' gaat eraf. Je commits en je geschiedenis blijven staan — alleen de verwijzing naar GitHub verdwijnt, en daarna kun je opnieuw koppelen."
 }
