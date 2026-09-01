@@ -1028,7 +1028,7 @@
   "accounts.eigenPinTekst": "As soon as there is a second account the PIN starts to matter. {naam} does not have one yet — we set that first, otherwise you put a lock on one door while the other stands open.",
   "accounts.kiesTekstPin": "Pick your account and enter your PIN.",
   "settings.git.inlogKnop": "Link GitHub account",
-  "git.inlog.uitleg": "Your browser opens and shows a code to enter there. No password passes through CommandDeck and your token is never shown. Afterwards you can link the account to this profile.",
+  "git.inlog.uitleg": "Your browser opens on github.com. You get an eight-character code here to enter there — one button puts it on your clipboard. No password passes through CommandDeck and your token is never shown.",
   "git.inlog.starten": "start login",
   "git.inlog.geenGhTekst": "Logging in to GitHub needs gh, which is not on this pc. I can install it through winget — you see exactly what happens in the terminal.",
   "git.inlog.installeren": "install now",
@@ -1058,5 +1058,9 @@
   "accounts.gitOphalen.nietIngelogd": "gh is there, but could not fetch your details. That usually means: not logged in yet, or no connection. Log in with the 'Link GitHub account' button, or fill it in yourself.",
   "accounts.gitGevondenViaStatus": "You are logged in as {gh}. I could not read your profile, so I use the GitHub noreply address — that still links your commits to your account. Commits will say {naam} <{email}>. Set it up like this?",
   "accounts.gitHaalTekstNietIngelogd": "The GitHub CLI is there, but you are not logged in yet. I will open your browser to log in and then fetch your name, email and username — so you do not have to type anything.",
-  "git.inlog.nietGelukt": "The login was not completed. Check the output for what happened — usually the window was closed before the code was entered."
+  "git.inlog.nietGelukt": "The login was not completed. Usually the code was not entered or the browser window was closed. The last lines from gh are below.",
+  "git.inlog.codeTitel": "Enter this code on GitHub",
+  "git.inlog.codeTekst": "Click open: the code goes to your clipboard and github.com/login/device opens. Paste it there and confirm. This window can stay open.",
+  "git.inlog.codeOpen": "copy and open",
+  "git.inlog.codeSluit": "close"
 }

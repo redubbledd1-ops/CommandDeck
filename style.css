@@ -1742,6 +1742,13 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
   border-radius: var(--radius); padding: 7px 9px;
 }
 .vraag-lijst[hidden] { display: none; }
+/* De inlogcode van GitHub moet je kunnen lezen én selecteren; in de terminal
+   kon dat niet en daar liep het op vast. */
+.vraag-lijst .vraag-regel:only-child {
+  font-size: 20px; letter-spacing: 3px; text-align: center;
+  color: var(--accent); padding: 8px 0; user-select: all; cursor: text;
+}
+
 .vraag-regel {
   font-family: var(--mono); font-size: 11px; color: var(--muted2);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 1px 0;

@@ -7342,6 +7342,51 @@ async function vraagGitIdentiteit(accountNaam, huidig) {
 // De GitHub-CLI installeren, alleen als je erom vraagt. Nooit bij het
 // opstarten en nooit stilletjes: software installeren op iemands pc is een
 // beslissing van die persoon, niet van een launcher.
+// De code die gh toont, in een venster in plaats van in een terminal waar je
+// hem niet kunt selecteren. Met een knop die hem op je klembord zet en de
+// juiste pagina opent.
+let ghCodeVenster = null
+
+async function startGhLogin() {
+  ghCodeVenster = null
+  try {
+    window.api.opGhCode((code) => {
+      // Zodra gh de code prijsgeeft: laten zien. Het inloggen loopt ondertussen
+      // door; dit venster is alleen om mee te kijken en te kopiëren.
+      toonGhCode(code)
+    })
+  } catch {}
+
+  const r = await window.api.gitGhLogin()
+
+  // Het codevenster mag weg zodra het gelukt is.
+  if (ghCodeVenster && vraagKlaar) sluitVraag('klaar')
+  ghCodeVenster = null
+
+  try { await window.api.gitGhVergeet() } catch {}
+  return r
+}
+
+async function toonGhCode(code) {
+  ghCodeVenster = code
+  const keuze = await vraagKeuze({
+    titel: I18N.t('git.inlog.codeTitel'),
+    tekst: I18N.t('git.inlog.codeTekst'),
+    regels: [code],
+    knoppen: [
+      { label: I18N.t('git.inlog.codeSluit'), waarde: 'sluit' },
+      { label: I18N.t('git.inlog.codeOpen'), waarde: 'open', soort: 'primair' },
+    ],
+  })
+  if (keuze === 'open') {
+    // Kopiëren én de pagina openen: plakken is dan het enige wat overblijft.
+    try { await navigator.clipboard.writeText(code) } catch {}
+    await window.api.openUrl('https://github.com/login/device')
+    // Opnieuw tonen, want je hebt hem straks nog nodig om te plakken.
+    if (ghCodeVenster) setTimeout(() => { if (ghCodeVenster) toonGhCode(code) }, 400)
+  }
+}
+
 async function installeerGh() {
   let winget = false
   try { winget = await window.api.gitWinget() } catch {}
@@ -7441,30 +7486,28 @@ async function githubInloggen(opties = {}) {
     if (!gelukt) return false
   }
 
-  const p = projects.find(x => x.id === activeId) || projects[0]
-  if (!p) { await meldKort(I18N.t('settings.git.inlogKnop'), I18N.t('git.inlog.geenProject')); return false }
-
   if (!opties.stil) {
     const ja = await vraagJaNee(I18N.t('settings.git.inlogKnop'), I18N.t('git.inlog.uitleg'),
       I18N.t('git.inlog.starten'), 'primair')
     if (!ja) return false
   }
 
-  // In de terminal van de app: gh toont daar de code die je in je browser moet
-  // invullen, en je ziet zelf wat er gebeurt. Er gaat geen wachtwoord door de
-  // app heen en het token komt nergens in beeld.
-  if (view === 'settings') toggleSettings()
-  await executeCmd(p, GitTools.ghLoginCommando(), null)
-
-  // De meting of gh er is, en met welke accounts, is nu verouderd.
-  try { await window.api.gitGhVergeet() } catch {}
-  let na = { ingelogd: false, accounts: [] }
-  try { na = await window.api.gitGhStatus() } catch {}
-  if (!na.ingelogd) {
-    if (!opties.stil) await meldKort(I18N.t('settings.git.inlogKnop'), I18N.t('git.inlog.nietGelukt'))
+  // De app voert de dialoog met gh. Jij krijgt alleen de code te zien, in een
+  // venster waar je hem kunt kopiëren — in de terminal kan dat niet, en dáár
+  // liep het op vast.
+  const r = await startGhLogin()
+  if (!r || !r.ok) {
+    if (!opties.stil) {
+      await vraagKeuze({
+        titel: I18N.t('settings.git.inlogKnop'),
+        tekst: I18N.t('git.inlog.nietGelukt'),
+        regels: (r && r.uitvoer) ? String(r.uitvoer).split('\n').filter(Boolean).slice(-6) : [],
+        knoppen: [{ label: I18N.t('common.ok'), waarde: 'ok', soort: 'primair' }],
+      })
+    }
     return false
   }
-  const namen = na.accounts
+  const namen = r.accounts || []
 
   if (!opties.stil) {
     await meldKort(I18N.t('git.inlog.klaarTitel'),

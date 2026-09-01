@@ -724,6 +724,31 @@ t('zonder profiel valt er niets te activeren',
 t('een profiel zonder GitHub-account zet alleen de naam',
   G.accountActiveerStappen({ ...prof, ghGebruiker: '' }, true).map(x => x.soort).join() === 'identiteit')
 
+// ── inloggen is interactief; de app voert die dialoog ────────────────────────
+// `gh auth login --web` toont een code en wacht op Enter. In de gewone terminal
+// van de app kun je niets typen en de uitvoer niet selecteren — daar liep het
+// op vast. Main voert het gesprek nu zelf.
+const mainBron5 = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8')
+const loginBlok = (mainBron5.match(/ipcMain\.handle\('git:ghLogin'[\s\S]*?\n\}\)\)/) || [''])[0]
+
+t('inloggen draait als los proces met stdin, niet als kaal commando',
+  /spawn\('gh', \['auth', 'login'/.test(loginBlok) && /proc\.stdin\.write/.test(loginBlok))
+t('de code wordt uit de uitvoer gevist', /\[A-Z0-9\]\{4\}-\[A-Z0-9\]\{4\}/.test(loginBlok))
+t('en naar het venster gestuurd zodat je hem kunt kopiëren',
+  /webContents\.send\('git:ghCode'/.test(loginBlok))
+t('de app drukt zelf op Enter bij "press enter"', /press enter/i.test(loginBlok))
+t('gh schrijft naar stderr, dus die lezen we ook', /stderr\.on\('data'/.test(loginBlok))
+t('het resultaat komt uit gh auth status, niet uit de exitcode',
+  /auth', 'status'/.test(loginBlok) && /accounts\.length > 0/.test(loginBlok))
+t('en het blijft niet eeuwig hangen', /setTimeout\([\s\S]{0,80}proc\.kill/.test(loginBlok))
+
+// De code is van de vorm ABCD-1234; die vorm moet de regex herkennen.
+for (const code of ['1A2B-3C4D', 'ABCD-1234', '0000-FFFF']) {
+  t('code herkend: ' + code, /\b([A-Z0-9]{4}-[A-Z0-9]{4})\b/.test(code))
+}
+t('een gewone zin levert geen code op',
+  !/\b([A-Z0-9]{4}-[A-Z0-9]{4})\b/.test('Press Enter to open github.com in your browser'))
+
 // ── geïnstalleerd is niet hetzelfde als ingelogd ─────────────────────────────
 // Hier ging het mis: gh stond er wél, maar was nooit ingelogd. De app sloeg het
 // inloggen over en liep meteen tegen 'To get started with GitHub CLI' aan.

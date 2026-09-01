@@ -1425,6 +1425,75 @@ ipcMain.handle('git:ghIdentiteit', () => {
   return { ok: false, reden: 'niet-ingelogd', detail: laatsteFout }
 })
 
+// Inloggen bij GitHub, met de app als tussenpersoon.
+//
+// `gh auth login --web` is interactief: het toont een code van acht tekens en
+// wacht daarna op Enter voordat het je browser opent. In de gewone terminal van
+// de app kun je niets intypen en de uitvoer niet selecteren, dus daar blijft
+// het staan wachten op iets wat niemand kan geven. Daarom voeren we die
+// dialoog hier: we vangen de code op, sturen hem naar het venster zodat je hem
+// kunt kopiëren, en drukken zelf op Enter.
+ipcMain.handle('git:ghLogin', () => new Promise((resolve) => {
+  if (!ghBeschikbaar()) { resolve({ ok: false, reden: 'geen-gh' }); return }
+
+  const proc = spawn('gh', ['auth', 'login', '--hostname', 'github.com', '--git-protocol', 'https', '--web'], {
+    env: childEnv(), windowsHide: true, shell: false,
+  })
+
+  let alles = ''
+  let codeGestuurd = false
+  let enterGestuurd = false
+
+  const bekijk = (brok) => {
+    alles += brok
+    if (alles.length > 20000) alles = alles.slice(-20000)
+
+    // De code is van de vorm ABCD-1234. Zodra hij voorbijkomt gaat hij naar het
+    // venster: daar kun je hem kopiëren, hier niet.
+    if (!codeGestuurd) {
+      const m = alles.match(/\b([A-Z0-9]{4}-[A-Z0-9]{4})\b/)
+      if (m) {
+        codeGestuurd = true
+        try { if (win && !win.isDestroyed()) win.webContents.send('git:ghCode', m[1]) } catch {}
+      }
+    }
+
+    // "Press Enter to open github.com in your browser" — dat doen wij, zodat
+    // niemand in een terminal hoeft te typen die geen toetsenbord heeft.
+    if (!enterGestuurd && /press enter/i.test(alles)) {
+      enterGestuurd = true
+      try { proc.stdin.write('\n') } catch {}
+    }
+  }
+
+  proc.stdout.on('data', d => bekijk(d.toString()))
+  proc.stderr.on('data', d => bekijk(d.toString()))   // gh schrijft dit meeste naar stderr
+
+  const klaar = (code) => {
+    // Niet op de exitcode afgaan maar op de werkelijkheid: is er nu een account?
+    let ingelogd = false
+    let accounts = []
+    try {
+      const uit = execFileSync('gh', ['auth', 'status'], {
+        encoding: 'utf8', timeout: 6000, windowsHide: true, env: childEnv(),
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+      accounts = GitTools.parseGhAccounts(uit)
+    } catch (e) {
+      accounts = GitTools.parseGhAccounts(String((e && (e.stdout || e.stderr)) || ''))
+    }
+    ingelogd = accounts.length > 0
+    resolve({ ok: ingelogd, accounts, code, uitvoer: alles.slice(-1200) })
+  }
+
+  proc.on('error', () => resolve({ ok: false, reden: 'start-mislukt' }))
+  proc.on('close', klaar)
+
+  // Blijft het hangen — browser nooit geopend, code nooit ingevuld — dan houdt
+  // het na vijf minuten op in plaats van voor altijd te blijven staan.
+  setTimeout(() => { try { proc.kill() } catch {} }, 5 * 60 * 1000)
+}))
+
 // Geïnstalleerd én ingelogd zijn twee verschillende dingen. Alleen kijken of
 // gh bestaat is precies waarom het ophalen doodliep bij iemand die hem wél had
 // maar nooit had ingelogd.
