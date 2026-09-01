@@ -1011,5 +1011,20 @@
   "accounts.bestandBlijft": "De projectenlijst staat er nog als {bestand} in de map van CommandDeck. Weggooien doe je zelf.",
   "accounts.laatsteAccount": "Dit is het laatste account; er moet er minstens één zijn.",
   "accounts.kiesTitel": "Wie werkt er?",
-  "accounts.kiesTekst": "Kies je account. Je krijgt dan je eigen projecten en git-instellingen."
+  "accounts.kiesTekst": "Kies je account. Je krijgt dan je eigen projecten en git-instellingen.",
+  "accounts.pinNieuwTekst": "Kies een pincode van {min} tot {max} cijfers.",
+  "accounts.pinHerhaal": "Nog een keer, om zeker te weten dat je hem goed hebt.",
+  "accounts.pinOngeldig": "Een pincode is 4 tot 8 cijfers, verder niets.",
+  "accounts.pinVerschilt": "De twee codes zijn niet gelijk. Probeer het nog eens.",
+  "accounts.pinVragenTitel": "Pincode van {naam}",
+  "accounts.pinVragenTekst": "Voer je pincode in om verder te gaan.",
+  "accounts.pinFout": "Dat klopt niet. Je hebt nog {over} pogingen.",
+  "accounts.pinOp": "De pincode klopt niet. Er wordt niet gewisseld.",
+  "accounts.inloggen": "inloggen",
+  "accounts.pinZetten": "pincode instellen",
+  "accounts.pinWijzigen": "pincode wijzigen",
+  "accounts.pinVoorTitel": "Pincode voor {naam}",
+  "accounts.eigenPinTitel": "Eerst je eigen pincode",
+  "accounts.eigenPinTekst": "Zodra er een tweede account is, telt de pincode mee. {naam} heeft er nog geen — die stellen we nu eerst in, anders zet je een slot op de ene deur terwijl de andere openstaat.",
+  "accounts.kiesTekstPin": "Kies je account en voer je pincode in."
 }

@@ -1011,5 +1011,20 @@
   "accounts.bestandBlijft": "The project list is still there as {bestand} in the CommandDeck folder. Deleting it is up to you.",
   "accounts.laatsteAccount": "This is the last account; there has to be at least one.",
   "accounts.kiesTitel": "Who is working?",
-  "accounts.kiesTekst": "Pick your account. You get your own projects and git settings."
+  "accounts.kiesTekst": "Pick your account. You get your own projects and git settings.",
+  "accounts.pinNieuwTekst": "Pick a PIN of {min} to {max} digits.",
+  "accounts.pinHerhaal": "Once more, to be sure you have it right.",
+  "accounts.pinOngeldig": "A PIN is 4 to 8 digits, nothing else.",
+  "accounts.pinVerschilt": "The two codes are not the same. Try again.",
+  "accounts.pinVragenTitel": "PIN for {naam}",
+  "accounts.pinVragenTekst": "Enter your PIN to continue.",
+  "accounts.pinFout": "That is not right. You have {over} tries left.",
+  "accounts.pinOp": "The PIN is not correct. Nothing was switched.",
+  "accounts.inloggen": "log in",
+  "accounts.pinZetten": "set PIN",
+  "accounts.pinWijzigen": "change PIN",
+  "accounts.pinVoorTitel": "PIN for {naam}",
+  "accounts.eigenPinTitel": "Your own PIN first",
+  "accounts.eigenPinTekst": "As soon as there is a second account the PIN starts to matter. {naam} does not have one yet — we set that first, otherwise you put a lock on one door while the other stands open.",
+  "accounts.kiesTekstPin": "Pick your account and enter your PIN."
 }

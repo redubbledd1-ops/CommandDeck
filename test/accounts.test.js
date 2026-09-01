@@ -86,6 +86,45 @@ t('en het actieve blijft actief', na.actiefAccount === lijst[0].id)
 const na2 = A.naVerwijderen(lijst, lijst[1].id, lijst[1].id)
 t('verwijder je jezelf, dan schuift het actieve door', na2.actiefAccount === lijst[0].id)
 
+// ── pincode ──────────────────────────────────────────────────────────────────
+// Waar dit voor is: voorkomen dat je per ongeluk in het verkeerde account komt.
+// Niet: iemand tegenhouden die de bestanden opent.
+for (const goed of ['1234', '0000', '12345678']) t('geldige pincode: ' + goed, A.geldigePin(goed))
+for (const slecht of ['123', '123456789', '12a4', '12 34', '', '  1234', null, '12.4']) {
+  t('geweigerd als pincode: ' + JSON.stringify(slecht), A.geldigePin(slecht) === false)
+}
+
+const eenAcc = [A.maakAccount({ naam: 'Ik' })]
+const tweeAcc = [...eenAcc, A.maakAccount({ naam: 'Collega' })]
+t('bij één account vragen we niets', A.pinNodig(eenAcc) === false)
+t('vanaf twee altijd', A.pinNodig(tweeAcc) === true)
+t('lege lijst vraagt niets', A.pinNodig([]) === false)
+
+t('een vers account heeft nog geen pincode', A.heeftPin(eenAcc[0]) === false)
+t('een half ingevulde pincode telt niet',
+  A.heeftPin({ pin: { hash: 'abc' } }) === false && A.heeftPin({ pin: { salt: 'x' } }) === false)
+t('met salt én hash wel', A.heeftPin({ pin: { salt: 'x', hash: 'y' } }) === true)
+
+t('bij één account is niemand zonder pincode een probleem',
+  A.accountsZonderPin(eenAcc).length === 0)
+t('bij twee accounts zijn ze dat allebei',
+  A.accountsZonderPin(tweeAcc).length === 2)
+t('en wie er wel een heeft valt af',
+  A.accountsZonderPin([{ ...tweeAcc[0], pin: { salt: 'x', hash: 'y' } }, tweeAcc[1]]).length === 1)
+
+// Num Lock uit: de cijfertoetsen rechts sturen dan een pijltje. De fysieke
+// toets klopt wel, en die gebruiken we.
+t('Num Lock uit levert alsnog het cijfer', A.cijferUitToets('Numpad4', 'ArrowLeft') === '4')
+t('ook voor 8', A.cijferUitToets('Numpad8', 'ArrowUp') === '8')
+t('ook voor 9', A.cijferUitToets('Numpad9', 'PageUp') === '9')
+t('ook voor 0', A.cijferUitToets('Numpad0', 'Insert') === '0')
+t('Num Lock aan laten we met rust — anders komt het cijfer er dubbel in',
+  A.cijferUitToets('Numpad4', '4') === '')
+t('de gewone cijferrij ook', A.cijferUitToets('Digit7', '7') === '')
+t('letters doen niets', A.cijferUitToets('KeyA', 'a') === '')
+t('de punt op het numerieke blok ook niet', A.cijferUitToets('NumpadDecimal', 'Delete') === '')
+t('niets in, niets uit', A.cijferUitToets('', '') === '' && A.cijferUitToets(null, null) === '')
+
 // ── isolatie: welke mappen horen bij dit account ─────────────────────────────
 // Dit is het deel dat sluitend moet zijn. Niet tegen meelezen — dat kan de app
 // niet — maar tegen gedrag: nooit een git-actie in de map van een ander
@@ -131,6 +170,19 @@ for (const k of ['settings.section.accountsTitle', 'accounts.toevoegen', 'accoun
   t('tekst ' + k + ' bestaat in nl en en', !!nl[k] && !!en[k])
 }
 // Deze regel is het verschil tussen een eerlijke functie en een schijnzekerheid.
+// De pincode mag nergens leesbaar staan, en de renderer heeft hash en salt
+// niet nodig — wat er niet is, kan ook niet in beeld komen.
+const mainBron = fs.readFileSync(path.join(APP, 'main.js'), 'utf8')
+t('de pincode wordt gehasht opgeslagen, niet als tekst',
+  /scryptSync/.test(mainBron) && /randomBytes/.test(mainBron))
+t('vergelijken gebeurt in vaste tijd', /timingSafeEqual/.test(mainBron))
+t('de renderer krijgt hash en salt niet',
+  /const zonderGeheim = \(a\) => \(\{ id: a\.id, naam: a\.naam, icoon: a\.icoon, heeftPin/.test(mainBron))
+t('wisselen wordt in main gecontroleerd, niet alleen in het venster',
+  /pinNodig\(st\.accounts\) && !pinKlopt\(doel, pin\)/.test(mainBron))
+t('een account aanmaken kan niet zonder pincode',
+  /if \(!Accounts\.geldigePin\(pin\)\) return \{ ok: false, reden: 'pin-ongeldig' \}/.test(mainBron))
+
 // De vier plekken waar git-gegevens tussen accounts door konden lekken.
 const mainJs = fs.readFileSync(path.join(APP, 'main.js'), 'utf8')
 t('elke git-aanroep met een pad wordt getoetst',

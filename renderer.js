@@ -1231,7 +1231,7 @@ function vraagJaNee(titel, tekst, jaLabel = I18N.t('common.yes'), soort = 'prima
 
 // Eén regel tekst vragen. Geeft de ingevoerde tekst terug, of null bij
 // annuleren. Enter bevestigt, Escape annuleert.
-function vraagTekst({ titel, tekst = '', waarde = '', placeholder = '', okLabel = '', soort = 'primair' }) {
+function vraagTekst({ titel, tekst = '', waarde = '', placeholder = '', okLabel = '', soort = 'primair', verborgen = false }) {
   return new Promise(resolve => {
     vraagKlaar = resolve
     document.getElementById('vraag-titel').textContent = titel
@@ -1241,7 +1241,8 @@ function vraagTekst({ titel, tekst = '', waarde = '', placeholder = '', okLabel 
 
     const lijst = document.getElementById('vraag-lijst')
     lijst.hidden = false
-    lijst.innerHTML = `<input type="text" class="vraag-invoer" id="vraag-invoer" placeholder="${esc(placeholder)}" />`
+    lijst.innerHTML = `<input type="${verborgen ? 'password' : 'text'}" class="vraag-invoer" id="vraag-invoer"
+      ${verborgen ? 'inputmode="numeric" autocomplete="off"' : ''} placeholder="${esc(placeholder)}" />`
     const invoer = lijst.querySelector('#vraag-invoer')
     invoer.value = waarde
 
@@ -1256,6 +1257,20 @@ function vraagTekst({ titel, tekst = '', waarde = '', placeholder = '', okLabel 
     invoer.onkeydown = (e) => {
       if (e.key === 'Enter') { e.preventDefault(); af(true) }
       else if (e.key === 'Escape') { e.preventDefault(); af(false) }
+      else if (verborgen && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        // Num Lock uit: de cijfertoetsen rechts sturen dan een pijltje in
+        // plaats van een cijfer. De fysieke toets klopt wel, dus die gebruiken
+        // we — anders kun je je pincode niet intypen op het numerieke blok.
+        const cijfer = Accounts.cijferUitToets(e.code, e.key)
+        if (cijfer) {
+          e.preventDefault()
+          invoer.value += cijfer
+        } else if (e.code === 'NumpadDecimal' || e.code === 'Delete') {
+          // Met Num Lock uit is dat de Del-toets; die hoort niets te doen in
+          // een pincodeveld en zou anders de cursor laten springen.
+          e.preventDefault()
+        }
+      }
     }
 
     document.getElementById('modal-vraag').hidden = false
@@ -7224,13 +7239,50 @@ function saveAddBtnModal() {
 // tekst die onder het blok in de instellingen staat.
 let accounts = []
 let actiefAccount = ''
+let accountPinNodig = false
+
+// Een pincode vragen. Twee keer bij het instellen, zodat een typefout je niet
+// buitensluit uit je eigen account.
+async function vraagPin(titel, tekst, okLabel) {
+  const pin = await vraagTekst({ titel, tekst, verborgen: true, placeholder: '••••', okLabel })
+  return pin === null ? null : String(pin).trim()
+}
+
+async function vraagNieuwePin(titel) {
+  for (;;) {
+    const een = await vraagPin(titel, I18N.t('accounts.pinNieuwTekst', { min: 4, max: 8 }), I18N.t('common.next'))
+    if (een === null) return null
+    if (!Accounts.geldigePin(een)) { await meldKort(titel, I18N.t('accounts.pinOngeldig')); continue }
+    const twee = await vraagPin(titel, I18N.t('accounts.pinHerhaal'), I18N.t('common.save'))
+    if (twee === null) return null
+    if (een !== twee) { await meldKort(titel, I18N.t('accounts.pinVerschilt')); continue }
+    return een
+  }
+}
+
+// Vragen om de pincode van een bestaand account. Drie pogingen: daarna is het
+// duidelijk dat je het niet weet, en blijven vragen helpt niemand.
+async function vraagBestaandePin(account) {
+  for (let poging = 1; poging <= 3; poging++) {
+    const pin = await vraagPin(
+      I18N.t('accounts.pinVragenTitel', { naam: account.naam }),
+      poging === 1 ? I18N.t('accounts.pinVragenTekst') : I18N.t('accounts.pinFout', { over: 4 - poging }),
+      I18N.t('accounts.inloggen'))
+    if (pin === null) return null
+    const r = await window.api.accountCheck({ id: account.id, pin })
+    if (r && r.ok) return pin
+  }
+  await meldKort(I18N.t('accounts.pinVragenTitel', { naam: account.naam }), I18N.t('accounts.pinOp'))
+  return null
+}
 
 async function laadAccounts() {
   try {
     const r = await window.api.accountsList()
     accounts = (r && r.accounts) || []
     actiefAccount = (r && r.actief) || ''
-  } catch { accounts = []; actiefAccount = '' }
+    accountPinNodig = !!(r && r.pinNodig)
+  } catch { accounts = []; actiefAccount = ''; accountPinNodig = false }
 }
 
 const huidigAccount = () => accounts.find(a => a.id === actiefAccount) || null
@@ -7238,10 +7290,23 @@ const huidigAccount = () => accounts.find(a => a.id === actiefAccount) || null
 // Wisselen betekent: andere projecten, andere git-instellingen. Alles wat aan
 // het vorige account hing moet dus weg, anders zie je even de projectenlijst
 // van iemand anders of blijft een git-toestand van een ander pad hangen.
-async function wisselAccount(id) {
+async function wisselAccount(id, pin = null) {
   if (!id || id === actiefAccount) return
-  const r = await window.api.accountSwitch(id)
-  if (!r || !r.ok) return
+
+  // Vanaf twee accounts is inloggen altijd nodig — juist bij het wisselen, want
+  // dat is het moment waarop je in het verkeerde account belandt.
+  if (accountPinNodig && pin === null) {
+    const doel = accounts.find(a => a.id === id)
+    if (!doel) return
+    pin = await vraagBestaandePin(doel)
+    if (pin === null) return
+  }
+
+  const r = await window.api.accountSwitch({ id, pin: pin || '' })
+  if (!r || !r.ok) {
+    if (r && r.reden === 'pin-fout') await meldKort(I18N.t('accounts.wisselen'), I18N.t('accounts.pinOp'))
+    return
+  }
 
   // Eerst de deur dicht: main mag vanaf nu niets meer met de mappen van het
   // vorige account, ook niet als er nog een verversing onderweg is.
@@ -7281,10 +7346,21 @@ async function kiesAccountBijStart() {
   }
   const id = await vraagKeuze({
     titel: I18N.t('accounts.kiesTitel'),
-    tekst: I18N.t('accounts.kiesTekst'),
+    tekst: I18N.t(accountPinNodig ? 'accounts.kiesTekstPin' : 'accounts.kiesTekst'),
     knoppen,
   })
-  if (id) await wisselAccount(id)
+  if (!id) return
+
+  // Ook het account waar je al op stond vraagt om de pincode: anders is het
+  // venster bij het opstarten een deur die je zonder sleutel voorbij loopt.
+  if (id === actiefAccount) {
+    if (!accountPinNodig) return
+    const ik = accounts.find(a => a.id === id)
+    const pin = ik ? await vraagBestaandePin(ik) : null
+    if (pin === null) { await kiesAccountBijStart(); return }
+    return
+  }
+  await wisselAccount(id)
 }
 
 function accountRijenHtml() {
@@ -7295,6 +7371,8 @@ function accountRijenHtml() {
         ? `<span class="instel-uitleg">${esc(I18N.t('accounts.ditBenJij'))}</span>`
         : `<button class="term-btn" data-account-kies="${esc(a.id)}">${esc(I18N.t('accounts.wisselen'))}</button>`}
       <button class="term-btn" data-account-hernoem="${esc(a.id)}" title="${esc(I18N.t('accounts.hernoemen'))}"><i class="ti ti-pencil" style="font-size:13px"></i></button>
+      <button class="term-btn ${a.heeftPin ? '' : 'btn-danger'}" data-account-pin="${esc(a.id)}"
+        title="${esc(I18N.t(a.heeftPin ? 'accounts.pinWijzigen' : 'accounts.pinZetten'))}"><i class="ti ti-lock" style="font-size:13px"></i></button>
       ${accounts.length > 1 ? `<button class="term-btn" data-account-weg="${esc(a.id)}" title="${esc(I18N.t('accounts.verwijderen'))}"><i class="ti ti-trash" style="font-size:13px"></i></button>` : ''}
     </div>`).join('')
 }
@@ -7553,15 +7631,48 @@ function renderSettingsPanel() {
   })
   const accountAdd = document.getElementById('btn-account-add')
   if (accountAdd) accountAdd.onclick = async () => {
+    // Vanaf nu zijn er twee accounts en gaat de pincode meetellen. Heeft het
+    // huidige account er nog geen, dan moet die er eerst komen — anders maak je
+    // een slot op de ene deur en staat de andere open.
+    const ik = huidigAccount()
+    if (ik && !ik.heeftPin) {
+      await meldKort(I18N.t('accounts.eigenPinTitel'), I18N.t('accounts.eigenPinTekst', { naam: ik.naam }))
+      const eigen = await vraagNieuwePin(I18N.t('accounts.eigenPinTitel'))
+      if (eigen === null) return
+      const rp = await window.api.accountSetPin({ id: ik.id, pin: eigen })
+      if (!rp || !rp.ok) { await meldKort(I18N.t('accounts.eigenPinTitel'), I18N.t('accounts.pinOngeldig')); return }
+      await laadAccounts()
+    }
+
     const naam = await vraagTekst({
       titel: I18N.t('accounts.toevoegen'), tekst: I18N.t('accounts.toevoegenTekst'),
-      placeholder: I18N.t('accounts.naamPlaceholder'), okLabel: I18N.t('common.add'),
+      placeholder: I18N.t('accounts.naamPlaceholder'), okLabel: I18N.t('common.next'),
     })
     if (!naam) return
-    const r = await window.api.accountAdd({ naam })
-    if (!r || !r.ok) { await meldKort(I18N.t('accounts.toevoegen'), I18N.t('accounts.naamBezet')); return }
+
+    const pin = await vraagNieuwePin(I18N.t('accounts.pinVoorTitel', { naam }))
+    if (pin === null) return
+
+    const r = await window.api.accountAdd({ naam, pin })
+    if (!r || !r.ok) {
+      await meldKort(I18N.t('accounts.toevoegen'),
+        I18N.t(r && r.reden === 'pin-ongeldig' ? 'accounts.pinOngeldig' : 'accounts.naamBezet'))
+      return
+    }
     await laadAccounts(); renderSettingsPanel()
   }
+
+  panel.querySelectorAll('[data-account-pin]').forEach(btn => {
+    btn.onclick = async () => {
+      const a = accounts.find(x => x.id === btn.dataset.accountPin)
+      if (!a) return
+      const pin = await vraagNieuwePin(I18N.t('accounts.pinVoorTitel', { naam: a.naam }))
+      if (pin === null) return
+      const r = await window.api.accountSetPin({ id: a.id, pin })
+      if (!r || !r.ok) { await meldKort(I18N.t('accounts.pinWijzigen'), I18N.t('accounts.pinOngeldig')); return }
+      await laadAccounts(); renderSettingsPanel()
+    }
+  })
 
   const gitPoll = document.getElementById('set-git-poll')
   if (gitPoll) gitPoll.onchange = () => {

@@ -428,19 +428,74 @@ ipcMain.handle('settings:save', (_, s) => {
   return true
 })
 
+// ── Pincode ──────────────────────────────────────────────────────────────────
+// Gehasht met scrypt en een eigen salt per account, zodat de code niet leesbaar
+// in settings.json staat. Dat is het maximum dat hier zin heeft: wie bij dat
+// bestand kan, kan een viercijferige code alsnog in een oogwenk raden. Het slot
+// is bedoeld tegen vergissingen, niet tegen inbraak — en dat zegt de app er ook
+// bij.
+function maakPin(pin) {
+  const salt = crypto.randomBytes(16).toString('hex')
+  const hash = crypto.scryptSync(String(pin), salt, 32).toString('hex')
+  return { salt, hash }
+}
+
+function pinKlopt(account, pin) {
+  if (!Accounts.heeftPin(account)) return false
+  if (!Accounts.geldigePin(pin)) return false
+  try {
+    const proef = crypto.scryptSync(String(pin), account.pin.salt, 32)
+    const echt = Buffer.from(account.pin.hash, 'hex')
+    // Vergelijken in vaste tijd: anders lekt de duur van de vergelijking iets
+    // over hoeveel er klopte.
+    return proef.length === echt.length && crypto.timingSafeEqual(proef, echt)
+  } catch { return false }
+}
+
+// De renderer krijgt de accounts nooit mét hash en salt: die hoeven daar niet
+// te zijn, en wat er niet is kan ook niet per ongeluk in beeld komen.
+const zonderGeheim = (a) => ({ id: a.id, naam: a.naam, icoon: a.icoon, heeftPin: Accounts.heeftPin(a) })
+
 ipcMain.handle('accounts:list', () => {
   const st = accountStand()
-  return { accounts: st.accounts, actief: st.actiefAccount }
+  return {
+    accounts: st.accounts.map(zonderGeheim),
+    actief: st.actiefAccount,
+    pinNodig: Accounts.pinNodig(st.accounts),
+    zonderPin: Accounts.accountsZonderPin(st.accounts).map(a => a.id),
+  }
 })
 
-ipcMain.handle('accounts:add', (_, { naam, icoon } = {}) => {
+ipcMain.handle('accounts:setPin', (_, { id, pin } = {}) => {
+  const st = accountStand()
+  if (!st.accounts.some(a => a.id === id)) return { ok: false, reden: 'onbekend' }
+  if (!Accounts.geldigePin(pin)) return { ok: false, reden: 'pin-ongeldig' }
+  const s = loadSettings()
+  saveSettings({ ...s, accounts: st.accounts.map(a => a.id === id ? { ...a, pin: maakPin(pin) } : a) })
+  return { ok: true }
+})
+
+ipcMain.handle('accounts:check', (_, { id, pin } = {}) => {
+  const st = accountStand()
+  const a = st.accounts.find(x => x.id === id)
+  if (!a) return { ok: false, reden: 'onbekend' }
+  // Geen pincode gezet en er is er maar één: dan valt er niets te controleren.
+  if (!Accounts.heeftPin(a)) return { ok: !Accounts.pinNodig(st.accounts), reden: 'geen-pin' }
+  return { ok: pinKlopt(a, pin) }
+})
+
+ipcMain.handle('accounts:add', (_, { naam, icoon, pin } = {}) => {
   const st = accountStand()
   if (!Accounts.naamVrij(st.accounts, naam)) return { ok: false, reden: 'naam-bezet' }
-  const nieuw = Accounts.maakAccount({ naam, icoon })
+  // Aanmaken kan alleen mét pincode. Achteraf toevoegen zou betekenen dat er
+  // een account bestaat waar iedereen zo in kan, precies zolang niemand eraan
+  // denkt hem te zetten.
+  if (!Accounts.geldigePin(pin)) return { ok: false, reden: 'pin-ongeldig' }
+  const nieuw = { ...Accounts.maakAccount({ naam, icoon }), pin: maakPin(pin) }
   if (!Accounts.accountGeldig(nieuw)) return { ok: false, reden: 'naam-leeg' }
   const s = loadSettings()
   saveSettings({ ...s, accounts: [...st.accounts, nieuw], actiefAccount: st.actiefAccount })
-  return { ok: true, account: nieuw }
+  return { ok: true, account: zonderGeheim(nieuw) }
 })
 
 ipcMain.handle('accounts:rename', (_, { id, naam } = {}) => {
@@ -452,9 +507,14 @@ ipcMain.handle('accounts:rename', (_, { id, naam } = {}) => {
   return { ok: true }
 })
 
-ipcMain.handle('accounts:switch', (_, id) => {
+ipcMain.handle('accounts:switch', (_, arg) => {
+  const { id, pin } = (typeof arg === 'string') ? { id: arg, pin: '' } : (arg || {})
   const st = accountStand()
-  if (!st.accounts.some(a => a.id === id)) return { ok: false, reden: 'onbekend' }
+  const doel = st.accounts.find(a => a.id === id)
+  if (!doel) return { ok: false, reden: 'onbekend' }
+  // De controle hoort hier en niet alleen in het venster: een scherm is een
+  // scherm, dit is de plek waar de projecten vandaan komen.
+  if (Accounts.pinNodig(st.accounts) && !pinKlopt(doel, pin)) return { ok: false, reden: 'pin-fout' }
   saveSettings({ ...loadSettings(), actiefAccount: id })
   return { ok: true, projects: loadProjects(id), settings: Accounts.samengevoegd(loadSettings(), id) }
 })
