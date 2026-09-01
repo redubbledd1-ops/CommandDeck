@@ -1012,6 +1012,16 @@
     return 'gh auth login --hostname github.com --git-protocol https --web'
   }
 
+  // De GitHub-CLI installeren. Alleen op verzoek, nooit uit zichzelf: een app
+  // die ongevraagd andere software installeert is gedrag dat je van malware
+  // verwacht. De vlaggen zijn nodig omdat winget anders om bevestiging vraagt
+  // in een venster dat niemand ziet; --scope user voorkomt dat er om
+  // beheerdersrechten wordt gevraagd.
+  function ghInstallCommando() {
+    return 'winget install --id GitHub.cli -e --source winget --scope user'
+         + ' --accept-package-agreements --accept-source-agreements'
+  }
+
   // ── Je gegevens ophalen bij GitHub ──────────────────────────────────────────
   // Na het inloggen weet gh wie je bent. Dan hoeft niemand zijn naam en adres
   // over te typen — de app haalt ze op. Dat scheelt niet alleen werk maar ook
@@ -1151,7 +1161,7 @@
     INLOG_ONTHOUDEN, INLOG_VRAGEN, INLOG_KEUZES,
     indicator, onveiligeRedenen, magFetchen, achterstandMelding, FETCH_INTERVAL_MS,
     globaalIdentiteitCommando, globaalGhGebruikerCommando, accountActiveerStappen,
-    ghLoginCommando, parseGhAccounts, parseGhUser, parseGhEmails, noreplyEmail, ghIdentiteit,
+    ghLoginCommando, ghInstallCommando, parseGhAccounts, parseGhUser, parseGhEmails, noreplyEmail, ghIdentiteit,
     diffCommando, isHoofdtak, parseTrack, branchOmschrijving, branchHeeftEigenWerk,
     resetZachtCommando, amendCommando, weggooiBestandCommando, alGepusht, terugdraaiBlokkade,
     parseBranches, lokaleBranches, huidigeBranch, nieuweRemoteBranches,

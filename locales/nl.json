@@ -1030,8 +1030,8 @@
   "settings.git.inlogKnop": "GitHub-account koppelen",
   "git.inlog.uitleg": "Je browser gaat open en toont een code die je daar invult. Er gaat geen wachtwoord door CommandDeck heen, en je token komt nergens in beeld. Daarna kun je het account aan dit profiel koppelen.",
   "git.inlog.starten": "inloggen starten",
-  "git.inlog.geenGhTekst": "Hiervoor is de GitHub-CLI nodig (gh). Die is er niet op deze pc. Installeer hem via cli.github.com of met: winget install GitHub.cli",
-  "git.inlog.installeren": "naar cli.github.com",
+  "git.inlog.geenGhTekst": "Voor inloggen bij GitHub is gh nodig. Die staat niet op deze pc. Ik kan hem via winget installeren — je ziet in de terminal precies wat er gebeurt.",
+  "git.inlog.installeren": "nu installeren",
   "git.inlog.geenProject": "Er is nog geen project om dit in te draaien. Voeg er eerst één toe.",
   "git.inlog.klaarTitel": "GitHub-accounts op deze pc",
   "git.inlog.klaarTekst": "Deze accounts staan nu klaar: {namen}. Zet de juiste bij je git-profiel, dan schakelt hij mee als je van account wisselt.",
@@ -1049,5 +1049,9 @@
   "accounts.gitZelfInvullen": "zelf invullen",
   "accounts.gitOphalenMislukt": "Kon je gegevens niet ophalen. Vul ze anders zelf in.",
   "accounts.gitGevondenTitel": "Gevonden bij GitHub",
-  "accounts.gitGevondenTekst": "Commits komen op naam {naam} <{email}>, pushen gaat via {gh}. Zo instellen?"
+  "accounts.gitGevondenTekst": "Commits komen op naam {naam} <{email}>, pushen gaat via {gh}. Zo instellen?",
+  "git.inlog.geenGhTitel": "GitHub-CLI ontbreekt",
+  "git.inlog.geenWingetTekst": "Voor inloggen bij GitHub is gh nodig, en die staat niet op deze pc. Winget is er ook niet, dus installeren kan ik hier niet. Haal hem op bij cli.github.com.",
+  "git.inlog.naarSite": "naar cli.github.com",
+  "git.inlog.installMislukt": "De installatie is niet gelukt of is afgebroken. Kijk in de uitvoer wat er misging — op een werk-pc is winget vaak geblokkeerd."
 }

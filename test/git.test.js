@@ -724,6 +724,18 @@ t('zonder profiel valt er niets te activeren',
 t('een profiel zonder GitHub-account zet alleen de naam',
   G.accountActiveerStappen({ ...prof, ghGebruiker: '' }, true).map(x => x.soort).join() === 'identiteit')
 
+// ── de GitHub-CLI installeren ────────────────────────────────────────────────
+// Alleen op verzoek. Een app die ongevraagd software installeert is gedrag dat
+// je van malware verwacht, niet van een launcher.
+const inst = G.ghInstallCommando()
+t('installeert precies het juiste pakket', inst.includes('--id GitHub.cli') && inst.includes('-e'))
+t('uit de winget-bron, niet zomaar ergens vandaan', inst.includes('--source winget'))
+t('vraagt niet om beheerdersrechten', inst.includes('--scope user'))
+t('en blijft niet hangen op een bevestiging die niemand ziet',
+  inst.includes('--accept-package-agreements') && inst.includes('--accept-source-agreements'))
+t('het installeert niets anders',
+  !/(;|&&|\|\|)/.test(inst) && (inst.match(/--id/g) || []).length === 1)
+
 // ── je gegevens ophalen bij GitHub ───────────────────────────────────────────
 // Zodat niemand zijn naam en adres hoeft over te typen. Een tikfout in je
 // e-mailadres merk je pas als GitHub je commits niet meer aan je koppelt.
@@ -764,6 +776,14 @@ t('een openbaar profieladres wordt gebruikt als er geen lijst is',
 t('zonder gebruiker geen identiteit', G.ghIdentiteit(null) === null)
 t('het adres is nooit leeg als er een login is',
   ['', null].every(e => G.ghIdentiteit(ghUser, e).gitEmail.length > 0))
+
+// De app moet git en gh met een verse PATH zoeken; anders vindt hij iets dat
+// net geïnstalleerd is pas na een herstart, en lijkt de installatie mislukt.
+const mainBron2 = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8')
+const gitUitBlok = (mainBron2.match(/function gitUit\([\s\S]*?\n\}/) || [''])[0]
+t('git wordt gezocht met een verse PATH',
+  gitUitBlok.length > 0 && /env: childEnv\(\)/.test(gitUitBlok))
+t('gh ook', (mainBron2.match(/execFileSync\('gh'[\s\S]{0,200}?env: childEnv\(\)/g) || []).length >= 3)
 
 t('inloggen gaat via de browser, niet via een token in een venster',
   G.ghLoginCommando().includes('--web'))

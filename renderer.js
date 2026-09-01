@@ -7339,6 +7339,42 @@ async function vraagGitIdentiteit(accountNaam, huidig) {
 
 // Probeert de identiteit bij GitHub op te halen. Geeft null terug als dat niet
 // kan of als de gebruiker het liever zelf invult — dan volgt de gewone vraag.
+// De GitHub-CLI installeren, alleen als je erom vraagt. Nooit bij het
+// opstarten en nooit stilletjes: software installeren op iemands pc is een
+// beslissing van die persoon, niet van een launcher.
+async function installeerGh() {
+  let winget = false
+  try { winget = await window.api.gitWinget() } catch {}
+
+  const keuze = await vraagKeuze({
+    titel: I18N.t('git.inlog.geenGhTitel'),
+    tekst: I18N.t(winget ? 'git.inlog.geenGhTekst' : 'git.inlog.geenWingetTekst'),
+    knoppen: [
+      { label: I18N.t('common.cancel'), waarde: '' },
+      { label: I18N.t('git.inlog.naarSite'), waarde: 'site' },
+      ...(winget ? [{ label: I18N.t('git.inlog.installeren'), waarde: 'winget', soort: 'primair' }] : []),
+    ],
+  })
+  if (!keuze) return false
+  if (keuze === 'site') { await window.api.openUrl('https://cli.github.com/'); return false }
+
+  const p = projects.find(x => x.id === activeId) || projects[0]
+  if (!p) { await meldKort(I18N.t('git.inlog.geenGhTitel'), I18N.t('git.inlog.geenProject')); return false }
+
+  // In de terminal, zodat je ziet wat er geïnstalleerd wordt en waar het
+  // vandaan komt. Geen voortgangsbalkje dat het verbergt.
+  if (view === 'settings') toggleSettings()
+  await executeCmd(p, GitTools.ghInstallCommando(), null)
+
+  // De app zoekt gh met een verse PATH uit het register, dus een herstart is
+  // niet nodig — maar we moeten de oude meting wel weggooien.
+  try { await window.api.gitGhVergeet() } catch {}
+  let nu = false
+  try { nu = await window.api.gitGh() } catch {}
+  if (!nu) { await meldKort(I18N.t('git.inlog.geenGhTitel'), I18N.t('git.inlog.installMislukt')); return false }
+  return true
+}
+
 async function haalGitIdentiteitOp(accountNaam) {
   let gh = false
   try { gh = await window.api.gitGh() } catch {}
@@ -7373,17 +7409,8 @@ async function haalGitIdentiteitOp(accountNaam) {
 async function githubInloggen(opties = {}) {
   const gh = await window.api.gitGh()
   if (!gh) {
-    const keuze = await vraagKeuze({
-      titel: I18N.t('settings.git.inlogKnop'),
-      tekst: I18N.t('git.inlog.geenGhTekst'),
-      knoppen: [
-        { label: I18N.t('common.cancel'), waarde: '' },
-        { label: I18N.t('git.inlog.installeren'), waarde: 'install', soort: 'primair' },
-      ],
-    })
-    if (keuze !== 'install') return
-    await window.api.openUrl('https://cli.github.com/')
-    return
+    const gelukt = await installeerGh()
+    if (!gelukt) return false
   }
 
   const p = projects.find(x => x.id === activeId) || projects[0]

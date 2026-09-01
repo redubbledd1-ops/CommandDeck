@@ -1078,6 +1078,10 @@ function gitUit(dir, args) {
   try {
     return execFileSync('git', args, {
       cwd: dir, encoding: 'utf8', timeout: 4000, windowsHide: true,
+      // childEnv leest PATH vers uit het register. Zonder dat vindt de app een
+      // net geïnstalleerde git of gh pas na een herstart van CommandDeck, en
+      // dan lijkt de installatie mislukt terwijl hij gelukt is.
+      env: childEnv(),
       stdio: ['ignore', 'pipe', 'ignore'],
     })
   } catch (e) {
@@ -1338,7 +1342,7 @@ let ghAanwezig = null
 function ghBeschikbaar() {
   if (ghAanwezig === null) {
     try {
-      execFileSync('gh', ['--version'], { encoding: 'utf8', timeout: 4000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] })
+      execFileSync('gh', ['--version'], { encoding: 'utf8', timeout: 4000, windowsHide: true, env: childEnv(), stdio: ['ignore', 'pipe', 'ignore'] })
       ghAanwezig = true
     } catch { ghAanwezig = false }
   }
@@ -1375,7 +1379,7 @@ ipcMain.handle('git:ghIdentiteit', () => {
   const roep = (pad) => {
     try {
       return execFileSync('gh', ['api', pad], {
-        encoding: 'utf8', timeout: 8000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'],
+        encoding: 'utf8', timeout: 8000, windowsHide: true, env: childEnv(), stdio: ['ignore', 'pipe', 'ignore'],
       })
     } catch { return '' }
   }
@@ -1395,7 +1399,7 @@ ipcMain.handle('git:ghAccounts', () => {
   if (!ghBeschikbaar()) return []
   try {
     const uit = execFileSync('gh', ['auth', 'status'], {
-      encoding: 'utf8', timeout: 6000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
+      encoding: 'utf8', timeout: 6000, windowsHide: true, env: childEnv(), stdio: ['ignore', 'pipe', 'pipe'],
     })
     return GitTools.parseGhAccounts(uit)
   } catch (e) {
@@ -1406,6 +1410,23 @@ ipcMain.handle('git:ghAccounts', () => {
 })
 
 ipcMain.handle('git:gh', () => ghBeschikbaar())
+
+// Kan deze pc überhaupt met winget installeren? Op oudere Windows-versies en
+// op dichtgetimmerde werk-pc's niet, en dan is een installeerknop een knop die
+// alleen maar een foutmelding oplevert.
+let wingetAanwezig = null
+ipcMain.handle('git:winget', () => {
+  if (wingetAanwezig === null) {
+    try {
+      execFileSync('winget', ['--version'], {
+        encoding: 'utf8', timeout: 6000, windowsHide: true, env: childEnv(),
+        stdio: ['ignore', 'pipe', 'ignore'],
+      })
+      wingetAanwezig = true
+    } catch { wingetAanwezig = false }
+  }
+  return wingetAanwezig
+})
 
 // Na een inlog is de uitkomst veranderd; anders blijft de app zeggen dat gh
 // er niet is omdat hij dat één keer heeft gemeten.

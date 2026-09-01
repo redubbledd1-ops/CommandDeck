@@ -1030,8 +1030,8 @@
   "settings.git.inlogKnop": "Link GitHub account",
   "git.inlog.uitleg": "Your browser opens and shows a code to enter there. No password passes through CommandDeck and your token is never shown. Afterwards you can link the account to this profile.",
   "git.inlog.starten": "start login",
-  "git.inlog.geenGhTekst": "This needs the GitHub CLI (gh), which is not on this pc. Install it from cli.github.com or with: winget install GitHub.cli",
-  "git.inlog.installeren": "go to cli.github.com",
+  "git.inlog.geenGhTekst": "Logging in to GitHub needs gh, which is not on this pc. I can install it through winget — you see exactly what happens in the terminal.",
+  "git.inlog.installeren": "install now",
   "git.inlog.geenProject": "There is no project to run this in yet. Add one first.",
   "git.inlog.klaarTitel": "GitHub accounts on this pc",
   "git.inlog.klaarTekst": "These accounts are ready now: {namen}. Set the right one on your git profile and it will switch along when you change account.",
@@ -1049,5 +1049,9 @@
   "accounts.gitZelfInvullen": "fill in myself",
   "accounts.gitOphalenMislukt": "Could not fetch your details. Fill them in yourself instead.",
   "accounts.gitGevondenTitel": "Found on GitHub",
-  "accounts.gitGevondenTekst": "Commits will say {naam} <{email}>, pushing goes through {gh}. Set it up like this?"
+  "accounts.gitGevondenTekst": "Commits will say {naam} <{email}>, pushing goes through {gh}. Set it up like this?",
+  "git.inlog.geenGhTitel": "GitHub CLI missing",
+  "git.inlog.geenWingetTekst": "Logging in to GitHub needs gh, which is not on this pc. Winget is missing too, so I cannot install it here. Get it from cli.github.com.",
+  "git.inlog.naarSite": "go to cli.github.com",
+  "git.inlog.installMislukt": "The install did not finish or was cancelled. Check the output for what went wrong — on a work pc winget is often blocked."
 }
