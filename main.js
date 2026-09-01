@@ -1005,7 +1005,32 @@ function heeftGit() {
   return gitAanwezig
 }
 
+// ── Wat mag dit account zien? ────────────────────────────────────────────────
+// Niet tegen meelezen — dat kan de app niet, alles staat in de map van de
+// Windows-gebruiker. Dit gaat over iets anders en dat kán wel sluitend: er mag
+// nooit een git-actie draaien op de map van een ánder account, en niemand mag
+// een melding krijgen over andermans repo. Dus houdt main bij welke paden bij
+// het actieve account horen, en weigert al het andere.
+let gitToegang = { accountId: '', paden: null }   // null = de renderer heeft nog niets gemeld
+
+ipcMain.on('git:paden', (_, data) => {
+  const d = data || {}
+  gitToegang = {
+    accountId: String(d.accountId || ''),
+    paden: (Array.isArray(d.paden) ? d.paden : []).filter(Boolean),
+  }
+})
+
+// Vóór de eerste melding (het moment tussen opstarten en de eerste render)
+// laten we alles door: er is dan nog geen tweede account in beeld en anders
+// zou de app bij de start niets over zichzelf kunnen zeggen.
+function padToegestaan(dir) {
+  if (!gitToegang.paden) return true
+  return Accounts.padHoortBij(gitToegang.paden, dir)
+}
+
 ipcMain.handle('git:info', (_, dir) => {
+  if (!padToegestaan(dir)) return GitTools.maakStaat({ beschikbaar: heeftGit(), isRepo: false })
   if (!dir || !fs.existsSync(dir)) return GitTools.maakStaat({ beschikbaar: heeftGit(), isRepo: false })
   if (!heeftGit()) return GitTools.maakStaat({ beschikbaar: false })
 
@@ -1049,6 +1074,7 @@ ipcMain.handle('git:info', (_, dir) => {
 // een gewone Git-voor-Windows op systeemniveau. Alleen een lokale kunnen we
 // weer weghalen.
 ipcMain.handle('git:accountInfo', (_, dir) => {
+  if (!padToegestaan(dir)) return null
   const leeg = { naam: '', email: '', ghGebruiker: '', helperLokaal: false, ghCli: false }
   if (!dir || !fs.existsSync(dir) || !heeftGit()) return leeg
 
@@ -1081,12 +1107,14 @@ ipcMain.handle('git:accountInfo', (_, dir) => {
 // Alle branches, lokaal en op de remote. Alleen op aanvraag: dit hangt aan een
 // knop en hoeft niet mee te draaien in de achtergrondverversing.
 ipcMain.handle('git:branches', (_, dir) => {
+  if (!padToegestaan(dir)) return []
   if (!dir || !fs.existsSync(dir) || !heeftGit()) return []
   return GitTools.parseBranches(
     gitUit(dir, ['branch', '-a', '--format=%(HEAD)%09%(refname)%09%(refname:short)%09%(upstream:short)%09%(upstream:track)']))
 })
 
 ipcMain.handle('git:stashLijst', (_, dir) => {
+  if (!padToegestaan(dir)) return []
   if (!dir || !fs.existsSync(dir) || !heeftGit()) return []
   const lijst = GitTools.parseStashLijst(gitUit(dir, ['stash', 'list', '--pretty=%gd%x09%cs%x09%gs']))
   if (lijst.length) return lijst
@@ -1100,6 +1128,7 @@ ipcMain.handle('git:stashLijst', (_, dir) => {
 // Welke bestanden zitten er in één stash. Dat is de vraag die je stelt vóór je
 // hem terughaalt of weggooit: "was dit het werk dat ik zoek?"
 ipcMain.handle('git:stashInhoud', (_, dir, ref) => {
+  if (!padToegestaan(dir)) return []
   if (!dir || !fs.existsSync(dir) || !heeftGit()) return []
   if (!GitTools.stashRefGeldig(ref)) return []
   // --include-untracked, want de stash-knop zet met -u ook nieuwe bestanden
@@ -1125,18 +1154,32 @@ ipcMain.handle('git:stashInhoud', (_, dir, ref) => {
 // De renderer houdt bij welke projecten een git-map hebben en hoe ze ervoor
 // staan. Die lijst zetten we hier klaar, want op het moment zelf kunnen we hem
 // niet meer opvragen.
-let gitProjectenVoorAfsluiten = []
+let gitProjectenVoorAfsluiten = { accountId: '', lijst: [] }
 ipcMain.on('git:projecten', (_, lijst) => {
-  gitProjectenVoorAfsluiten = Array.isArray(lijst) ? lijst : []
+  const d = lijst || {}
+  // Mét het account erbij. Bij een Windows-shutdown vlak na het wisselen mag
+  // er nooit gestasht worden in de map van degene die net is uitgelogd.
+  gitProjectenVoorAfsluiten = {
+    accountId: String(d.accountId || ''),
+    lijst: Array.isArray(d.lijst) ? d.lijst : [],
+  }
 })
 
-const STASH_MELDING_FILE = path.join(app.getPath('userData'), 'git-stash-melding.json')
+// Per account een eigen melding. Anders krijgt je collega bij het opstarten te
+// horen dat er werk van jou is weggezet, met jouw projectnamen erbij.
+const stashMeldingBestand = (accountId) =>
+  path.join(app.getPath('userData'), `git-stash-melding-${Accounts.geldigAccountId(accountId) ? accountId : 'onbekend'}.json`)
 
 app.on('session-end', () => {
   try {
     if (actieveInstellingen().git.afsluiten !== 'stashen') return
 
-    const teStashen = GitTools.teStashenProjecten(gitProjectenVoorAfsluiten, 'stashen')
+    // Hoort deze lijst nog bij wie er nu ingelogd is? Zo niet, dan raken we
+    // niets aan: liever niets stashen dan in de map van een ander.
+    const st = accountStand()
+    if (gitProjectenVoorAfsluiten.accountId !== st.actiefAccount) return
+
+    const teStashen = GitTools.teStashenProjecten(gitProjectenVoorAfsluiten.lijst, 'stashen')
     if (!teStashen.length) return
 
     const gelukt = []
@@ -1151,7 +1194,8 @@ app.on('session-end', () => {
     }
 
     if (gelukt.length) {
-      fs.writeFileSync(STASH_MELDING_FILE, JSON.stringify({ op: Date.now(), projecten: gelukt }))
+      fs.writeFileSync(stashMeldingBestand(st.actiefAccount),
+        JSON.stringify({ op: Date.now(), projecten: gelukt }))
     }
   } catch { /* nooit het afsluiten van Windows ophouden met een fout van ons */ }
 })
@@ -1160,9 +1204,10 @@ app.on('session-end', () => {
 // bestand: de melding hoort één keer te komen, niet elke start opnieuw.
 ipcMain.handle('git:stashMelding', () => {
   try {
-    if (!fs.existsSync(STASH_MELDING_FILE)) return null
-    const m = JSON.parse(fs.readFileSync(STASH_MELDING_FILE, 'utf8'))
-    try { fs.unlinkSync(STASH_MELDING_FILE) } catch {}
+    const bestand = stashMeldingBestand(accountStand().actiefAccount)
+    if (!fs.existsSync(bestand)) return null
+    const m = JSON.parse(fs.readFileSync(bestand, 'utf8'))
+    try { fs.unlinkSync(bestand) } catch {}
     return m
   } catch { return null }
 })
@@ -1177,6 +1222,7 @@ ipcMain.handle('git:stashMelding', () => {
 //             proces staan wachten op invoer die niemand ziet
 //   tijdslimiet zodat een trage of onbereikbare remote niet blijft hangen
 ipcMain.handle('git:fetch', (_, dir) => new Promise((resolve) => {
+  if (!padToegestaan(dir)) { resolve({ ok: false, reden: 'ander-account' }); return }
   if (!dir || !fs.existsSync(dir) || !heeftGit()) { resolve({ ok: false, reden: 'geen-repo' }); return }
 
   execFile('git', ['fetch', '--prune'], {

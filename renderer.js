@@ -496,6 +496,7 @@ async function ververesGitStaat(p, forceer = false) {
 // Eén voor één, niet allemaal tegelijk: bij tien projecten zou dat tien
 // git-processen naast elkaar zijn.
 async function ververesAlleGitStaten(forceer = false) {
+  meldGitPadenAanMain()
   for (const p of projects) {
     for (const loc of projectLocaties(p)) await ververesGitPad(loc.pad, forceer)
   }
@@ -519,7 +520,18 @@ function gitProjectenLijst() {
 }
 
 function meldGitProjectenAanMain() {
-  try { window.api.gitProjecten(gitProjectenLijst()) } catch {}
+  try { window.api.gitProjecten({ accountId: actiefAccount, lijst: gitProjectenLijst() }) } catch {}
+}
+
+// Welke mappen horen bij dit account? Main weigert daarna elke git-actie op een
+// pad dat er niet in staat. Dit moet vóór de eerste git-aanroep gebeuren, want
+// anders draait er nog iets op de map van degene die net is uitgelogd.
+function meldGitPadenAanMain() {
+  const paden = []
+  for (const p of projects) {
+    for (const loc of projectLocaties(p)) paden.push(loc.pad)
+  }
+  try { window.api.gitPaden({ accountId: actiefAccount, paden }) } catch {}
 }
 
 // Achtergrondverversing. Het venster verbergen zet hem stil: anders draaien er
@@ -826,6 +838,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   // van projecten die niet open staan: de afsluitcontrole moet straks over
   // allemaal iets kunnen zeggen, niet alleen over het laatst bekeken project.
   setTimeout(async () => {
+    meldGitPadenAanMain()
     await ververesAlleGitStaten(true)
     startGitPolling()
     // Ook bij het opstarten kijken of de remote vóórloopt. restoreLastView()
@@ -7230,10 +7243,17 @@ async function wisselAccount(id) {
   const r = await window.api.accountSwitch(id)
   if (!r || !r.ok) return
 
+  // Eerst de deur dicht: main mag vanaf nu niets meer met de mappen van het
+  // vorige account, ook niet als er nog een verversing onderweg is.
+  try { window.api.gitPaden({ accountId: id, paden: [] }) } catch {}
+  try { window.api.gitProjecten({ accountId: id, lijst: [] }) } catch {}
+
   actiefAccount = id
   projects = r.projects || []
   settings = r.settings || settings
   gitStaten = {}
+  for (const k of Object.keys(gitLaatsteFetch)) delete gitLaatsteFetch[k]
+  meldGitPadenAanMain()
   activeId = projects[0] ? projects[0].id : ''
   setView(projects.length ? 'project' : 'cmd')
   renderSidebar()

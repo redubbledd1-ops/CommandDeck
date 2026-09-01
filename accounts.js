@@ -114,6 +114,29 @@
     return s
   }
 
+  // ── Welke mappen horen bij dit account ──────────────────────────────────────
+  // Dit is het stuk dat wél sluitend kan: er mag nooit een git-actie draaien op
+  // de map van een ander account, en niemand mag een melding krijgen over
+  // andermans repo. Vergelijken doen we op een genormaliseerd pad, want Windows
+  // maakt geen verschil tussen hoofdletters en gebruikt beide schuine strepen.
+  function normaliseerPad(pad) {
+    return String(pad || '')
+      .trim()
+      .replace(/\\/g, '/')
+      .replace(/\/+$/, '')
+      .toLowerCase()
+  }
+
+  // Exact vergelijken, geen submappen. Een locatie is een concreet pad; iets
+  // dat er alleen onder valt is niet hetzelfde project en hoort niet mee te
+  // liften op de toestemming.
+  function padHoortBij(paden, dir) {
+    const n = normaliseerPad(dir)
+    if (!n) return false
+    const lijst = paden instanceof Set ? [...paden] : (paden || [])
+    return lijst.some(p => normaliseerPad(p) === n)
+  }
+
   // Een account verwijderen mag nooit het laatste zijn: dan is er niets meer om
   // in te werken. En het actieve account moet daarna nog bestaan.
   function naVerwijderen(lijst, actief, id) {
@@ -126,6 +149,7 @@
     MAX_NAAM, PERSOONLIJK,
     nieuwAccountId, geldigAccountId, schoneNaam, maakAccount, accountGeldig, naamVrij,
     projectBestand, migreer, accountInstellingen, samengevoegd, metAccountInstellingen,
+    normaliseerPad, padHoortBij,
     naVerwijderen,
   }
 })

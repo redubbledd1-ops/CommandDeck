@@ -86,6 +86,38 @@ t('en het actieve blijft actief', na.actiefAccount === lijst[0].id)
 const na2 = A.naVerwijderen(lijst, lijst[1].id, lijst[1].id)
 t('verwijder je jezelf, dan schuift het actieve door', na2.actiefAccount === lijst[0].id)
 
+// ── isolatie: welke mappen horen bij dit account ─────────────────────────────
+// Dit is het deel dat sluitend moet zijn. Niet tegen meelezen — dat kan de app
+// niet — maar tegen gedrag: nooit een git-actie in de map van een ander
+// account, en nooit een melding over andermans repo.
+const mijnPaden = ['C:\\Users\\redub\\Desktop\\Projects\\CommandDeck',
+                   'C:/Users/redub/Desktop/Projects/resume']
+
+t('mijn eigen map mag', A.padHoortBij(mijnPaden, 'C:\\Users\\redub\\Desktop\\Projects\\CommandDeck'))
+t('hoofdletters maken niet uit — Windows doet dat ook niet',
+  A.padHoortBij(mijnPaden, 'c:/users/redub/desktop/projects/commanddeck'))
+t('schuine strepen door elkaar mag',
+  A.padHoortBij(mijnPaden, 'C:/Users/redub/Desktop/Projects/CommandDeck'))
+t('een streep op het eind maakt niet uit',
+  A.padHoortBij(mijnPaden, 'C:/Users/redub/Desktop/Projects/CommandDeck/'))
+
+t('de map van een ander account mag NIET',
+  !A.padHoortBij(mijnPaden, 'C:/Users/redub/Desktop/Projects/DD-Music'))
+t('een submap mag ook niet meeliften',
+  !A.padHoortBij(mijnPaden, 'C:/Users/redub/Desktop/Projects/CommandDeck/lib'))
+t('een bovenliggende map al helemaal niet',
+  !A.padHoortBij(mijnPaden, 'C:/Users/redub/Desktop/Projects'))
+t('een leeg pad mag nooit', !A.padHoortBij(mijnPaden, ''))
+t('null mag nooit', !A.padHoortBij(mijnPaden, null))
+t('zonder toegestane paden mag niets', !A.padHoortBij([], 'C:/wat/dan/ook'))
+t('een Set werkt net zo goed als een lijst',
+  A.padHoortBij(new Set(mijnPaden), 'C:/Users/redub/Desktop/Projects/resume'))
+
+t('normaliseren maakt beide schrijfwijzen gelijk',
+  A.normaliseerPad('C:\\Map\\Sub\\') === A.normaliseerPad('c:/map/sub'))
+t('en laat niets van het pad weg',
+  A.normaliseerPad('C:/Map/Sub') === 'c:/map/sub')
+
 // ── de bedrading ─────────────────────────────────────────────────────────────
 const APP = path.join(__dirname, '..')
 const html = fs.readFileSync(path.join(APP, 'index.html'), 'utf8')
@@ -99,6 +131,21 @@ for (const k of ['settings.section.accountsTitle', 'accounts.toevoegen', 'accoun
   t('tekst ' + k + ' bestaat in nl en en', !!nl[k] && !!en[k])
 }
 // Deze regel is het verschil tussen een eerlijke functie en een schijnzekerheid.
+// De vier plekken waar git-gegevens tussen accounts door konden lekken.
+const mainJs = fs.readFileSync(path.join(APP, 'main.js'), 'utf8')
+t('elke git-aanroep met een pad wordt getoetst',
+  (mainJs.match(/padToegestaan\(dir\)/g) || []).length >= 6)
+t('de afsluitlijst draagt het account met zich mee',
+  /gitProjectenVoorAfsluiten\.accountId !== st\.actiefAccount/.test(mainJs))
+t('de stash-melding is per account',
+  /stashMeldingBestand\(/.test(mainJs) && !/const STASH_MELDING_FILE/.test(mainJs))
+
+const rendererJs = fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8')
+t('bij het wisselen gaat de deur eerst dicht',
+  /gitPaden\(\{ accountId: id, paden: \[\] \}\)/.test(rendererJs))
+t('en de fetch-teller wordt geleegd',
+  /delete gitLaatsteFetch\[k\]/.test(rendererJs))
+
 t('de waarschuwing dat dit niets beveiligt staat er, in beide talen',
   /Windows/.test(nl['accounts.eerlijk'] || '') && /Windows/.test(en['accounts.eerlijk'] || ''))
 
