@@ -942,6 +942,7 @@ ipcMain.handle('git:info', (_, dir) => {
   return GitTools.maakStaat({
     beschikbaar: true, isRepo: true, remotes,
     branch: st.branch, commits: st.commits, upstream: st.upstream,
+    nieuw: st.nieuw, nieuweBestanden: st.nieuweBestanden,
     ahead: st.ahead, behind: st.behind, vuil: st.vuil,
     conflicten: st.conflicten, stashes, bestanden: st.bestanden,
     naam: ident.naam, email: ident.email,

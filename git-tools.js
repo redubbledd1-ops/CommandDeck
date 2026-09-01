@@ -34,6 +34,9 @@
     // Wisselen, maken, samenvoegen en verwijderen horen bij elkaar, en de
     // meeste mensen die in hun eentje werken openen dit nooit.
     { id: 'git-branch',   labelKey: 'git.btn.branch', label: 'branches',        icon: 'ti-git-fork',     cls: 'gitbranch', schrijft: true, standaardUit: true },
+    // Zien wat er verandert vóór je het vastlegt. Staat wél aan: dit is hoe je
+    // merkt dat er een sleutel of een debug-regel meegaat.
+    { id: 'git-diff',     labelKey: 'git.btn.diff',   label: 'diff',            icon: 'ti-file-diff',    cls: 'gitdiff' },
     // Terughalen staat wél aan, en verschijnt vanzelf zodra er iets in de
     // stash zit — ook als dat er door de afsluitcontrole in is gezet en je
     // de stash-knop nooit hebt aangeraakt. Dit is de weg terug; die mag nooit
@@ -86,7 +89,8 @@
   //   # branch.ab +2 -0         ontbreekt dan ook
   //   1/2/u/? <...> <pad>       één regel per gewijzigd of onbekend bestand
   function parseStatusV2(uit) {
-    const r = { branch: null, upstream: null, ahead: 0, behind: 0, commits: false, vuil: 0, conflicten: 0, bestanden: [] }
+    const r = { branch: null, upstream: null, ahead: 0, behind: 0, commits: false,
+                vuil: 0, conflicten: 0, nieuw: 0, bestanden: [], nieuweBestanden: [] }
     for (const regel of String(uit || '').split('\n')) {
       const r2 = regel.replace(/\r$/, '')
       if (!r2) continue
@@ -109,8 +113,13 @@
         // versies die elkaar tegenspreken. Dat telt ook als vuil, maar het is
         // een ander soort probleem — je moet het oplossen, niet vastleggen.
         if (r2[0] === 'u') r.conflicten++
+        // '?' = nog niet in versiebeheer. Dat zijn de bestanden waar het bij
+        // een commit mis kan gaan: `git add -A` pakt ze mee, en een .env of
+        // een sleutel die er nog nooit in zat staat er dan ineens in.
+        if (r2[0] === '?') r.nieuw++
         const pad = padUitStatusRegel(r2)
         if (pad && r.bestanden.length < 40) r.bestanden.push(pad)
+        if (pad && r2[0] === '?' && r.nieuweBestanden.length < 40) r.nieuweBestanden.push(pad)
       }
     }
     return r
@@ -144,7 +153,8 @@
   //                dat `git commit` gaat weigeren
   function maakStaat({ beschikbaar = true, isRepo = false, remotes = [], branch = null,
                        commits = true, upstream = null, ahead = 0, behind = 0,
-                       vuil = 0, conflicten = 0, stashes = 0, bestanden = [],
+                       vuil = 0, conflicten = 0, nieuw = 0, stashes = 0,
+                       bestanden = [], nieuweBestanden = [],
                        naam = '', email = '' } = {}) {
     const lijst = Array.isArray(remotes) ? remotes.filter(Boolean) : parseRemotes(remotes)
     return {
@@ -160,6 +170,8 @@
       behind: behind || 0,
       vuil: vuil || 0,
       conflicten: conflicten || 0,
+      nieuw: nieuw || 0,
+      nieuweBestanden: Array.isArray(nieuweBestanden) ? nieuweBestanden : [],
       stashes: stashes || 0,
       bestanden: Array.isArray(bestanden) ? bestanden : [],
       naam: String(naam || '').trim(),
@@ -177,7 +189,7 @@
   //   met remote  -> koppelen valt weg, push/pull/fetch komen erbij
   // Commit hoort dus al bij een niet-gekoppelde repo. Anders stuurt de
   // koppel-dialoog je naar "maak eerst een commit" zonder knop om dat te doen.
-  const LOKAAL = ['git-status', 'git-commit', 'git-stash', 'git-branch', 'git-log']
+  const LOKAAL = ['git-status', 'git-commit', 'git-diff', 'git-stash', 'git-branch', 'git-log']
   const REMOTE = ['git-push', 'git-pull', 'git-fetch']
 
   function zichtbareGitIds(staat) {
@@ -196,6 +208,9 @@
       // Zonder commit bestaat er nog geen branch om iets mee te doen: git
       // heeft dan wel een naam voor HEAD, maar nog geen tak.
       if (id === 'git-branch' && !staat.commits) continue
+      // Zonder wijzigingen valt er niets te vergelijken. Zo is de knop meteen
+      // het antwoord op "is er iets veranderd?".
+      if (id === 'git-diff' && !(staat.vuil > 0)) continue
       uit.push(id)
     }
     return uit
@@ -276,6 +291,15 @@
       // overschrijven die je hebt aangepast.
       vuil: i.vuil,
     }
+  }
+
+  // ── Zien wat er verandert ───────────────────────────────────────────────────
+  // `git diff` alleen laat de bestanden zien die al onder versiebeheer staan,
+  // en dan nog alleen wat niet klaargezet is. Met HEAD erbij zie je alles wat
+  // deze commit zou bevatten — behalve nieuwe bestanden, want die kent git nog
+  // niet. Die noemen we apart; het zijn juist de gevaarlijkste.
+  function diffCommando() {
+    return 'git diff HEAD'
   }
 
   // ── Branches ────────────────────────────────────────────────────────────────
@@ -923,6 +947,7 @@
     identiteitCommando, profielCommando, ghSwitchCommando, vraagtOmInloggen,
     INLOG_ONTHOUDEN, INLOG_VRAGEN, INLOG_KEUZES,
     indicator, onveiligeRedenen, magFetchen, achterstandMelding, FETCH_INTERVAL_MS,
+    diffCommando,
     parseBranches, lokaleBranches, huidigeBranch, nieuweRemoteBranches,
     geldigeBranchNaam, veiligeBranchNaam, checkoutCommando, nieuweBranchCommando,
     verwijderBranchCommando, verwijderRemoteBranchCommando, mergeCommando, wisselBlokkade,

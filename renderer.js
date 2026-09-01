@@ -167,7 +167,7 @@ const KLEUR_IDX = {
   android: 2, windows: 5, web: 3, info: 3, pub: 5, clean: 10, doctor: 8,
   apk: 9, buildweb: 0, buildwin: 11,
   gitlink: 4, gitread: 6, gitpull: 2, gitfetch: 7, gitlog: 1,
-  gitcommit: 9, gitpush: 3, gitstash: 8, gitstashlijst: 10, gitbranch: 5,
+  gitcommit: 9, gitpush: 3, gitstash: 8, gitstashlijst: 10, gitbranch: 5, gitdiff: 7,
   'editor-vscode': 5, 'editor-cursor': 0, 'editor-claude': 4,
   'editor-android-studio': 2, 'editor-claude-desktop': 6,
   'merk-visualstudio': 1, 'merk-codex': 8, 'merk-openai': 8, 'merk-gemini': 5,
@@ -11181,6 +11181,7 @@ async function runGitCmd(project, cmdKey) {
   // ervoor: eerst moet je zien wat er ligt. Dus een eigen weg, net als koppelen.
   if (cmdKey === 'git-stash-lijst') { await stashOverzicht(project); return }
   if (cmdKey === 'git-branch') { await branchOverzicht(project); return }
+  if (cmdKey === 'git-diff') { await toonDiff(project); return }
   if (GitTools.isSchrijfKnop(cmdKey)) { await schrijfGitCmd(project, cmdKey); return }
 
   const cmd = GitTools.GIT_CMD_MAP[cmdKey]
@@ -11221,6 +11222,24 @@ async function schrijfGitCmd(project, cmdKey) {
     if (!await controleerIdentiteit(project, staat)) return
     // De plaatshouder is meteen het bericht dat je krijgt als je niets typt.
     // Zo zie je vóór het klikken wat er komt te staan.
+    // Gaan er nieuwe bestanden mee, dan eerst vragen of je die wilt zien. Dat
+    // is de categorie waar een .env of een sleutel in zit, en `add -A` pakt ze
+    // gewoon mee.
+    if (staat.nieuw > 0) {
+      const kijk = await vraagKeuze({
+        titel: I18N.t('git.commit.nieuwTitel'),
+        tekst: I18N.t('git.commit.nieuwTekst', { aantal: staat.nieuw, totaal: staat.vuil }),
+        regels: staat.nieuweBestanden.slice(0, 12),
+        knoppen: [
+          { label: I18N.t('common.cancel'), waarde: '' },
+          { label: I18N.t('git.commit.bekijken'), waarde: 'diff' },
+          { label: I18N.t('git.commit.doorgaan'), waarde: 'door', soort: 'primair' },
+        ],
+      })
+      if (!kijk) return
+      if (kijk === 'diff') { await toonDiff(project); return }
+    }
+
     const automatisch = GitTools.automatischCommitBericht(staat)
     const bericht = await vraagTekst({
       titel: I18N.t('git.commit.title'),
@@ -11274,6 +11293,27 @@ function stashLabel(s) {
     ? s.bericht
     : I18N.t('git.stashLijst.wijzigingenOp', { branch: s.branch || '?' })
   return s.datum ? `${wat} — ${s.datum}` : wat
+}
+
+// Zien wat er verandert vóór je het vastlegt. `git diff HEAD` toont alles wat
+// deze commit zou bevatten — behálve nieuwe bestanden, want die kent git nog
+// niet. Juist daar zit het risico (een .env, een sleutel), dus die noemen we
+// er apart bij in plaats van te doen alsof de diff het hele verhaal is.
+async function toonDiff(project) {
+  const staat = await ververesGitStaat(project, true)
+  if (!staat || !staat.isRepo) return
+
+  if (!staat.vuil) { await meldKort(I18N.t('git.diff.leegTitel'), I18N.t('git.diff.leegTekst')); return }
+
+  await executeCmd(project, GitTools.diffCommando(), 'git-diff')
+
+  if (staat.nieuw > 0) {
+    springNaarOutput()
+    appendLine('out', '')
+    appendLine('out', I18N.t('git.diff.nieuweKop', { aantal: staat.nieuw }))
+    for (const b of staat.nieuweBestanden.slice(0, 20)) appendLine('out', '  ?  ' + b)
+    if (staat.nieuw > 20) appendLine('out', '  …')
+  }
 }
 
 // ── Branches ─────────────────────────────────────────────────────────────────

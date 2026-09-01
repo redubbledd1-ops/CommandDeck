@@ -952,5 +952,13 @@
   "git.branch.wegRemoteBevestig": "{naam} wordt van de remote verwijderd. Dat geldt voor iedereen die deze repository gebruikt, en het is niet ongedaan te maken.",
   "git.branch.wegNietSamengevoegdTitel": "Nog niet samengevoegd",
   "git.branch.wegNietSamengevoegdTekst": "{naam} bevat commits die nergens anders in zitten. Verwijderen betekent dat dat werk weg is.",
-  "git.branch.wegForceren": "toch verwijderen"
+  "git.branch.wegForceren": "toch verwijderen",
+  "git.btn.diff": "diff",
+  "git.diff.leegTitel": "Niets veranderd",
+  "git.diff.leegTekst": "Er is niets om te vergelijken.",
+  "git.diff.nieuweKop": "--- {aantal} nieuw bestand(en), niet zichtbaar in de diff hierboven ---",
+  "git.commit.nieuwTitel": "Er gaan nieuwe bestanden mee",
+  "git.commit.nieuwTekst": "{aantal} van de {totaal} bestanden staan nog niet in versiebeheer. Die worden nu voor het eerst vastgelegd — controleer of er niets tussen zit wat er niet in hoort.",
+  "git.commit.bekijken": "eerst bekijken",
+  "git.commit.doorgaan": "doorgaan"
 }

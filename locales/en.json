@@ -952,5 +952,13 @@
   "git.branch.wegRemoteBevestig": "{naam} will be deleted from the remote. That applies to everyone using this repository, and it cannot be undone.",
   "git.branch.wegNietSamengevoegdTitel": "Not merged yet",
   "git.branch.wegNietSamengevoegdTekst": "{naam} has commits that exist nowhere else. Deleting means that work is gone.",
-  "git.branch.wegForceren": "delete anyway"
+  "git.branch.wegForceren": "delete anyway",
+  "git.btn.diff": "diff",
+  "git.diff.leegTitel": "Nothing changed",
+  "git.diff.leegTekst": "There is nothing to compare.",
+  "git.diff.nieuweKop": "--- {aantal} new file(s), not shown in the diff above ---",
+  "git.commit.nieuwTitel": "New files are included",
+  "git.commit.nieuwTekst": "{aantal} of the {totaal} files are not under version control yet. They are about to be recorded for the first time — check that nothing is in there that should not be.",
+  "git.commit.bekijken": "look first",
+  "git.commit.doorgaan": "continue"
 }

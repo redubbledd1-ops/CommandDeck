@@ -185,8 +185,15 @@ const repoStash = G.maakStaat({ isRepo: true, remotes: ['origin'], branch: 'main
 
 t('geen stash -> geen terughaalknop', !G.zichtbareGitIds(repoVol).includes('git-stash-lijst'))
 t('wel een stash -> wel een terughaalknop', G.zichtbareGitIds(repoStash).includes('git-stash-lijst'))
-t('met een stash staat de hele lijst er, op koppelen na',
-  G.zichtbareGitIds(repoStash).join() === G.GIT_IDS.filter(i => i !== 'git-koppelen').join())
+// Deze repo heeft een stash maar geen wijzigingen, dus de diff-knop hoort
+// er niet te staan: er valt niets te vergelijken.
+gelijk('met een stash staat de hele lijst er, op koppelen en diff na',
+  G.zichtbareGitIds(repoStash),
+  G.GIT_IDS.filter(i => i !== 'git-koppelen' && i !== 'git-diff'))
+t('en mét wijzigingen staat werkelijk alles er, op koppelen na',
+  G.zichtbareGitIds(G.maakStaat({ isRepo: true, remotes: ['origin'], branch: 'main',
+    upstream: 'origin/main', vuil: 1, stashes: 2 })).join()
+  === G.GIT_IDS.filter(i => i !== 'git-koppelen').join())
 t('een stash in een losse repo mag ook terug',
   G.zichtbareGitIds(G.maakStaat({ isRepo: true, remotes: [], branch: 'main', stashes: 1 }))
     .includes('git-stash-lijst'))
@@ -655,6 +662,39 @@ t('en de locIndex blijft bewaard, anders commit je in de verkeerde map',
 gelijk('stashen pakt alleen de locatie met niet-vastgelegd werk',
   G.teStashenProjecten(tweeLocs, 'stashen').map(x => x.naam), ['resume — main'])
 
+// ── zien wat er verandert ────────────────────────────────────────────────────
+const stDiff = G.parseStatusV2([
+  '# branch.oid a', '# branch.head main',
+  '1 .M N... 100644 100644 100644 a b renderer.js',
+  '1 M. N... 100644 100644 100644 c d style.css',
+  '? .env',
+  '? lib/nieuw.dart',
+].join('\n'))
+
+t('drie wijzigingen in totaal', stDiff.vuil === 4)
+t('waarvan twee nieuw', stDiff.nieuw === 2)
+gelijk('en die worden apart bijgehouden', stDiff.nieuweBestanden, ['.env', 'lib/nieuw.dart'])
+gelijk('terwijl de volledige lijst alles bevat', stDiff.bestanden,
+  ['renderer.js', 'style.css', '.env', 'lib/nieuw.dart'])
+t('zonder nieuwe bestanden is de lijst leeg',
+  G.parseStatusV2('# branch.oid a\n# branch.head main\n1 .M N... 1 2 3 a b x.js').nieuweBestanden.length === 0)
+t('en het aantal nul',
+  G.parseStatusV2('# branch.oid a\n# branch.head main\n1 .M N... 1 2 3 a b x.js').nieuw === 0)
+
+t('de diff vergelijkt met HEAD, niet alleen met wat klaarstaat',
+  G.diffCommando() === 'git diff HEAD')
+t('de diff schrijft niets',
+  !/\b(commit|push|stash|reset|checkout|merge|rebase|add)\b/.test(G.diffCommando()))
+
+t('de diff-knop staat aan — dit is hoe je een sleutel opmerkt',
+  !G.GIT_CMD_DEFS.find(d => d.id === 'git-diff').standaardUit)
+t('de diff-knop verschijnt zodra er iets gewijzigd is',
+  G.zichtbareGitIds(G.maakStaat({ isRepo: true, remotes: [], branch: 'main', vuil: 1 })).includes('git-diff'))
+t('en verdwijnt als er niets te vergelijken valt',
+  !G.zichtbareGitIds(G.maakStaat({ isRepo: true, remotes: [], branch: 'main', vuil: 0 })).includes('git-diff'))
+t('hij werkt ook zonder remote',
+  G.zichtbareGitIds(G.maakStaat({ isRepo: true, remotes: [], branch: 'main', vuil: 2 })).includes('git-diff'))
+
 // ── branches ─────────────────────────────────────────────────────────────────
 // Zoals `git branch -a --format=...` het echt teruggeeft. De vólledige refnaam
 // is nodig: refname:short geeft voor een remote-tak gewoon 'origin/main', en
@@ -759,6 +799,11 @@ for (const sleutel of ['git.afsluit.titel', 'git.afsluit.commitPush', 'git.afslu
                        'git.afsluit.reden.niet-gepusht', 'git.stashMelding.titel',
                        'settings.git.label', 'settings.git.off', 'settings.git.warn', 'settings.git.stash']) {
   t('afsluit-tekst ' + sleutel + ' bestaat in nl en en', !!nl[sleutel] && !!en[sleutel])
+}
+
+for (const sleutel of ['git.btn.diff', 'git.diff.leegTitel', 'git.diff.nieuweKop',
+                       'git.commit.nieuwTitel', 'git.commit.bekijken', 'git.commit.doorgaan']) {
+  t('diff-tekst ' + sleutel + ' bestaat in nl en en', !!nl[sleutel] && !!en[sleutel])
 }
 
 for (const sleutel of ['git.btn.branch', 'git.branch.titel', 'git.branch.nieuw', 'git.branch.wisselen',
