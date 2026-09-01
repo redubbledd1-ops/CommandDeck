@@ -724,6 +724,28 @@ t('zonder profiel valt er niets te activeren',
 t('een profiel zonder GitHub-account zet alleen de naam',
   G.accountActiveerStappen({ ...prof, ghGebruiker: '' }, true).map(x => x.soort).join() === 'identiteit')
 
+// ── geïnstalleerd is niet hetzelfde als ingelogd ─────────────────────────────
+// Hier ging het mis: gh stond er wél, maar was nooit ingelogd. De app sloeg het
+// inloggen over en liep meteen tegen 'To get started with GitHub CLI' aan.
+t('de tekst van gh bij niet-ingelogd levert geen account op',
+  G.parseGhAccounts('To get started with GitHub CLI, please run:  gh auth login').length === 0)
+t('ook niet de andere variant',
+  G.parseGhAccounts('You are not logged into any GitHub hosts. To log in, run: gh auth login').length === 0)
+t('en met een echte login wél',
+  G.parseGhAccounts('  ✓ Logged in to github.com account frank-v (keyring)').length === 1)
+
+const mainBron4 = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8')
+const statusBlok = (mainBron4.match(/ipcMain\.handle\('git:ghStatus'[\s\S]*?\n\}\)/) || [''])[0]
+t('er is een status die beide vragen beantwoordt',
+  /geinstalleerd/.test(statusBlok) && /ingelogd/.test(statusBlok))
+t('ingelogd hangt aan een gevonden account, niet aan het bestaan van gh',
+  /ingelogd: accounts\.length > 0/.test(statusBlok))
+
+const rendererBron = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer.js'), 'utf8')
+t('de renderer logt eerst in en haalt daarna pas op',
+  rendererBron.indexOf('if (!st.ingelogd) {') > 0
+  && rendererBron.indexOf('if (!st.ingelogd) {') < rendererBron.indexOf('await window.api.gitGhIdentiteit()'))
+
 // ── terugval als de API niet lukt ────────────────────────────────────────────
 // `gh api user` kan mislukken terwijl je wél ingelogd bent: geen netwerk, een
 // proxy op het werk, een token zonder de juiste rechten. `gh auth status` weet

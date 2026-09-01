@@ -1056,5 +1056,7 @@
   "git.inlog.installMislukt": "The install did not finish or was cancelled. Check the output for what went wrong — on a work pc winget is often blocked.",
   "accounts.gitOphalen.geenGh": "The GitHub CLI (gh) was not found. Without it I cannot fetch your details — install it, or fill in your name and address yourself.",
   "accounts.gitOphalen.nietIngelogd": "gh is there, but could not fetch your details. That usually means: not logged in yet, or no connection. Log in with the 'Link GitHub account' button, or fill it in yourself.",
-  "accounts.gitGevondenViaStatus": "You are logged in as {gh}. I could not read your profile, so I use the GitHub noreply address — that still links your commits to your account. Commits will say {naam} <{email}>. Set it up like this?"
+  "accounts.gitGevondenViaStatus": "You are logged in as {gh}. I could not read your profile, so I use the GitHub noreply address — that still links your commits to your account. Commits will say {naam} <{email}>. Set it up like this?",
+  "accounts.gitHaalTekstNietIngelogd": "The GitHub CLI is there, but you are not logged in yet. I will open your browser to log in and then fetch your name, email and username — so you do not have to type anything.",
+  "git.inlog.nietGelukt": "The login was not completed. Check the output for what happened — usually the window was closed before the code was entered."
 }

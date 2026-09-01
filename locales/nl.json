@@ -1056,5 +1056,7 @@
   "git.inlog.installMislukt": "De installatie is niet gelukt of is afgebroken. Kijk in de uitvoer wat er misging — op een werk-pc is winget vaak geblokkeerd.",
   "accounts.gitOphalen.geenGh": "De GitHub-CLI (gh) is niet gevonden. Zonder die kan ik je gegevens niet ophalen — installeer hem, of vul je naam en adres zelf in.",
   "accounts.gitOphalen.nietIngelogd": "gh is er wel, maar kon je gegevens niet opvragen. Meestal betekent dat: nog niet ingelogd, of geen verbinding. Log in met de knop 'GitHub-account koppelen', of vul het zelf in.",
-  "accounts.gitGevondenViaStatus": "Je bent ingelogd als {gh}. Je profielgegevens kon ik niet opvragen, dus ik gebruik het noreply-adres van GitHub — dat koppelt je commits gewoon aan je account. Commits komen op naam {naam} <{email}>. Zo instellen?"
+  "accounts.gitGevondenViaStatus": "Je bent ingelogd als {gh}. Je profielgegevens kon ik niet opvragen, dus ik gebruik het noreply-adres van GitHub — dat koppelt je commits gewoon aan je account. Commits komen op naam {naam} <{email}>. Zo instellen?",
+  "accounts.gitHaalTekstNietIngelogd": "De GitHub-CLI staat er, maar je bent nog niet ingelogd. Ik open je browser om in te loggen en haal daarna je naam, e-mailadres en gebruikersnaam op — dan hoef je niets over te typen.",
+  "git.inlog.nietGelukt": "Het inloggen is niet afgerond. Kijk in de uitvoer wat er gebeurde — meestal is het venster gesloten voordat de code was ingevuld."
 }

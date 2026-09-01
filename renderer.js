@@ -7376,24 +7376,38 @@ async function installeerGh() {
 }
 
 async function haalGitIdentiteitOp(accountNaam) {
-  let gh = false
-  try { gh = await window.api.gitGh() } catch {}
+  // Geïnstalleerd en ingelogd zijn twee dingen. Alleen op het eerste kijken is
+  // precies waarom dit doodliep bij iemand die gh wél had maar nooit had
+  // ingelogd: dan sloegen we het inloggen over en liepen we tegen de API aan.
+  let st = { geinstalleerd: false, ingelogd: false }
+  try { st = await window.api.gitGhStatus() } catch {}
+
+  const tekst = !st.geinstalleerd ? 'accounts.gitHaalTekstGeenGh'
+    : !st.ingelogd ? 'accounts.gitHaalTekstNietIngelogd'
+    : 'accounts.gitHaalTekst'
+  const knopLabel = st.ingelogd ? 'accounts.gitOphalen' : 'accounts.gitInloggenEnOphalen'
 
   const keuze = await vraagKeuze({
     titel: I18N.t('accounts.gitTitel', { naam: accountNaam }),
-    tekst: I18N.t(gh ? 'accounts.gitHaalTekst' : 'accounts.gitHaalTekstGeenGh'),
+    tekst: I18N.t(tekst),
     knoppen: [
       { label: I18N.t('common.cancel'), waarde: '' },
       { label: I18N.t('accounts.gitZelfInvullen'), waarde: 'zelf' },
-      { label: I18N.t(gh ? 'accounts.gitOphalen' : 'accounts.gitInloggenEnOphalen'), waarde: 'github', soort: 'primair' },
+      { label: I18N.t(knopLabel), waarde: 'github', soort: 'primair' },
     ],
   })
   if (!keuze) return false          // false = afgebroken, niet doorgaan
   if (keuze === 'zelf') return null // null = zelf invullen
 
-  if (!gh) {
+  if (!st.geinstalleerd) {
+    const gelukt = await installeerGh()
+    if (!gelukt) return null
+  }
+
+  // Nog niet ingelogd? Dan eerst de browser in. Dit was de ontbrekende stap.
+  if (!st.ingelogd) {
     const gelukt = await githubInloggen({ stil: true })
-    if (!gelukt) return null        // inloggen niet gelukt: dan maar met de hand
+    if (!gelukt) return null
   }
 
   const r = await window.api.gitGhIdentiteit()
@@ -7420,7 +7434,8 @@ async function haalGitIdentiteitOp(accountNaam) {
 }
 
 async function githubInloggen(opties = {}) {
-  const gh = await window.api.gitGh()
+  let gh = false
+  try { gh = await window.api.gitGh() } catch {}
   if (!gh) {
     const gelukt = await installeerGh()
     if (!gelukt) return false
@@ -7443,8 +7458,13 @@ async function githubInloggen(opties = {}) {
 
   // De meting of gh er is, en met welke accounts, is nu verouderd.
   try { await window.api.gitGhVergeet() } catch {}
-  const namen = await window.api.gitGhAccounts()
-  if (!namen || !namen.length) return false
+  let na = { ingelogd: false, accounts: [] }
+  try { na = await window.api.gitGhStatus() } catch {}
+  if (!na.ingelogd) {
+    if (!opties.stil) await meldKort(I18N.t('settings.git.inlogKnop'), I18N.t('git.inlog.nietGelukt'))
+    return false
+  }
+  const namen = na.accounts
 
   if (!opties.stil) {
     await meldKort(I18N.t('git.inlog.klaarTitel'),

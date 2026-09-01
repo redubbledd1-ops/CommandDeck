@@ -1425,6 +1425,23 @@ ipcMain.handle('git:ghIdentiteit', () => {
   return { ok: false, reden: 'niet-ingelogd', detail: laatsteFout }
 })
 
+// Geïnstalleerd én ingelogd zijn twee verschillende dingen. Alleen kijken of
+// gh bestaat is precies waarom het ophalen doodliep bij iemand die hem wél had
+// maar nooit had ingelogd.
+ipcMain.handle('git:ghStatus', () => {
+  if (!ghBeschikbaar()) return { geinstalleerd: false, ingelogd: false, accounts: [] }
+  let uit = ''
+  try {
+    uit = execFileSync('gh', ['auth', 'status'], {
+      encoding: 'utf8', timeout: 6000, windowsHide: true, env: childEnv(),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+  } catch (e) { uit = String((e && (e.stdout || e.stderr)) || '') }
+
+  const accounts = GitTools.parseGhAccounts(uit)
+  return { geinstalleerd: true, ingelogd: accounts.length > 0, accounts }
+})
+
 // Welke GitHub-accounts staan al klaar op deze pc?
 ipcMain.handle('git:ghAccounts', () => {
   if (!ghBeschikbaar()) return []
