@@ -211,7 +211,7 @@ const DEFAULT_SETTINGS = {
   //   stashen      idem, plus bij een Windows-shutdown automatisch stashen
   // profielen: [{ id, label, naam, email, ghGebruiker, inloggen }] — zie
   // "Identiteit en accounts" in git-tools.js
-  git: { afsluiten: 'waarschuwen', fetchBijOpenen: true, profielen: [], standaardProfiel: '' },
+  git: { afsluiten: 'waarschuwen', fetchBijOpenen: true, pollSec: 30, profielen: [], standaardProfiel: '' },
   // Volgorde van de knoppen onder het kopje "opdrachten" in de zijbalk
   navVolgorde: ['cmd', 'ps', 'bat', 'dict'],
   // Map met de broncode; wordt automatisch gevonden, hier alleen onthouden

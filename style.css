@@ -553,6 +553,8 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
 .cmd-btn.gitcommit:hover { background: rgba(52,211,153,0.1); border-color: #34d399; }
 .cmd-btn.gitpush { border-color: rgba(167,139,250,0.4); color: #a78bfa; }
 .cmd-btn.gitpush:hover { background: rgba(167,139,250,0.12); border-color: #a78bfa; }
+.cmd-btn.gitterug { border-color: rgba(251,113,133,0.4); color: #fb7185; }
+.cmd-btn.gitterug:hover { background: rgba(251,113,133,0.12); border-color: #fb7185; }
 .cmd-btn.gitdiff { border-color: rgba(251,191,36,0.35); color: #fcd34d; }
 .cmd-btn.gitdiff:hover { background: rgba(251,191,36,0.1); border-color: #fcd34d; }
 .cmd-btn.gitbranch { border-color: rgba(148,163,184,0.4); color: #cbd5e1; }

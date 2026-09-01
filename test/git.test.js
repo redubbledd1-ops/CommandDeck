@@ -37,10 +37,10 @@ t('remotes mag ook rauwe tekst zijn',
 gelijk('geen repo -> alleen koppelen', G.zichtbareGitIds(geenRepo), ['git-koppelen'])
 gelijk('losse repo -> koppelen plus wat lokaal werkt',
   G.zichtbareGitIds(losseRepo),
-  ['git-koppelen', 'git-status', 'git-commit', 'git-stash', 'git-branch', 'git-log'])
+  ['git-koppelen', 'git-status', 'git-commit', 'git-stash', 'git-branch', 'git-terug', 'git-log'])
 gelijk('gekoppeld -> alles, koppelen valt weg',
   G.zichtbareGitIds(gekoppeld),
-  ['git-status', 'git-commit', 'git-push', 'git-pull', 'git-fetch', 'git-stash', 'git-branch', 'git-log'])
+  ['git-status', 'git-commit', 'git-push', 'git-pull', 'git-fetch', 'git-stash', 'git-branch', 'git-terug', 'git-log'])
 gelijk('nog niet gemeten -> geen enkele knop', G.zichtbareGitIds(null), [])
 gelijk('git ontbreekt -> geen enkele knop', G.zichtbareGitIds(geenGit), [])
 t('koppelen verdwijnt zodra er een remote is',
@@ -161,14 +161,15 @@ t('commit, push en stash schrijven',
   ['git-commit', 'git-push', 'git-stash'].every(id => G.isSchrijfKnop(id)))
 t('de leesknoppen schrijven niet',
   ['git-status', 'git-pull', 'git-fetch', 'git-log', 'git-koppelen'].every(id => !G.isSchrijfKnop(id)))
-t('alleen stash is als gevaarlijk gemarkeerd',
-  G.GIT_CMD_DEFS.filter(d => d.gevaar).map(d => d.id).join() === 'git-stash')
+// Gevaarlijk = het kan werk uit beeld halen of je geschiedenis herschrijven.
+gelijk('alleen stash en terugdraaien zijn als gevaarlijk gemarkeerd',
+  G.GIT_CMD_DEFS.filter(d => d.gevaar).map(d => d.id), ['git-stash', 'git-terug'])
 
 // ── fase 1: knoppen die standaard uit staan ──────────────────────────────────
 // Uit staan is niet hetzelfde als niet bestaan. Deze twee blijven gewoon in de
 // lijst zitten, zodat de instellingen ze kunnen tonen en je ze aan kunt zetten.
-gelijk('fetch, stash en branches staan standaard uit',
-  G.STANDAARD_UIT_IDS, ['git-fetch', 'git-stash', 'git-branch'])
+gelijk('fetch, stash, branches en terugdraaien staan standaard uit',
+  G.STANDAARD_UIT_IDS, ['git-fetch', 'git-stash', 'git-branch', 'git-terug'])
 t('standaard uit staat alleen op knoppen die ook echt bestaan',
   G.STANDAARD_UIT_IDS.every(id => G.GIT_IDS.includes(id)))
 t('de dagelijkse lus staat gewoon aan',
@@ -695,6 +696,50 @@ t('en verdwijnt als er niets te vergelijken valt',
 t('hij werkt ook zonder remote',
   G.zichtbareGitIds(G.maakStaat({ isRepo: true, remotes: [], branch: 'main', vuil: 2 })).includes('git-diff'))
 
+// ── terugdraaien ─────────────────────────────────────────────────────────────
+t('reset houdt je wijzigingen', G.resetZachtCommando() === 'git reset --soft HEAD~1')
+t('en gooit dus nooit iets weg', !/--hard|--merge|--keep/.test(G.resetZachtCommando()))
+t('geen enkel commando gebruikt reset --hard',
+  Object.values(G.GIT_CMD_MAP).every(c => !/--hard/.test(c))
+  && !/--hard/.test(G.resetZachtCommando()) && !/--hard/.test(G.amendCommando('x')))
+
+t('amend past alleen het bericht aan',
+  G.amendCommando('betere tekst') === 'git commit --amend -m "betere tekst"')
+t('en schoont het net zo op als een gewone commit',
+  G.amendCommando('met "quotes"') === 'git commit --amend -m "met \'quotes\'"')
+t('leeg bericht levert geen commando', G.amendCommando('  ') === null)
+
+t('een pad met spaties blijft heel',
+  G.weggooiBestandCommando('lib/mijn map/x.dart') === 'git checkout -- "lib/mijn map/x.dart"')
+t('aanhalingstekens in een pad worden geweerd',
+  !G.weggooiBestandCommando('raar"pad.js').includes('""'))
+t('leeg pad levert geen commando', G.weggooiBestandCommando('') === null)
+
+const stGepusht = G.maakStaat({ ...BASIS, ahead: 0 })
+const stEigen = G.maakStaat({ ...BASIS, ahead: 2 })
+const stGeenRemote = G.maakStaat({ isRepo: true, remotes: [], branch: 'main' })
+t('laatste commit staat al op de remote', G.alGepusht(stGepusht) === true)
+t('eigen commits nog niet', G.alGepusht(stEigen) === false)
+t('zonder upstream valt er niets te vergelijken', G.alGepusht(stGeenRemote) === false)
+
+t('zonder commits valt er niets terug te draaien',
+  G.terugdraaiBlokkade('commit', G.maakStaat({ ...BASIS, commits: false })) === 'geen-commits')
+t('weggooien kan niet als er niets gewijzigd is',
+  G.terugdraaiBlokkade('weggooien', G.maakStaat({ ...BASIS, vuil: 0 })) === 'schoon')
+t('met wijzigingen mag het wel',
+  G.terugdraaiBlokkade('weggooien', G.maakStaat({ ...BASIS, vuil: 2 })) === null)
+t('geen repo, niets terug te draaien',
+  G.terugdraaiBlokkade('commit', G.maakStaat({ isRepo: false })) === 'geen-repo')
+
+t('de terugdraai-knop staat standaard uit',
+  G.GIT_CMD_DEFS.find(d => d.id === 'git-terug').standaardUit === true)
+t('en is als gevaarlijk gemarkeerd',
+  G.GIT_CMD_DEFS.find(d => d.id === 'git-terug').gevaar === true)
+t('hij verschijnt pas als er een commit is',
+  !G.zichtbareGitIds(G.maakStaat({ isRepo: true, remotes: [], branch: 'main', commits: false })).includes('git-terug'))
+t('en werkt ook zonder remote',
+  G.zichtbareGitIds(stGeenRemote).includes('git-terug'))
+
 // ── branches ─────────────────────────────────────────────────────────────────
 // Zoals `git branch -a --format=...` het echt teruggeeft. De vólledige refnaam
 // is nodig: refname:short geeft voor een remote-tak gewoon 'origin/main', en
@@ -860,6 +905,12 @@ for (const sleutel of ['git.afsluit.titel', 'git.afsluit.commitPush', 'git.afslu
 for (const sleutel of ['git.btn.diff', 'git.diff.leegTitel', 'git.diff.nieuweKop',
                        'git.commit.nieuwTitel', 'git.commit.bekijken', 'git.commit.doorgaan']) {
   t('diff-tekst ' + sleutel + ' bestaat in nl en en', !!nl[sleutel] && !!en[sleutel])
+}
+
+for (const sleutel of ['git.btn.undo', 'git.terug.titel', 'git.terug.commit', 'git.terug.bericht',
+                       'git.terug.weggooien', 'git.terug.weggooiBevestig', 'git.terug.nieuwTekst',
+                       'settings.git.pollLabel', 'settings.git.pollUit', 'settings.git.pollSec']) {
+  t('terugdraai-tekst ' + sleutel + ' bestaat in nl en en', !!nl[sleutel] && !!en[sleutel])
 }
 
 for (const sleutel of ['git.branch.remoteHalenTitel', 'git.branch.remoteHalenTekst',

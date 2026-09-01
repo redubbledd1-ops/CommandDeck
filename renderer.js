@@ -167,7 +167,7 @@ const KLEUR_IDX = {
   android: 2, windows: 5, web: 3, info: 3, pub: 5, clean: 10, doctor: 8,
   apk: 9, buildweb: 0, buildwin: 11,
   gitlink: 4, gitread: 6, gitpull: 2, gitfetch: 7, gitlog: 1,
-  gitcommit: 9, gitpush: 3, gitstash: 8, gitstashlijst: 10, gitbranch: 5, gitdiff: 7,
+  gitcommit: 9, gitpush: 3, gitstash: 8, gitstashlijst: 10, gitbranch: 5, gitdiff: 7, gitterug: 11,
   'editor-vscode': 5, 'editor-cursor': 0, 'editor-claude': 4,
   'editor-android-studio': 2, 'editor-claude-desktop': 6,
   'merk-visualstudio': 1, 'merk-codex': 8, 'merk-openai': 8, 'merk-gemini': 5,
@@ -524,20 +524,28 @@ function meldGitProjectenAanMain() {
 
 // Achtergrondverversing. Het venster verbergen zet hem stil: anders draaien er
 // tien git-processen per minuut voor een scherm waar niemand naar kijkt.
-const GIT_POLL_MS = 30000          // ronde 4 maakt dit instelbaar
+const GIT_POLL_SEC_STANDAARD = 30
+// 0 = niet pollen. De indicator wordt dan alleen nog bijgewerkt na een
+// git-actie en bij het wisselen van locatie.
+function gitPollSec() {
+  const v = (settings.git || {}).pollSec
+  return Number.isFinite(v) ? Math.max(0, v) : GIT_POLL_SEC_STANDAARD
+}
 const GIT_VOLLEDIG_ELKE = 10       // elke tiende ronde ook de andere projecten
 let gitPollTeller = 0
 let gitPollTimer = null
 
 function startGitPolling() {
-  if (gitPollTimer) return
+  if (gitPollTimer) { clearInterval(gitPollTimer); gitPollTimer = null }
+  const sec = gitPollSec()
+  if (!sec) return
   gitPollTimer = setInterval(async () => {
     if (document.hidden) return
     gitPollTeller++
     if (gitPollTeller % GIT_VOLLEDIG_ELKE === 0) { await ververesAlleGitStaten(true); return }
     const p = projects.find(x => x.id === activeId)
     if (p) await ververesGitStaat(p, true)
-  }, GIT_POLL_MS)
+  }, sec * 1000)
 }
 
 // De indicator in de projectkop: welke branch, hoeveel vooruit/achter, hoeveel
@@ -7301,6 +7309,16 @@ function renderSettingsPanel() {
           <span class="instel-uitleg">${I18N.t('settings.git.fetchDesc')}</span>
         </div>
         <div class="instel-rij">
+          <div class="editor-row-name"><i class="ti ti-refresh"></i> ${I18N.t('settings.git.pollLabel')}</div>
+          <select class="loc-select" id="set-git-poll">
+            ${[0, 15, 30, 60, 300].map(sec => `
+              <option value="${sec}" ${gitPollSec() === sec ? 'selected' : ''}>
+                ${sec === 0 ? esc(I18N.t('settings.git.pollUit')) : esc(I18N.t('settings.git.pollSec', { sec }))}
+              </option>`).join('')}
+          </select>
+          <span class="instel-uitleg">${I18N.t('settings.git.pollDesc')}</span>
+        </div>
+        <div class="instel-rij">
           <div class="editor-row-name"><i class="ti ti-user-circle"></i> ${I18N.t('settings.git.profielLabel')}</div>
           <span class="instel-uitleg">${I18N.t('settings.git.profielDesc')}</span>
           <div id="git-profiel-lijst"></div>
@@ -7382,6 +7400,13 @@ function renderSettingsPanel() {
   if (gitKeuze) gitKeuze.onchange = () => {
     settings.git = { ...(settings.git || {}), afsluiten: gitKeuze.value }
     window.api.saveSettings(settings)
+  }
+
+  const gitPoll = document.getElementById('set-git-poll')
+  if (gitPoll) gitPoll.onchange = () => {
+    settings.git = { ...(settings.git || {}), pollSec: parseInt(gitPoll.value, 10) }
+    window.api.saveSettings(settings)
+    startGitPolling()          // meteen op de nieuwe stand, niet pas na herstart
   }
 
   const gitFetchVak = document.getElementById('set-git-fetch')
@@ -11182,6 +11207,7 @@ async function runGitCmd(project, cmdKey) {
   if (cmdKey === 'git-stash-lijst') { await stashOverzicht(project); return }
   if (cmdKey === 'git-branch') { await branchOverzicht(project); return }
   if (cmdKey === 'git-diff') { await toonDiff(project); return }
+  if (cmdKey === 'git-terug') { await terugdraaien(project); return }
   if (GitTools.isSchrijfKnop(cmdKey)) { await schrijfGitCmd(project, cmdKey); return }
 
   const cmd = GitTools.GIT_CMD_MAP[cmdKey]
@@ -11314,6 +11340,85 @@ async function toonDiff(project) {
     for (const b of staat.nieuweBestanden.slice(0, 20)) appendLine('out', '  ?  ' + b)
     if (staat.nieuw > 20) appendLine('out', '  …')
   }
+}
+
+// ── Terugdraaien ─────────────────────────────────────────────────────────────
+// Drie dingen, elk met een eigen bevestiging. Reset en amend herschrijven je
+// geschiedenis; staat die commit al op GitHub, dan gaat je repo afwijken en
+// wordt de volgende push geweigerd. Dat zeggen we vóóraf, niet achteraf.
+async function terugdraaien(project) {
+  const staat = await ververesGitStaat(project, true)
+  if (!staat || !staat.isRepo) return
+  if (!staat.commits) { await meldKort(I18N.t('git.terug.titel'), I18N.t('git.block.geen-commitsText')); return }
+
+  const gepusht = GitTools.alGepusht(staat)
+  const keuze = await vraagKeuze({
+    titel: I18N.t('git.terug.titel'),
+    tekst: I18N.t(gepusht ? 'git.terug.tekstGepusht' : 'git.terug.tekst'),
+    knoppen: [
+      { label: I18N.t('common.cancel'), waarde: '' },
+      { label: I18N.t('git.terug.weggooien'), waarde: 'weg', soort: 'gevaar' },
+      { label: I18N.t('git.terug.bericht'), waarde: 'amend' },
+      { label: I18N.t('git.terug.commit'), waarde: 'reset', soort: 'gevaar' },
+    ],
+  })
+  if (!keuze) return
+
+  if (keuze === 'reset') {
+    const ja = await vraagJaNee(I18N.t('git.terug.commitTitel'),
+      I18N.t(gepusht ? 'git.terug.commitTekstGepusht' : 'git.terug.commitTekst'),
+      I18N.t('git.terug.commit'), 'gevaar')
+    if (!ja) return
+    await executeCmd(project, GitTools.resetZachtCommando(), 'git-terug')
+    await ververesGitStaat(project, true)
+    return
+  }
+
+  if (keuze === 'amend') {
+    const bericht = await vraagTekst({
+      titel: I18N.t('git.terug.berichtTitel'),
+      tekst: I18N.t(gepusht ? 'git.terug.berichtTekstGepusht' : 'git.terug.berichtTekst'),
+      placeholder: I18N.t('git.commit.placeholder'),
+      okLabel: I18N.t('git.terug.bericht'),
+    })
+    if (!bericht) return          // leeg bericht is hier geen commit waard
+    const cmd = GitTools.amendCommando(bericht)
+    if (!cmd) return
+    await executeCmd(project, cmd, 'git-terug')
+    await ververesGitStaat(project, true)
+    return
+  }
+
+  // Wijzigingen in één bestand weggooien. Dit is het enige dat niet terug te
+  // halen is: geen commit, geen stash, niets. Dus eerst kiezen wélk bestand,
+  // en dan nog een keer vragen met de naam erin.
+  const blok = GitTools.terugdraaiBlokkade('weggooien', staat)
+  if (blok) { await meldKort(I18N.t('git.terug.titel'), I18N.t('git.block.schoonText')); return }
+
+  const bestanden = (staat.bestanden || []).slice(0, 8)
+  const knoppen = [{ label: I18N.t('common.cancel'), waarde: '' }]
+  for (let i = bestanden.length - 1; i >= 0; i--) {
+    knoppen.push({ label: bestanden[i], waarde: bestanden[i], soort: i === 0 ? 'gevaar' : '' })
+  }
+  const pad = await vraagKeuze({
+    titel: I18N.t('git.terug.weggooiTitel'),
+    tekst: I18N.t('git.terug.weggooiKies', { aantal: staat.vuil }),
+    knoppen,
+  })
+  if (!pad) return
+
+  // Een nieuw bestand kan git niet terugzetten: er is geen eerdere versie.
+  if ((staat.nieuweBestanden || []).includes(pad)) {
+    await meldKort(I18N.t('git.terug.nieuwTitel'), I18N.t('git.terug.nieuwTekst', { naam: pad }))
+    return
+  }
+
+  const zeker = await vraagJaNee(I18N.t('git.terug.weggooiTitel'),
+    I18N.t('git.terug.weggooiBevestig', { naam: pad }), I18N.t('git.terug.weggooien'), 'gevaar')
+  if (!zeker) return
+
+  await executeCmd(project, GitTools.weggooiBestandCommando(pad), 'git-terug')
+  await ververesGitStaat(project, true)
 }
 
 // ── Branches ─────────────────────────────────────────────────────────────────

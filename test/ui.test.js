@@ -2201,8 +2201,8 @@ function startVraagAutomaat() {
   check('maar hun vinkje staat uit', !cmdVink('git-fetch').checked && !cmdVink('git-stash').checked)
   check('met "standaard uit" erachter, zodat je weet waaróm',
     $$('.cmdvis-row').filter(r => r.querySelector('.cmdvis-standaard-uit'))
-      .every(r => ['git-fetch', 'git-stash', 'git-branch'].includes(r.querySelector('[data-cmdvis-id]').dataset.cmdvisId))
-    && $$('.cmdvis-standaard-uit').length === 3)
+      .every(r => ['git-fetch', 'git-stash', 'git-branch', 'git-terug'].includes(r.querySelector('[data-cmdvis-id]').dataset.cmdvisId))
+    && $$('.cmdvis-standaard-uit').length === 4)
   check('de dagelijkse knoppen staan gewoon aan',
     ['git-status', 'git-commit', 'git-push', 'git-pull', 'git-log'].every(id => cmdVink(id) && cmdVink(id).checked))
   check('en terughalen ook — dat is de weg terug',

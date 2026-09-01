@@ -37,6 +37,10 @@
     // Zien wat er verandert vóór je het vastlegt. Staat wél aan: dit is hoe je
     // merkt dat er een sleutel of een debug-regel meegaat.
     { id: 'git-diff',     labelKey: 'git.btn.diff',   label: 'diff',            icon: 'ti-file-diff',    cls: 'gitdiff' },
+    // Terugdraaien: één knop met de drie dingen die je écht wilt kunnen.
+    // Standaard uit, want de meeste dagen heb je hem niet nodig — en als je
+    // hem nodig hebt, moet elke stap een bewuste keuze zijn.
+    { id: 'git-terug',    labelKey: 'git.btn.undo',   label: 'terugdraaien',    icon: 'ti-arrow-back-up', cls: 'gitterug', schrijft: true, gevaar: true, standaardUit: true },
     // Terughalen staat wél aan, en verschijnt vanzelf zodra er iets in de
     // stash zit — ook als dat er door de afsluitcontrole in is gezet en je
     // de stash-knop nooit hebt aangeraakt. Dit is de weg terug; die mag nooit
@@ -189,7 +193,7 @@
   //   met remote  -> koppelen valt weg, push/pull/fetch komen erbij
   // Commit hoort dus al bij een niet-gekoppelde repo. Anders stuurt de
   // koppel-dialoog je naar "maak eerst een commit" zonder knop om dat te doen.
-  const LOKAAL = ['git-status', 'git-commit', 'git-diff', 'git-stash', 'git-branch', 'git-log']
+  const LOKAAL = ['git-status', 'git-commit', 'git-diff', 'git-stash', 'git-branch', 'git-terug', 'git-log']
   const REMOTE = ['git-push', 'git-pull', 'git-fetch']
 
   function zichtbareGitIds(staat) {
@@ -211,6 +215,8 @@
       // Zonder wijzigingen valt er niets te vergelijken. Zo is de knop meteen
       // het antwoord op "is er iets veranderd?".
       if (id === 'git-diff' && !(staat.vuil > 0)) continue
+      // Zonder commits valt er niets terug te draaien.
+      if (id === 'git-terug' && !staat.commits) continue
       uit.push(id)
     }
     return uit
@@ -300,6 +306,50 @@
   // niet. Die noemen we apart; het zijn juist de gevaarlijkste.
   function diffCommando() {
     return 'git diff HEAD'
+  }
+
+  // ── Terugdraaien ────────────────────────────────────────────────────────────
+  // Drie dingen, en bewust niet meer. `reset --hard` staat er niet bij: dat
+  // gooit je werk weg zonder dat er ergens een kopie achterblijft, en geen
+  // bevestigingsvenster maakt dat veilig genoeg voor een knop.
+
+  // De commit terug, de wijzigingen blijven staan. Dit is de knop voor "oeps,
+  // te vroeg gecommit" — je verliest niets, de commit wordt alleen ongedaan.
+  function resetZachtCommando() {
+    return 'git reset --soft HEAD~1'
+  }
+
+  // Alleen het bericht van de laatste commit veranderen. --amend maakt een
+  // nieuwe commit met dezelfde inhoud, dus het is een herschrijving van de
+  // geschiedenis — daarom hetzelfde voorbehoud als bij reset.
+  function amendCommando(bericht) {
+    const schoon = veiligCommitBericht(bericht)
+    if (!schoon) return null
+    return `git commit --amend -m "${schoon}"`
+  }
+
+  // De wijzigingen in één bestand weggooien. Dit is het enige van de drie dat
+  // echt onomkeerbaar is: er is geen commit en geen stash om op terug te
+  // vallen. Aanhalingstekens eromheen, want een pad mag spaties bevatten.
+  function weggooiBestandCommando(pad) {
+    const p = String(pad || '').trim().replace(/"/g, '')
+    if (!p) return null
+    return `git checkout -- "${p}"`
+  }
+
+  // Staat de laatste commit al op de remote? Dan is terugdraaien niet zomaar
+  // ongedaan maken: je geschiedenis gaat afwijken van wat er op GitHub staat,
+  // en de volgende push wordt geweigerd. Dat hoor je vooraf te weten.
+  function alGepusht(staat) {
+    return !!(staat && staat.upstream && (staat.ahead || 0) === 0)
+  }
+
+  // Waarom een terugdraai-actie nu niet kan.
+  function terugdraaiBlokkade(soort, staat) {
+    if (!staat || !staat.isRepo) return 'geen-repo'
+    if (!staat.commits) return 'geen-commits'
+    if (soort === 'weggooien' && !(staat.vuil > 0)) return 'schoon'
+    return null
   }
 
   // ── Branches ────────────────────────────────────────────────────────────────
@@ -995,6 +1045,7 @@
     INLOG_ONTHOUDEN, INLOG_VRAGEN, INLOG_KEUZES,
     indicator, onveiligeRedenen, magFetchen, achterstandMelding, FETCH_INTERVAL_MS,
     diffCommando, isHoofdtak, parseTrack, branchOmschrijving, branchHeeftEigenWerk,
+    resetZachtCommando, amendCommando, weggooiBestandCommando, alGepusht, terugdraaiBlokkade,
     parseBranches, lokaleBranches, huidigeBranch, nieuweRemoteBranches,
     geldigeBranchNaam, veiligeBranchNaam, checkoutCommando, nieuweBranchCommando,
     verwijderBranchCommando, verwijderRemoteBranchCommando, mergeCommando, wisselBlokkade,
