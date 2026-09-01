@@ -7297,6 +7297,14 @@ async function vraagBestaandePin(account) {
 // je commit en met wiens account je pusht. In één keer vragen, want los van
 // elkaar zijn ze onaf.
 async function vraagGitIdentiteit(accountNaam, huidig) {
+  // Eerst aanbieden om het op te halen. Wie is ingelogd bij GitHub hoeft dan
+  // niets te typen — en een overgetypt e-mailadres met een tikfout is precies
+  // hoe je commits niet meer aan je account gekoppeld worden.
+  const opgehaald = await haalGitIdentiteitOp(accountNaam)
+  if (opgehaald === false) return null        // afgebroken: helemaal stoppen
+  if (opgehaald) return opgehaald             // opgehaald bij GitHub
+  // null: zelf invullen, of ophalen lukte niet — dan gewoon vragen.
+
   const naam = await vraagTekst({
     titel: I18N.t('accounts.gitTitel', { naam: accountNaam }),
     tekst: I18N.t('accounts.gitNaamTekst'),
@@ -7329,7 +7337,40 @@ async function vraagGitIdentiteit(accountNaam, huidig) {
   return { gitNaam: naam, gitEmail: email, ghGebruiker: gh }
 }
 
-async function githubInloggen() {
+// Probeert de identiteit bij GitHub op te halen. Geeft null terug als dat niet
+// kan of als de gebruiker het liever zelf invult — dan volgt de gewone vraag.
+async function haalGitIdentiteitOp(accountNaam) {
+  let gh = false
+  try { gh = await window.api.gitGh() } catch {}
+
+  const keuze = await vraagKeuze({
+    titel: I18N.t('accounts.gitTitel', { naam: accountNaam }),
+    tekst: I18N.t(gh ? 'accounts.gitHaalTekst' : 'accounts.gitHaalTekstGeenGh'),
+    knoppen: [
+      { label: I18N.t('common.cancel'), waarde: '' },
+      { label: I18N.t('accounts.gitZelfInvullen'), waarde: 'zelf' },
+      { label: I18N.t(gh ? 'accounts.gitOphalen' : 'accounts.gitInloggenEnOphalen'), waarde: 'github', soort: 'primair' },
+    ],
+  })
+  if (!keuze) return false          // false = afgebroken, niet doorgaan
+  if (keuze === 'zelf') return null // null = zelf invullen
+
+  if (!gh) {
+    const gelukt = await githubInloggen({ stil: true })
+    if (!gelukt) return null        // inloggen niet gelukt: dan maar met de hand
+  }
+
+  const ident = await window.api.gitGhIdentiteit()
+  if (!ident) { await meldKort(I18N.t('accounts.gitTitel', { naam: accountNaam }), I18N.t('accounts.gitOphalenMislukt')); return null }
+
+  const ja = await vraagJaNee(I18N.t('accounts.gitGevondenTitel'),
+    I18N.t('accounts.gitGevondenTekst', {
+      naam: ident.gitNaam, email: ident.gitEmail, gh: ident.ghGebruiker,
+    }), I18N.t('common.save'), 'primair')
+  return ja ? ident : null
+}
+
+async function githubInloggen(opties = {}) {
   const gh = await window.api.gitGh()
   if (!gh) {
     const keuze = await vraagKeuze({
@@ -7346,24 +7387,30 @@ async function githubInloggen() {
   }
 
   const p = projects.find(x => x.id === activeId) || projects[0]
-  if (!p) { await meldKort(I18N.t('settings.git.inlogKnop'), I18N.t('git.inlog.geenProject')); return }
+  if (!p) { await meldKort(I18N.t('settings.git.inlogKnop'), I18N.t('git.inlog.geenProject')); return false }
 
-  const ja = await vraagJaNee(I18N.t('settings.git.inlogKnop'), I18N.t('git.inlog.uitleg'),
-    I18N.t('git.inlog.starten'), 'primair')
-  if (!ja) return
+  if (!opties.stil) {
+    const ja = await vraagJaNee(I18N.t('settings.git.inlogKnop'), I18N.t('git.inlog.uitleg'),
+      I18N.t('git.inlog.starten'), 'primair')
+    if (!ja) return false
+  }
 
   // In de terminal van de app: gh toont daar de code die je in je browser moet
-  // invullen, en je ziet zelf wat er gebeurt.
-  toggleSettings()
+  // invullen, en je ziet zelf wat er gebeurt. Er gaat geen wachtwoord door de
+  // app heen en het token komt nergens in beeld.
+  if (view === 'settings') toggleSettings()
   await executeCmd(p, GitTools.ghLoginCommando(), null)
 
   // De meting of gh er is, en met welke accounts, is nu verouderd.
   try { await window.api.gitGhVergeet() } catch {}
   const namen = await window.api.gitGhAccounts()
-  if (!namen || !namen.length) return
+  if (!namen || !namen.length) return false
 
-  await meldKort(I18N.t('git.inlog.klaarTitel'),
-    I18N.t('git.inlog.klaarTekst', { namen: namen.join(', ') }), namen)
+  if (!opties.stil) {
+    await meldKort(I18N.t('git.inlog.klaarTitel'),
+      I18N.t('git.inlog.klaarTekst', { namen: namen.join(', ') }), namen)
+  }
+  return true
 }
 
 async function activeerGitVoorAccount() {

@@ -1041,5 +1041,13 @@
   "accounts.gitEmailTekst": "Welk e-mailadres hoort daarbij? GitHub koppelt je commits hieraan.",
   "accounts.gitGhTekst": "Je GitHub-gebruikersnaam, als je die hebt. Daarmee weet git met welk account hij moet pushen als er meerdere op deze pc staan. Leeg laten mag.",
   "accounts.gitOnaf": "git-identiteit nog niet ingevuld",
-  "accounts.gitBewerken": "git-identiteit aanpassen"
+  "accounts.gitBewerken": "git-identiteit aanpassen",
+  "accounts.gitHaalTekst": "Ik kan je naam, e-mailadres en gebruikersnaam ophalen bij GitHub. Dan hoef je niets over te typen.",
+  "accounts.gitHaalTekstGeenGh": "Ik kan je gegevens ophalen bij GitHub. Je logt dan eerst in via je browser — er gaat geen wachtwoord door deze app heen.",
+  "accounts.gitOphalen": "ophalen bij GitHub",
+  "accounts.gitInloggenEnOphalen": "inloggen bij GitHub",
+  "accounts.gitZelfInvullen": "zelf invullen",
+  "accounts.gitOphalenMislukt": "Kon je gegevens niet ophalen. Vul ze anders zelf in.",
+  "accounts.gitGevondenTitel": "Gevonden bij GitHub",
+  "accounts.gitGevondenTekst": "Commits komen op naam {naam} <{email}>, pushen gaat via {gh}. Zo instellen?"
 }

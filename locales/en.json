@@ -1041,5 +1041,13 @@
   "accounts.gitEmailTekst": "Which email address goes with it? GitHub links your commits to this.",
   "accounts.gitGhTekst": "Your GitHub username, if you have one. That tells git which account to push with when several are on this pc. Leaving it empty is fine.",
   "accounts.gitOnaf": "git identity not filled in yet",
-  "accounts.gitBewerken": "edit git identity"
+  "accounts.gitBewerken": "edit git identity",
+  "accounts.gitHaalTekst": "I can fetch your name, email and username from GitHub. Then you do not have to type anything.",
+  "accounts.gitHaalTekstGeenGh": "I can fetch your details from GitHub. You log in through your browser first — no password passes through this app.",
+  "accounts.gitOphalen": "fetch from GitHub",
+  "accounts.gitInloggenEnOphalen": "log in to GitHub",
+  "accounts.gitZelfInvullen": "fill in myself",
+  "accounts.gitOphalenMislukt": "Could not fetch your details. Fill them in yourself instead.",
+  "accounts.gitGevondenTitel": "Found on GitHub",
+  "accounts.gitGevondenTekst": "Commits will say {naam} <{email}>, pushing goes through {gh}. Set it up like this?"
 }

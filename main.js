@@ -1367,6 +1367,29 @@ ipcMain.handle('git:accountActiveren', (_, profiel) => {
   return { ok: !!gedaan.length, gedaan, mislukt }
 })
 
+// Wie ben je volgens GitHub? Na het inloggen weet gh dat, dus hoeft niemand
+// zijn naam en adres over te typen.
+ipcMain.handle('git:ghIdentiteit', () => {
+  if (!ghBeschikbaar()) return null
+
+  const roep = (pad) => {
+    try {
+      return execFileSync('gh', ['api', pad], {
+        encoding: 'utf8', timeout: 8000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'],
+      })
+    } catch { return '' }
+  }
+
+  const user = GitTools.parseGhUser(roep('user'))
+  if (!user) return null
+
+  // Het adressenlijstje vereist een extra recht (user:email). Lukt dat niet,
+  // dan valt ghIdentiteit terug op het noreply-adres — dat werkt altijd en
+  // houdt een privéadres uit een publieke geschiedenis.
+  const email = GitTools.parseGhEmails(roep('user/emails'))
+  return GitTools.ghIdentiteit(user, email)
+})
+
 // Welke GitHub-accounts staan al klaar op deze pc?
 ipcMain.handle('git:ghAccounts', () => {
   if (!ghBeschikbaar()) return []

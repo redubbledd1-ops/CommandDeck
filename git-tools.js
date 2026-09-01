@@ -1012,6 +1012,58 @@
     return 'gh auth login --hostname github.com --git-protocol https --web'
   }
 
+  // ── Je gegevens ophalen bij GitHub ──────────────────────────────────────────
+  // Na het inloggen weet gh wie je bent. Dan hoeft niemand zijn naam en adres
+  // over te typen — de app haalt ze op. Dat scheelt niet alleen werk maar ook
+  // typefouten: een verkeerd adres in je commits merk je pas als GitHub ze niet
+  // meer aan je account koppelt.
+  function parseGhUser(json) {
+    let d = null
+    try { d = JSON.parse(String(json || '')) } catch { return null }
+    if (!d || typeof d !== 'object') return null
+    const login = String(d.login || '').trim()
+    if (!login) return null
+    return {
+      login,
+      naam: String(d.name || '').trim() || login,
+      email: String(d.email || '').trim(),
+      id: Number.isFinite(d.id) ? d.id : null,
+    }
+  }
+
+  // Het adres waarmee GitHub je commits aan je account koppelt zónder je echte
+  // adres te tonen. Wie zijn e-mailadres privé heeft staan, hoort dit te
+  // krijgen — anders belandt zijn privéadres in een publieke geschiedenis.
+  function noreplyEmail(id, login) {
+    const l = String(login || '').trim()
+    if (!l) return ''
+    return Number.isFinite(id) ? `${id}+${l}@users.noreply.github.com` : `${l}@users.noreply.github.com`
+  }
+
+  // `gh api user/emails` geeft alle adressen. We willen het primaire dat ook
+  // geverifieerd is; een niet-geverifieerd adres accepteert GitHub niet.
+  function parseGhEmails(json) {
+    let d = null
+    try { d = JSON.parse(String(json || '')) } catch { return '' }
+    if (!Array.isArray(d)) return ''
+    const primair = d.find(e => e && e.primary && e.verified)
+    if (primair && primair.email) return String(primair.email).trim()
+    const geverifieerd = d.find(e => e && e.verified && e.email)
+    return geverifieerd ? String(geverifieerd.email).trim() : ''
+  }
+
+  // Alles bij elkaar tot de identiteit die op het account komt te staan.
+  // Volgorde: het geverifieerde primaire adres, anders wat er op het profiel
+  // staat, anders het noreply-adres. Nooit leeg als we een login hebben.
+  function ghIdentiteit(user, emails = '') {
+    if (!user || !user.login) return null
+    return {
+      gitNaam: user.naam || user.login,
+      gitEmail: emails || user.email || noreplyEmail(user.id, user.login),
+      ghGebruiker: user.login,
+    }
+  }
+
   // Welke GitHub-accounts staan er al klaar op deze pc?
   function parseGhAccounts(uit) {
     const namen = []
@@ -1099,7 +1151,7 @@
     INLOG_ONTHOUDEN, INLOG_VRAGEN, INLOG_KEUZES,
     indicator, onveiligeRedenen, magFetchen, achterstandMelding, FETCH_INTERVAL_MS,
     globaalIdentiteitCommando, globaalGhGebruikerCommando, accountActiveerStappen,
-    ghLoginCommando, parseGhAccounts,
+    ghLoginCommando, parseGhAccounts, parseGhUser, parseGhEmails, noreplyEmail, ghIdentiteit,
     diffCommando, isHoofdtak, parseTrack, branchOmschrijving, branchHeeftEigenWerk,
     resetZachtCommando, amendCommando, weggooiBestandCommando, alGepusht, terugdraaiBlokkade,
     parseBranches, lokaleBranches, huidigeBranch, nieuweRemoteBranches,

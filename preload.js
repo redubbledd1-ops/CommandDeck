@@ -44,6 +44,7 @@ contextBridge.exposeInMainWorld('api', {
   gitGh:         ()      => ipcRenderer.invoke('git:gh'),
   gitGhVergeet:  ()      => ipcRenderer.invoke('git:ghVergeet'),
   gitGhAccounts: ()      => ipcRenderer.invoke('git:ghAccounts'),
+  gitGhIdentiteit: ()    => ipcRenderer.invoke('git:ghIdentiteit'),
   gitAccountActiveren: (p) => ipcRenderer.invoke('git:accountActiveren', p),
   gitFetch:      (p)     => ipcRenderer.invoke('git:fetch', p),
   gitProjecten:  (l)     => ipcRenderer.send('git:projecten', l),

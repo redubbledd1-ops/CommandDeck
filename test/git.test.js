@@ -724,6 +724,47 @@ t('zonder profiel valt er niets te activeren',
 t('een profiel zonder GitHub-account zet alleen de naam',
   G.accountActiveerStappen({ ...prof, ghGebruiker: '' }, true).map(x => x.soort).join() === 'identiteit')
 
+// ── je gegevens ophalen bij GitHub ───────────────────────────────────────────
+// Zodat niemand zijn naam en adres hoeft over te typen. Een tikfout in je
+// e-mailadres merk je pas als GitHub je commits niet meer aan je koppelt.
+const ghUser = G.parseGhUser(JSON.stringify({
+  login: 'redubbledd1-ops', name: 'Redub', email: null, id: 12345678 }))
+t('login komt eruit', ghUser.login === 'redubbledd1-ops')
+t('de weergavenaam ook', ghUser.naam === 'Redub')
+t('zonder naam valt hij terug op de login',
+  G.parseGhUser(JSON.stringify({ login: 'jan', id: 1 })).naam === 'jan')
+t('zonder login is er niets', G.parseGhUser(JSON.stringify({ name: 'x' })) === null)
+t('rommel klapt niet', G.parseGhUser('geen json') === null && G.parseGhUser('') === null)
+
+t('het primaire geverifieerde adres wint',
+  G.parseGhEmails(JSON.stringify([
+    { email: 'oud@x.nl', primary: false, verified: true },
+    { email: 'echt@x.nl', primary: true, verified: true },
+  ])) === 'echt@x.nl')
+t('een niet-geverifieerd primair adres telt niet',
+  G.parseGhEmails(JSON.stringify([
+    { email: 'nieuw@x.nl', primary: true, verified: false },
+    { email: 'oud@x.nl', primary: false, verified: true },
+  ])) === 'oud@x.nl')
+t('geen adressen levert niets', G.parseGhEmails('[]') === '')
+t('rommel ook niet', G.parseGhEmails('nee') === '')
+
+// Wie zijn adres privé heeft staan hoort het noreply-adres te krijgen: anders
+// belandt zijn privéadres in een publieke geschiedenis.
+t('noreply met id', G.noreplyEmail(12345678, 'jan') === '12345678+jan@users.noreply.github.com')
+t('noreply zonder id', G.noreplyEmail(null, 'jan') === 'jan@users.noreply.github.com')
+t('zonder login geen adres', G.noreplyEmail(1, '') === '')
+
+gelijk('met een geverifieerd adres', G.ghIdentiteit(ghUser, 'echt@x.nl'),
+  { gitNaam: 'Redub', gitEmail: 'echt@x.nl', ghGebruiker: 'redubbledd1-ops' })
+t('zonder adres valt hij terug op noreply, nooit op leeg',
+  G.ghIdentiteit(ghUser, '').gitEmail === '12345678+redubbledd1-ops@users.noreply.github.com')
+t('een openbaar profieladres wordt gebruikt als er geen lijst is',
+  G.ghIdentiteit({ login: 'jan', naam: 'Jan', email: 'jan@x.nl', id: 5 }, '').gitEmail === 'jan@x.nl')
+t('zonder gebruiker geen identiteit', G.ghIdentiteit(null) === null)
+t('het adres is nooit leeg als er een login is',
+  ['', null].every(e => G.ghIdentiteit(ghUser, e).gitEmail.length > 0))
+
 t('inloggen gaat via de browser, niet via een token in een venster',
   G.ghLoginCommando().includes('--web'))
 t('en nooit met een wachtwoord op de opdrachtregel',
