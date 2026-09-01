@@ -373,6 +373,29 @@
       .slice(0, 200)
   }
 
+  // Laat je het bericht leeg, dan maken we er zelf een. Geen volgnummer maar
+  // de bestandsnamen: "wijzigingen in 13 bestanden (renderer.js, style.css,
+  // +11)" vertelt je over een maand nog iets, "commit 14" niet. De datum laten
+  // we weg — die staat al in de commit zelf.
+  function automatischCommitBericht(staat) {
+    const bestanden = (staat && Array.isArray(staat.bestanden)) ? staat.bestanden.filter(Boolean) : []
+    const aantal = (staat && staat.vuil) || bestanden.length
+
+    // Alleen de bestandsnaam, niet het hele pad: anders is de eerste regel op
+    // een diepe map meteen vol.
+    const namen = bestanden.map(b => String(b).split(/[\\/]/).pop()).filter(Boolean)
+
+    if (!namen.length) return aantal ? `wijzigingen in ${aantal} bestand(en)` : 'wijzigingen vastgelegd'
+
+    // Opsommen mag alleen als we ze ook allemaal kennen. De bestandenlijst uit
+    // de status is afgekapt op 40, dus bij een grote wijziging is `aantal`
+    // hoger dan wat we kunnen noemen — dan zou opsommen de rest verzwijgen.
+    const volledig = namen.length === aantal
+    if (volledig && aantal === 1) return `wijziging in ${namen[0]}`
+    if (volledig && aantal <= 3) return `wijzigingen in ${namen.join(', ')}`
+    return `wijzigingen in ${aantal} bestanden (${namen.slice(0, 2).join(', ')}, +${aantal - 2})`
+  }
+
   // Alles in één regel, zodat je in de terminal precies ziet wat er gebeurde.
   function commitCommando(bericht) {
     const schoon = veiligCommitBericht(bericht)
@@ -736,7 +759,7 @@
     GIT_CMD_DEFS, GIT_CMD_MAP, GIT_IDS, isGitId, isSchrijfKnop, STANDAARD_UIT_IDS,
     parseRemotes, parseBranch, parseStatusV2, maakStaat, zichtbareGitIds,
     koppelStap, koppelCommando, veiligeRepoNaam, normaliseerRepoUrl,
-    veiligCommitBericht, commitCommando, pushCommando, stashCommando, blokkade,
+    veiligCommitBericht, automatischCommitBericht, commitCommando, pushCommando, stashCommando, blokkade,
     parseStashAantal, parseStashLijst, parseStashOnderwerp, stashRefGeldig,
     stashPopCommando, stashDropCommando, botsendeBestanden,
     parseIdentiteit, geldigEmail, maakProfiel, profielGeldig, profielLabel,

@@ -10916,12 +10916,14 @@ async function vraagOverProject(project) {
     const bericht = await vraagTekst({
       titel: I18N.t('git.commit.title'),
       tekst: I18N.t('git.commit.text', { aantal: project.staat.vuil }),
-      placeholder: I18N.t('git.commit.placeholder'),
+      placeholder: GitTools.automatischCommitBericht(project.staat),
       okLabel: I18N.t('git.afsluit.commitPush'),
     })
-    if (!bericht) return 'blijven'
+    // null = geannuleerd. Leeg = wel doorgaan, maar zonder eigen bericht;
+    // dan vullen we er zelf een in op basis van wat er verandert.
+    if (bericht === null) return 'blijven'
     selectProject(p.id)
-    await executeCmd(p, GitTools.commitCommando(bericht), 'git-commit')
+    await executeCmd(p, GitTools.commitCommando(bericht || GitTools.automatischCommitBericht(project.staat)), 'git-commit')
   }
 
   const na = await ververesGitStaat(p, true)
@@ -11173,14 +11175,18 @@ async function schrijfGitCmd(project, cmdKey) {
     // de verkeerde identiteit staat het er morgen nog. Beide vragen horen vóór
     // het bericht — daarna is het te laat om er nog iets aan te doen.
     if (!await controleerIdentiteit(project, staat)) return
+    // De plaatshouder is meteen het bericht dat je krijgt als je niets typt.
+    // Zo zie je vóór het klikken wat er komt te staan.
+    const automatisch = GitTools.automatischCommitBericht(staat)
     const bericht = await vraagTekst({
       titel: I18N.t('git.commit.title'),
       tekst: I18N.t('git.commit.text', { aantal: staat.vuil }),
-      placeholder: I18N.t('git.commit.placeholder'),
+      placeholder: automatisch,
       okLabel: I18N.t('git.commit.ok'),
     })
-    if (!bericht) return
-    cmd = GitTools.commitCommando(bericht)
+    // null = geannuleerd; leeg = doorgaan met het automatische bericht.
+    if (bericht === null) return
+    cmd = GitTools.commitCommando(bericht || automatisch)
     if (!cmd) return
 
   } else if (cmdKey === 'git-push') {

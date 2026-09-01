@@ -583,6 +583,33 @@ t('maar dat maakt het nog geen uiteenlopende geschiedenis', mVuil.uitEenLopend =
 t('een repo zonder repo geeft geen melding',
   G.achterstandMelding(G.maakStaat({ isRepo: false })) === null)
 
+// ── commit zonder eigen bericht ──────────────────────────────────────────────
+// Leeg laten mag, maar dan wel iets dat je over een maand nog iets zegt.
+const stB = (v, b) => G.maakStaat({ isRepo: true, remotes: ['origin'], branch: 'main', vuil: v, bestanden: b })
+
+t('één bestand krijgt zijn eigen naam',
+  G.automatischCommitBericht(stB(1, ['lib/main.dart'])) === 'wijziging in main.dart')
+t('paden worden ingekort tot de bestandsnaam',
+  !G.automatischCommitBericht(stB(1, ['lib/services/api_service.dart'])).includes('/'))
+t('Windows-paden ook',
+  G.automatischCommitBericht(stB(1, ['lib\\services\\api.dart'])) === 'wijziging in api.dart')
+t('twee of drie bestanden worden opgesomd',
+  G.automatischCommitBericht(stB(3, ['a.js', 'b.css', 'c.md'])) === 'wijzigingen in a.js, b.css, c.md')
+t('meer dan drie wordt een aantal met twee namen',
+  G.automatischCommitBericht(stB(13, ['renderer.js', 'style.css', 'main.js', 'x.js']))
+  === 'wijzigingen in 13 bestanden (renderer.js, style.css, +11)')
+t('zonder namen valt hij terug op het aantal',
+  G.automatischCommitBericht(stB(5, [])) === 'wijzigingen in 5 bestand(en)')
+t('zonder staat klapt hij niet', G.automatischCommitBericht(null) === 'wijzigingen vastgelegd')
+t('het levert altijd een bruikbaar commando op',
+  [stB(1, ['a.js']), stB(9, ['a.js', 'b.js', 'c.js', 'd.js']), stB(2, []), null]
+    .every(x => typeof G.commitCommando(G.automatischCommitBericht(x)) === 'string'))
+t('en nooit een leeg bericht',
+  [stB(1, ['a.js']), stB(2, []), null].every(x => G.automatischCommitBericht(x).trim().length > 0))
+t('het bericht overleeft de opschoning voor cmd.exe',
+  G.veiligCommitBericht(G.automatischCommitBericht(stB(13, ['renderer.js', 'style.css'])))
+  === 'wijzigingen in 13 bestanden (renderer.js, style.css, +11)')
+
 // ── bedrading naar de app ────────────────────────────────────────────────────
 // Zonder deze twee zie je de knoppen wel staan, maar grijs en zonder icoon —
 // ze lijken dan uitgeschakeld. Dat is precies wat er de eerste keer misging.

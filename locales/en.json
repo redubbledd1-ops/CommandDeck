@@ -801,7 +801,7 @@
   "git.btn.stash": "stash",
   "git.btn.stashList": "restore stash",
   "git.commit.title": "Record your changes",
-  "git.commit.text": "{aantal} file(s) will be included. What was this change about?",
+  "git.commit.text": "{aantal} file(s) will be included. What was this change about? Leave it empty and the grey example is used.",
   "git.commit.placeholder": "fix: ...",
   "git.commit.ok": "commit",
   "git.push.title": "Push?",

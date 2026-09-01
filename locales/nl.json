@@ -801,7 +801,7 @@
   "git.btn.stash": "stash",
   "git.btn.stashList": "stash terughalen",
   "git.commit.title": "Wijzigingen vastleggen",
-  "git.commit.text": "{aantal} bestand(en) gaan mee. Waar ging deze wijziging over?",
+  "git.commit.text": "{aantal} bestand(en) gaan mee. Waar ging deze wijziging over? Laat je het leeg, dan vullen we het grijze voorbeeld in.",
   "git.commit.placeholder": "fix: ...",
   "git.commit.ok": "commit",
   "git.push.title": "Pushen?",
