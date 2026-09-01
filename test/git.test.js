@@ -724,6 +724,32 @@ t('zonder profiel valt er niets te activeren',
 t('een profiel zonder GitHub-account zet alleen de naam',
   G.accountActiveerStappen({ ...prof, ghGebruiker: '' }, true).map(x => x.soort).join() === 'identiteit')
 
+// ── terugval als de API niet lukt ────────────────────────────────────────────
+// `gh api user` kan mislukken terwijl je wél ingelogd bent: geen netwerk, een
+// proxy op het werk, een token zonder de juiste rechten. `gh auth status` weet
+// dan nog steeds je gebruikersnaam, en daarmee is de identiteit alsnog te
+// maken — met het noreply-adres, dat altijd werkt.
+const statusUit = [
+  'github.com',
+  '  ✓ Logged in to github.com account frank-v (keyring)',
+  '  - Active account: true',
+].join('\n')
+gelijk('de gebruikersnaam komt uit de status', G.parseGhAccounts(statusUit), ['frank-v'])
+t('en daarmee is er een werkend adres',
+  G.noreplyEmail(null, 'frank-v') === 'frank-v@users.noreply.github.com')
+t('dat GitHub aan je account koppelt',
+  G.noreplyEmail(null, 'frank-v').endsWith('@users.noreply.github.com'))
+t('zonder login blijft het leeg — dan is er echt niets',
+  G.parseGhAccounts('You are not logged into any GitHub hosts.').length === 0)
+
+const mainBron3 = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8')
+const identBlok = (mainBron3.match(/ipcMain\.handle\('git:ghIdentiteit'[\s\S]*?\n\}\)/) || [''])[0]
+t('mislukken levert een reden op, geen kale null',
+  /reden: 'geen-gh'/.test(identBlok) && /reden: 'niet-ingelogd'/.test(identBlok))
+t('en de foutregel van gh wordt meegegeven', /detail: laatsteFout/.test(identBlok))
+t('er is een terugval via gh auth status', /viaStatus: true/.test(identBlok))
+t('die het noreply-adres gebruikt', /noreplyEmail/.test(identBlok))
+
 // ── de GitHub-CLI installeren ────────────────────────────────────────────────
 // Alleen op verzoek. Een app die ongevraagd software installeert is gedrag dat
 // je van malware verwacht, niet van een launcher.

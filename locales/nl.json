@@ -1053,5 +1053,8 @@
   "git.inlog.geenGhTitel": "GitHub-CLI ontbreekt",
   "git.inlog.geenWingetTekst": "Voor inloggen bij GitHub is gh nodig, en die staat niet op deze pc. Winget is er ook niet, dus installeren kan ik hier niet. Haal hem op bij cli.github.com.",
   "git.inlog.naarSite": "naar cli.github.com",
-  "git.inlog.installMislukt": "De installatie is niet gelukt of is afgebroken. Kijk in de uitvoer wat er misging — op een werk-pc is winget vaak geblokkeerd."
+  "git.inlog.installMislukt": "De installatie is niet gelukt of is afgebroken. Kijk in de uitvoer wat er misging — op een werk-pc is winget vaak geblokkeerd.",
+  "accounts.gitOphalen.geenGh": "De GitHub-CLI (gh) is niet gevonden. Zonder die kan ik je gegevens niet ophalen — installeer hem, of vul je naam en adres zelf in.",
+  "accounts.gitOphalen.nietIngelogd": "gh is er wel, maar kon je gegevens niet opvragen. Meestal betekent dat: nog niet ingelogd, of geen verbinding. Log in met de knop 'GitHub-account koppelen', of vul het zelf in.",
+  "accounts.gitGevondenViaStatus": "Je bent ingelogd als {gh}. Je profielgegevens kon ik niet opvragen, dus ik gebruik het noreply-adres van GitHub — dat koppelt je commits gewoon aan je account. Commits komen op naam {naam} <{email}>. Zo instellen?"
 }

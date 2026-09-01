@@ -1053,5 +1053,8 @@
   "git.inlog.geenGhTitel": "GitHub CLI missing",
   "git.inlog.geenWingetTekst": "Logging in to GitHub needs gh, which is not on this pc. Winget is missing too, so I cannot install it here. Get it from cli.github.com.",
   "git.inlog.naarSite": "go to cli.github.com",
-  "git.inlog.installMislukt": "The install did not finish or was cancelled. Check the output for what went wrong — on a work pc winget is often blocked."
+  "git.inlog.installMislukt": "The install did not finish or was cancelled. Check the output for what went wrong — on a work pc winget is often blocked.",
+  "accounts.gitOphalen.geenGh": "The GitHub CLI (gh) was not found. Without it I cannot fetch your details — install it, or fill in your name and address yourself.",
+  "accounts.gitOphalen.nietIngelogd": "gh is there, but could not fetch your details. That usually means: not logged in yet, or no connection. Log in with the 'Link GitHub account' button, or fill it in yourself.",
+  "accounts.gitGevondenViaStatus": "You are logged in as {gh}. I could not read your profile, so I use the GitHub noreply address — that still links your commits to your account. Commits will say {naam} <{email}>. Set it up like this?"
 }

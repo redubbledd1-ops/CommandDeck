@@ -1374,24 +1374,55 @@ ipcMain.handle('git:accountActiveren', (_, profiel) => {
 // Wie ben je volgens GitHub? Na het inloggen weet gh dat, dus hoeft niemand
 // zijn naam en adres over te typen.
 ipcMain.handle('git:ghIdentiteit', () => {
-  if (!ghBeschikbaar()) return null
+  // Mislukken mag, maar dan moet er wél staan waaróm. "Kon je gegevens niet
+  // ophalen" laat iemand met lege handen achter; met de reden erbij weet je of
+  // je moet inloggen, installeren, of gewoon zelf invullen.
+  if (!ghBeschikbaar()) return { ok: false, reden: 'geen-gh' }
 
+  let laatsteFout = ''
   const roep = (pad) => {
     try {
       return execFileSync('gh', ['api', pad], {
-        encoding: 'utf8', timeout: 8000, windowsHide: true, env: childEnv(), stdio: ['ignore', 'pipe', 'ignore'],
+        encoding: 'utf8', timeout: 8000, windowsHide: true, env: childEnv(),
+        stdio: ['ignore', 'pipe', 'pipe'],
       })
-    } catch { return '' }
+    } catch (e) {
+      laatsteFout = String((e && (e.stderr || e.message)) || '').trim().split('\n')[0]
+      return ''
+    }
   }
 
   const user = GitTools.parseGhUser(roep('user'))
-  if (!user) return null
+  if (user) {
+    // Het adressenlijstje vereist een extra recht (user:email). Lukt dat niet,
+    // dan valt ghIdentiteit terug op het noreply-adres — dat werkt altijd en
+    // houdt een privéadres uit een publieke geschiedenis.
+    const email = GitTools.parseGhEmails(roep('user/emails'))
+    return { ok: true, identiteit: GitTools.ghIdentiteit(user, email) }
+  }
 
-  // Het adressenlijstje vereist een extra recht (user:email). Lukt dat niet,
-  // dan valt ghIdentiteit terug op het noreply-adres — dat werkt altijd en
-  // houdt een privéadres uit een publieke geschiedenis.
-  const email = GitTools.parseGhEmails(roep('user/emails'))
-  return GitTools.ghIdentiteit(user, email)
+  // De API kan mislukken terwijl je wél ingelogd bent: geen netwerk, een token
+  // zonder de juiste rechten, een proxy op het werk. `gh auth status` weet dan
+  // nog steeds je gebruikersnaam, en daarmee kunnen we de identiteit alsnog
+  // opbouwen — met het noreply-adres, dat altijd werkt.
+  let statusUit = ''
+  try {
+    statusUit = execFileSync('gh', ['auth', 'status'], {
+      encoding: 'utf8', timeout: 6000, windowsHide: true, env: childEnv(),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+  } catch (e) { statusUit = String((e && (e.stdout || e.stderr)) || '') }
+
+  const namen = GitTools.parseGhAccounts(statusUit)
+  if (namen.length) {
+    const login = namen[0]
+    return {
+      ok: true, viaStatus: true,
+      identiteit: { gitNaam: login, gitEmail: GitTools.noreplyEmail(null, login), ghGebruiker: login },
+    }
+  }
+
+  return { ok: false, reden: 'niet-ingelogd', detail: laatsteFout }
 })
 
 // Welke GitHub-accounts staan al klaar op deze pc?

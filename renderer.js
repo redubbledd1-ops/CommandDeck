@@ -7396,11 +7396,24 @@ async function haalGitIdentiteitOp(accountNaam) {
     if (!gelukt) return null        // inloggen niet gelukt: dan maar met de hand
   }
 
-  const ident = await window.api.gitGhIdentiteit()
-  if (!ident) { await meldKort(I18N.t('accounts.gitTitel', { naam: accountNaam }), I18N.t('accounts.gitOphalenMislukt')); return null }
+  const r = await window.api.gitGhIdentiteit()
+  if (!r || !r.ok) {
+    // Zeggen wát er misging, met de foutregel van gh erbij. Anders sta je met
+    // een melding die niets oplost.
+    const reden = (r && r.reden) || 'onbekend'
+    const regels = (r && r.detail) ? [r.detail] : []
+    await vraagKeuze({
+      titel: I18N.t('accounts.gitTitel', { naam: accountNaam }),
+      tekst: I18N.t('accounts.gitOphalen.' + (reden === 'geen-gh' ? 'geenGh' : 'nietIngelogd')),
+      regels,
+      knoppen: [{ label: I18N.t('common.ok'), waarde: 'ok', soort: 'primair' }],
+    })
+    return null
+  }
 
+  const ident = r.identiteit
   const ja = await vraagJaNee(I18N.t('accounts.gitGevondenTitel'),
-    I18N.t('accounts.gitGevondenTekst', {
+    I18N.t(r.viaStatus ? 'accounts.gitGevondenViaStatus' : 'accounts.gitGevondenTekst', {
       naam: ident.gitNaam, email: ident.gitEmail, gh: ident.ghGebruiker,
     }), I18N.t('common.save'), 'primair')
   return ja ? ident : null
