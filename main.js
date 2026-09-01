@@ -1306,7 +1306,7 @@ ipcMain.handle('git:fetch', (_, dir) => new Promise((resolve) => {
 // Is de GitHub-CLI beschikbaar? Zo ja, dan kan de koppelknop de repo zelf
 // aanmaken; zo nee, dan vragen we de gebruiker om de url.
 let ghAanwezig = null
-ipcMain.handle('git:gh', () => {
+function ghBeschikbaar() {
   if (ghAanwezig === null) {
     try {
       execFileSync('gh', ['--version'], { encoding: 'utf8', timeout: 4000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] })
@@ -1314,7 +1314,50 @@ ipcMain.handle('git:gh', () => {
     } catch { ghAanwezig = false }
   }
   return ghAanwezig
+}
+
+// Het git-account laten meeschakelen met het app-account. Stil en globaal: je
+// bent nú deze persoon, dus elke repo zonder eigen instelling volgt dat. Elke
+// stap apart, want ze kunnen los van elkaar mislukken — gh hoeft niet te
+// bestaan om je naam wel goed te zetten.
+ipcMain.handle('git:accountActiveren', (_, profiel) => {
+  if (!heeftGit()) return { ok: false, reden: 'geen-git', gedaan: [] }
+
+  const gedaan = []
+  const mislukt = []
+  for (const stap of GitTools.accountActiveerStappen(profiel, ghBeschikbaar())) {
+    // In de thuismap draaien: dit is globale config en hoort bij geen enkele repo.
+    try {
+      execFileSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', stap.cmd], {
+        cwd: os.homedir(), encoding: 'utf8', timeout: 8000, windowsHide: true,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      })
+      gedaan.push(stap.soort)
+    } catch { mislukt.push(stap.soort) }
+  }
+  return { ok: !!gedaan.length, gedaan, mislukt }
 })
+
+// Welke GitHub-accounts staan al klaar op deze pc?
+ipcMain.handle('git:ghAccounts', () => {
+  if (!ghBeschikbaar()) return []
+  try {
+    const uit = execFileSync('gh', ['auth', 'status'], {
+      encoding: 'utf8', timeout: 6000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    return GitTools.parseGhAccounts(uit)
+  } catch (e) {
+    // gh schrijft de status naar stderr als je niet ingelogd bent; die tekst
+    // bevat soms alsnog de accounts die wél bekend zijn.
+    return GitTools.parseGhAccounts((e && (e.stdout || e.stderr)) || '')
+  }
+})
+
+ipcMain.handle('git:gh', () => ghBeschikbaar())
+
+// Na een inlog is de uitkomst veranderd; anders blijft de app zeggen dat gh
+// er niet is omdat hij dat één keer heeft gemeten.
+ipcMain.handle('git:ghVergeet', () => { ghAanwezig = null; return true })
 
 // ── Mapgroottes ───────────────────────────────────────────────────────────────
 // Windows houdt nergens bij hoe groot een map is; dat moet je uitrekenen door de

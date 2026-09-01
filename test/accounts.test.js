@@ -89,10 +89,17 @@ t('verwijder je jezelf, dan schuift het actieve door', na2.actiefAccount === lij
 // ── pincode ──────────────────────────────────────────────────────────────────
 // Waar dit voor is: voorkomen dat je per ongeluk in het verkeerde account komt.
 // Niet: iemand tegenhouden die de bestanden opent.
-for (const goed of ['1234', '0000', '12345678']) t('geldige pincode: ' + goed, A.geldigePin(goed))
-for (const slecht of ['123', '123456789', '12a4', '12 34', '', '  1234', null, '12.4']) {
-  t('geweigerd als pincode: ' + JSON.stringify(slecht), A.geldigePin(slecht) === false)
+// Vrije tekst, geen eisen aan de samenstelling. Vier cijfers moet kunnen, een
+// wachtwoordzin ook. Drie tekens niet.
+for (const goed of ['1234', '0000', '12345678', 'hallo', 'mijn wachtwoord', 'a1!x', 'ë2ü9']) {
+  t('geldige code: ' + JSON.stringify(goed), A.geldigePin(goed) === true)
 }
+for (const slecht of ['123', 'abc', '', '   ', '  a ', null, undefined, 'x'.repeat(65)]) {
+  t('geweigerd als code: ' + JSON.stringify(slecht), A.geldigePin(slecht) === false)
+}
+t('precies vier telt', A.geldigePin('abcd') === true)
+t('drie niet', A.geldigePin('abc') === false)
+t('spaties binnenin mogen', A.geldigePin('a b c') === true)
 
 const eenAcc = [A.maakAccount({ naam: 'Ik' })]
 const tweeAcc = [...eenAcc, A.maakAccount({ naam: 'Collega' })]

@@ -125,9 +125,17 @@
   // veranderen. We bewaren hem gehasht zodat hij niet leesbaar in het bestand
   // staat, en verder is de eerlijke boodschap: aparte Windows-accounts.
   const PIN_MIN = 4
-  const PIN_MAX = 8
+  const PIN_MAX = 64
 
-  const geldigePin = (pin) => new RegExp(`^[0-9]{${PIN_MIN},${PIN_MAX}}$`).test(String(pin || ''))
+  // Vrije tekst, geen eisen aan wat erin moet zitten. Vier cijfers mag, een
+  // zin ook. Regels als "minstens één hoofdletter" leveren geen sterkere codes
+  // op, alleen codes die mensen opschrijven — en drie tekens is te kort om
+  // zelfs maar een vergissing tegen te houden.
+  function geldigePin(pin) {
+    const p = String(pin == null ? '' : pin)
+    if (p.trim().length < PIN_MIN) return false     // alleen spaties telt niet mee
+    return p.length >= PIN_MIN && p.length <= PIN_MAX
+  }
 
   // Bij één account valt er niets te verwarren, dus vragen we niets. Vanaf twee
   // is het altijd nodig — ook bij het wisselen, want dat is precies het moment

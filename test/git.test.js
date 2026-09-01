@@ -696,6 +696,49 @@ t('en verdwijnt als er niets te vergelijken valt',
 t('hij werkt ook zonder remote',
   G.zichtbareGitIds(G.maakStaat({ isRepo: true, remotes: [], branch: 'main', vuil: 2 })).includes('git-diff'))
 
+// ── het git-account laten meeschakelen met het app-account ───────────────────
+const prof = { id: 'p1', label: 'Redub', naam: 'redub', email: 'redubbledd@hotmail.nl',
+               ghGebruiker: 'redubbledd1-ops', inloggen: 'onthouden' }
+
+t('identiteit wordt globaal gezet, niet per map',
+  G.globaalIdentiteitCommando(prof)
+  === 'git config --global user.name "redub" && git config --global user.email "redubbledd@hotmail.nl"')
+t('een onvolledig profiel levert niets op',
+  G.globaalIdentiteitCommando({ naam: 'x' }) === null)
+t('het GitHub-account wordt ook globaal gezet',
+  G.globaalGhGebruikerCommando('redubbledd1-ops')
+  === 'git config --global "credential.https://github.com.username" "redubbledd1-ops"')
+t('een onmogelijke gebruikersnaam wordt geweigerd',
+  G.globaalGhGebruikerCommando('niet geldig!') === null)
+
+const zonderGh = G.accountActiveerStappen(prof, false)
+const metGh = G.accountActiveerStappen(prof, true)
+gelijk('zonder gh: naam en GitHub-gebruiker', zonderGh.map(x => x.soort),
+  ['identiteit', 'github-gebruiker'])
+gelijk('met gh: ook echt van account wisselen', metGh.map(x => x.soort),
+  ['identiteit', 'github-gebruiker', 'gh-wissel'])
+t('elke stap is een los commando — ze mogen apart mislukken',
+  metGh.every(x => typeof x.cmd === 'string' && x.cmd.length > 0))
+t('zonder profiel valt er niets te activeren',
+  G.accountActiveerStappen(null, true).length === 0)
+t('een profiel zonder GitHub-account zet alleen de naam',
+  G.accountActiveerStappen({ ...prof, ghGebruiker: '' }, true).map(x => x.soort).join() === 'identiteit')
+
+t('inloggen gaat via de browser, niet via een token in een venster',
+  G.ghLoginCommando().includes('--web'))
+t('en nooit met een wachtwoord op de opdrachtregel',
+  !/--password|--with-token|-p /.test(G.ghLoginCommando()))
+
+gelijk('accounts uit de gh-status lezen',
+  G.parseGhAccounts([
+    'github.com',
+    '  ✓ Logged in to github.com account redubbledd1-ops (keyring)',
+    '  ✓ Logged in to github.com account collega-dev (keyring)',
+  ].join('\n')), ['redubbledd1-ops', 'collega-dev'])
+t('dubbele namen tellen één keer',
+  G.parseGhAccounts('account jan\naccount jan').length === 1)
+t('lege uitvoer geeft een lege lijst', G.parseGhAccounts('').length === 0)
+
 // ── terugdraaien ─────────────────────────────────────────────────────────────
 t('reset houdt je wijzigingen', G.resetZachtCommando() === 'git reset --soft HEAD~1')
 t('en gooit dus nooit iets weg', !/--hard|--merge|--keep/.test(G.resetZachtCommando()))

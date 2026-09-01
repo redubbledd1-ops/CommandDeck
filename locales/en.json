@@ -1012,9 +1012,9 @@
   "accounts.laatsteAccount": "This is the last account; there has to be at least one.",
   "accounts.kiesTitel": "Who is working?",
   "accounts.kiesTekst": "Pick your account. You get your own projects and git settings.",
-  "accounts.pinNieuwTekst": "Pick a PIN of {min} to {max} digits.",
+  "accounts.pinNieuwTekst": "Pick a code of at least {min} characters. Four digits is fine, a word or sentence too — no rules about capitals or punctuation.",
   "accounts.pinHerhaal": "Once more, to be sure you have it right.",
-  "accounts.pinOngeldig": "A PIN is 4 to 8 digits, nothing else.",
+  "accounts.pinOngeldig": "A code is at least 4 characters. Anything else goes.",
   "accounts.pinVerschilt": "The two codes are not the same. Try again.",
   "accounts.pinVragenTitel": "PIN for {naam}",
   "accounts.pinVragenTekst": "Enter your PIN to continue.",
@@ -1026,5 +1026,14 @@
   "accounts.pinVoorTitel": "PIN for {naam}",
   "accounts.eigenPinTitel": "Your own PIN first",
   "accounts.eigenPinTekst": "As soon as there is a second account the PIN starts to matter. {naam} does not have one yet — we set that first, otherwise you put a lock on one door while the other stands open.",
-  "accounts.kiesTekstPin": "Pick your account and enter your PIN."
+  "accounts.kiesTekstPin": "Pick your account and enter your PIN.",
+  "settings.git.inlogKnop": "Link GitHub account",
+  "git.inlog.uitleg": "Your browser opens and shows a code to enter there. No password passes through CommandDeck and your token is never shown. Afterwards you can link the account to this profile.",
+  "git.inlog.starten": "start login",
+  "git.inlog.geenGhTekst": "This needs the GitHub CLI (gh), which is not on this pc. Install it from cli.github.com or with: winget install GitHub.cli",
+  "git.inlog.installeren": "go to cli.github.com",
+  "git.inlog.geenProject": "There is no project to run this in yet. Add one first.",
+  "git.inlog.klaarTitel": "GitHub accounts on this pc",
+  "git.inlog.klaarTekst": "These accounts are ready now: {namen}. Set the right one on your git profile and it will switch along when you change account.",
+  "accounts.ghWisselMislukt": "Could not switch to GitHub account {naam}. Your name is set correctly, but check who you are pushing as."
 }

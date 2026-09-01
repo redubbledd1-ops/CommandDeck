@@ -839,6 +839,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   // allemaal iets kunnen zeggen, niet alleen over het laatst bekeken project.
   setTimeout(async () => {
     meldGitPadenAanMain()
+    await activeerGitVoorAccount()
     await ververesAlleGitStaten(true)
     startGitPolling()
     // Ook bij het opstarten kijken of de remote vóórloopt. restoreLastView()
@@ -1242,7 +1243,7 @@ function vraagTekst({ titel, tekst = '', waarde = '', placeholder = '', okLabel 
     const lijst = document.getElementById('vraag-lijst')
     lijst.hidden = false
     lijst.innerHTML = `<input type="${verborgen ? 'password' : 'text'}" class="vraag-invoer" id="vraag-invoer"
-      ${verborgen ? 'inputmode="numeric" autocomplete="off"' : ''} placeholder="${esc(placeholder)}" />`
+      ${verborgen ? 'autocomplete="off" spellcheck="false"' : ''} placeholder="${esc(placeholder)}" />`
     const invoer = lijst.querySelector('#vraag-invoer')
     invoer.value = waarde
 
@@ -7250,7 +7251,7 @@ async function vraagPin(titel, tekst, okLabel) {
 
 async function vraagNieuwePin(titel) {
   for (;;) {
-    const een = await vraagPin(titel, I18N.t('accounts.pinNieuwTekst', { min: 4, max: 8 }), I18N.t('common.next'))
+    const een = await vraagPin(titel, I18N.t('accounts.pinNieuwTekst', { min: Accounts.PIN_MIN }), I18N.t('common.next'))
     if (een === null) return null
     if (!Accounts.geldigePin(een)) { await meldKort(titel, I18N.t('accounts.pinOngeldig')); continue }
     const twee = await vraagPin(titel, I18N.t('accounts.pinHerhaal'), I18N.t('common.save'))
@@ -7274,6 +7275,71 @@ async function vraagBestaandePin(account) {
   }
   await meldKort(I18N.t('accounts.pinVragenTitel', { naam: account.naam }), I18N.t('accounts.pinOp'))
   return null
+}
+
+// Het git-account meeschakelen met het app-account. Dit is waar het om begon:
+// wissel je van account, dan commit en push je als die persoon — en niet als
+// degene die er toevallig het laatst was.
+// Inloggen bij GitHub zonder de omweg via cmd. `gh auth login --web` opent je
+// browser en toont een code; er gaat nooit een wachtwoord door deze app heen,
+// en er komt geen token in beeld dat iemand kan meelezen.
+async function githubInloggen() {
+  const gh = await window.api.gitGh()
+  if (!gh) {
+    const keuze = await vraagKeuze({
+      titel: I18N.t('settings.git.inlogKnop'),
+      tekst: I18N.t('git.inlog.geenGhTekst'),
+      knoppen: [
+        { label: I18N.t('common.cancel'), waarde: '' },
+        { label: I18N.t('git.inlog.installeren'), waarde: 'install', soort: 'primair' },
+      ],
+    })
+    if (keuze !== 'install') return
+    await window.api.openUrl('https://cli.github.com/')
+    return
+  }
+
+  const p = projects.find(x => x.id === activeId) || projects[0]
+  if (!p) { await meldKort(I18N.t('settings.git.inlogKnop'), I18N.t('git.inlog.geenProject')); return }
+
+  const ja = await vraagJaNee(I18N.t('settings.git.inlogKnop'), I18N.t('git.inlog.uitleg'),
+    I18N.t('git.inlog.starten'), 'primair')
+  if (!ja) return
+
+  // In de terminal van de app: gh toont daar de code die je in je browser moet
+  // invullen, en je ziet zelf wat er gebeurt.
+  toggleSettings()
+  await executeCmd(p, GitTools.ghLoginCommando(), null)
+
+  // De meting of gh er is, en met welke accounts, is nu verouderd.
+  try { await window.api.gitGhVergeet() } catch {}
+  const namen = await window.api.gitGhAccounts()
+  if (!namen || !namen.length) return
+
+  await meldKort(I18N.t('git.inlog.klaarTitel'),
+    I18N.t('git.inlog.klaarTekst', { namen: namen.join(', ') }), namen)
+}
+
+async function activeerGitVoorAccount() {
+  const prof = gitStandaardProfiel()
+  if (!prof) return null
+  try {
+    const r = await window.api.gitAccountActiveren(prof)
+    if (r && r.mislukt && r.mislukt.includes('gh-wissel')) {
+      // Alleen melden als het écht iets uitmaakt: naam en adres staan dan wel
+      // goed, maar pushen kan alsnog met het verkeerde GitHub-account.
+      showToast(I18N.t('accounts.ghWisselMislukt', { naam: prof.ghGebruiker || '' }))
+    }
+    return r
+  } catch { return null }
+}
+
+// Het profiel dat bij dit app-account hoort. De profielenlijst staat al per
+// account, dus dit is simpelweg het standaardprofiel van wie er nu werkt.
+function gitStandaardProfiel() {
+  const lijst = ((settings.git || {}).profielen) || []
+  const id = gitStandaardProfielId()
+  return lijst.find(p => p.id === id) || lijst[0] || null
 }
 
 async function laadAccounts() {
@@ -7319,6 +7385,7 @@ async function wisselAccount(id, pin = null) {
   gitStaten = {}
   for (const k of Object.keys(gitLaatsteFetch)) delete gitLaatsteFetch[k]
   meldGitPadenAanMain()
+  await activeerGitVoorAccount()
   activeId = projects[0] ? projects[0].id : ''
   setView(projects.length ? 'project' : 'cmd')
   renderSidebar()
@@ -7453,6 +7520,9 @@ function renderSettingsPanel() {
           <div id="git-profiel-lijst"></div>
           <button class="add-proj-btn" id="btn-add-git-profiel" style="margin:0;margin-top:4px">
             <i class="ti ti-plus"></i> ${I18N.t('settings.git.profielAdd')}
+          </button>
+          <button class="add-proj-btn" id="btn-git-inloggen" style="margin:0;margin-top:4px">
+            <i class="ti ti-brand-github"></i> ${I18N.t('settings.git.inlogKnop')}
           </button>
           <span class="instel-uitleg">${I18N.t('settings.git.inlogEerlijk')}</span>
         </div>
@@ -7673,6 +7743,9 @@ function renderSettingsPanel() {
       await laadAccounts(); renderSettingsPanel()
     }
   })
+
+  const gitInlog = document.getElementById('btn-git-inloggen')
+  if (gitInlog) gitInlog.onclick = () => githubInloggen()
 
   const gitPoll = document.getElementById('set-git-poll')
   if (gitPoll) gitPoll.onchange = () => {

@@ -969,6 +969,60 @@
   // Met gh erbij loopt het wisselen van account via gh zelf; die houdt zijn
   // eigen tokens bij en zet zich als credential helper voor github.com. Dan is
   // credential.username niet de knop die iets doet.
+  // Bij het wisselen van app-account moet git meeschakelen. Niet per map maar
+  // globaal: je bent nú deze persoon, en dat geldt voor elke repo waar niets
+  // anders is ingesteld. Een repo met een eigen user.name blijft die houden —
+  // dat is een bewuste keuze van wie hem daar heeft gezet.
+  function globaalIdentiteitCommando(profiel) {
+    if (!profielGeldig(profiel)) return null
+    return `git config --global user.name "${veiligConfigWaarde(profiel.naam)}"`
+         + ` && git config --global user.email "${veiligConfigWaarde(profiel.email)}"`
+  }
+
+  // Welk GitHub-account git moet gebruiken als er meerdere in de Windows-kluis
+  // staan. Zonder dit pakt git de eerste de beste en push je als de verkeerde.
+  function globaalGhGebruikerCommando(ghGebruiker) {
+    const naam = String(ghGebruiker || '').trim()
+    if (!geldigeGhGebruiker(naam)) return null
+    return `git config --global "credential.https://github.com.username" "${naam}"`
+  }
+
+  // Alles wat er bij het activeren van een account moet gebeuren, als losse
+  // stappen. Los, want ze kunnen onafhankelijk van elkaar mislukken: gh hoeft
+  // niet geïnstalleerd te zijn om je naam wel goed te zetten.
+  function accountActiveerStappen(profiel, ghAanwezig = false) {
+    const uit = []
+    const ident = globaalIdentiteitCommando(profiel)
+    if (ident) uit.push({ soort: 'identiteit', cmd: ident })
+
+    const cred = globaalGhGebruikerCommando(profiel && profiel.ghGebruiker)
+    if (cred) uit.push({ soort: 'github-gebruiker', cmd: cred })
+
+    if (ghAanwezig) {
+      const sw = ghSwitchCommando(profiel && profiel.ghGebruiker)
+      if (sw) uit.push({ soort: 'gh-wissel', cmd: sw })
+    }
+    return uit
+  }
+
+  // De inlogstroom van de GitHub-CLI. --web opent je browser en toont een code;
+  // dat is de enige variant die zonder token-plakwerk werkt en waarbij er nooit
+  // een wachtwoord door de app heen gaat.
+  function ghLoginCommando() {
+    return 'gh auth login --hostname github.com --git-protocol https --web'
+  }
+
+  // Welke GitHub-accounts staan er al klaar op deze pc?
+  function parseGhAccounts(uit) {
+    const namen = []
+    for (const regel of String(uit || '').split('\n')) {
+      // 'Logged in to github.com account redubbledd1-ops (keyring)'
+      const m = regel.match(/account\s+([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)/)
+      if (m && !namen.includes(m[1])) namen.push(m[1])
+    }
+    return namen
+  }
+
   function ghSwitchCommando(ghGebruiker) {
     const naam = String(ghGebruiker || '').trim()
     if (!geldigeGhGebruiker(naam)) return null
@@ -1044,6 +1098,8 @@
     identiteitCommando, profielCommando, ghSwitchCommando, vraagtOmInloggen,
     INLOG_ONTHOUDEN, INLOG_VRAGEN, INLOG_KEUZES,
     indicator, onveiligeRedenen, magFetchen, achterstandMelding, FETCH_INTERVAL_MS,
+    globaalIdentiteitCommando, globaalGhGebruikerCommando, accountActiveerStappen,
+    ghLoginCommando, parseGhAccounts,
     diffCommando, isHoofdtak, parseTrack, branchOmschrijving, branchHeeftEigenWerk,
     resetZachtCommando, amendCommando, weggooiBestandCommando, alGepusht, terugdraaiBlokkade,
     parseBranches, lokaleBranches, huidigeBranch, nieuweRemoteBranches,

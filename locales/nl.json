@@ -1012,9 +1012,9 @@
   "accounts.laatsteAccount": "Dit is het laatste account; er moet er minstens één zijn.",
   "accounts.kiesTitel": "Wie werkt er?",
   "accounts.kiesTekst": "Kies je account. Je krijgt dan je eigen projecten en git-instellingen.",
-  "accounts.pinNieuwTekst": "Kies een pincode van {min} tot {max} cijfers.",
+  "accounts.pinNieuwTekst": "Kies een code van minstens {min} tekens. Vier cijfers mag, een woord of zin ook — geen eisen aan hoofdletters of leestekens.",
   "accounts.pinHerhaal": "Nog een keer, om zeker te weten dat je hem goed hebt.",
-  "accounts.pinOngeldig": "Een pincode is 4 tot 8 cijfers, verder niets.",
+  "accounts.pinOngeldig": "Een code is minstens 4 tekens. Verder mag alles.",
   "accounts.pinVerschilt": "De twee codes zijn niet gelijk. Probeer het nog eens.",
   "accounts.pinVragenTitel": "Pincode van {naam}",
   "accounts.pinVragenTekst": "Voer je pincode in om verder te gaan.",
@@ -1026,5 +1026,14 @@
   "accounts.pinVoorTitel": "Pincode voor {naam}",
   "accounts.eigenPinTitel": "Eerst je eigen pincode",
   "accounts.eigenPinTekst": "Zodra er een tweede account is, telt de pincode mee. {naam} heeft er nog geen — die stellen we nu eerst in, anders zet je een slot op de ene deur terwijl de andere openstaat.",
-  "accounts.kiesTekstPin": "Kies je account en voer je pincode in."
+  "accounts.kiesTekstPin": "Kies je account en voer je pincode in.",
+  "settings.git.inlogKnop": "GitHub-account koppelen",
+  "git.inlog.uitleg": "Je browser gaat open en toont een code die je daar invult. Er gaat geen wachtwoord door CommandDeck heen, en je token komt nergens in beeld. Daarna kun je het account aan dit profiel koppelen.",
+  "git.inlog.starten": "inloggen starten",
+  "git.inlog.geenGhTekst": "Hiervoor is de GitHub-CLI nodig (gh). Die is er niet op deze pc. Installeer hem via cli.github.com of met: winget install GitHub.cli",
+  "git.inlog.installeren": "naar cli.github.com",
+  "git.inlog.geenProject": "Er is nog geen project om dit in te draaien. Voeg er eerst één toe.",
+  "git.inlog.klaarTitel": "GitHub-accounts op deze pc",
+  "git.inlog.klaarTekst": "Deze accounts staan nu klaar: {namen}. Zet de juiste bij je git-profiel, dan schakelt hij mee als je van account wisselt.",
+  "accounts.ghWisselMislukt": "Kon niet naar GitHub-account {naam} wisselen. Je naam staat wel goed, maar controleer met wie je pusht."
 }
