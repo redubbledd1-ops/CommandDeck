@@ -960,5 +960,7 @@
   "git.commit.nieuwTitel": "Er gaan nieuwe bestanden mee",
   "git.commit.nieuwTekst": "{aantal} van de {totaal} bestanden staan nog niet in versiebeheer. Die worden nu voor het eerst vastgelegd — controleer of er niets tussen zit wat er niet in hoort.",
   "git.commit.bekijken": "eerst bekijken",
-  "git.commit.doorgaan": "doorgaan"
+  "git.commit.doorgaan": "doorgaan",
+  "git.branch.hoofdtakTitel": "Dit is je hoofdtak",
+  "git.branch.hoofdtakTekst": "{naam} is de tak waar al je werk normaal in samenkomt. Verwijderen kan, maar dat wil je bijna nooit — bedoelde je een andere branch?"
 }

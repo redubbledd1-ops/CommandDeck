@@ -960,5 +960,7 @@
   "git.commit.nieuwTitel": "New files are included",
   "git.commit.nieuwTekst": "{aantal} of the {totaal} files are not under version control yet. They are about to be recorded for the first time — check that nothing is in there that should not be.",
   "git.commit.bekijken": "look first",
-  "git.commit.doorgaan": "continue"
+  "git.commit.doorgaan": "continue",
+  "git.branch.hoofdtakTitel": "This is your main branch",
+  "git.branch.hoofdtakTekst": "{naam} is the branch all your work normally comes together in. Deleting it is possible, but hardly ever what you want — did you mean a different branch?"
 }

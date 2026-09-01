@@ -328,14 +328,20 @@
       const upstream = String(velden[3] || '').trim()
       if (!kort) continue
 
-      // 'origin/HEAD' wijst alleen maar naar de standaardtak; geen echte branch.
+      // Onder refs/remotes/ staan ook dingen die geen branch zijn:
+      //   origin/HEAD   wijst alleen naar de standaardtak
+      //   origin        een kale verwijzing naar de remote zelf, zonder tak
+      // Allebei zijn ze niets om naartoe te wisselen of te verwijderen, en de
+      // tweede zag er in het venster uit als een branch die 'origin' heet.
+      const isRemoteRef = vol.startsWith('refs/remotes/')
       if (kort.endsWith('/HEAD') || kort.includes(' -> ')) continue
+      if (isRemoteRef && !kort.includes('/')) continue
 
       lijst.push({
         naam: kort,
         huidig: String(vlag || '').trim() === '*',
         upstream: upstream || null,
-        remote: vol.startsWith('refs/remotes/'),
+        remote: isRemoteRef,
       })
     }
     return lijst
@@ -415,6 +421,12 @@
     if (!geldigeBranchNaam(n) && !/^[\w.-]+\/[\w./-]+$/.test(n)) return null
     return `git merge ${n}`
   }
+
+  // Git laat je de hoofdtak gewoon verwijderen als hij ergens in is
+  // samengevoegd. Dat is zelden de bedoeling, en voor wie net begint is het een
+  // dure vergissing. We houden het niet tegen, maar we vragen wél extra door.
+  const HOOFDTAKKEN = ['main', 'master']
+  const isHoofdtak = (naam) => HOOFDTAKKEN.includes(String(naam || '').replace(/^[^/]+\//, ''))
 
   // Waarom je nu niet kunt wisselen. Git weigert bij vuile bestanden die de
   // andere tak ook aanraakt — maar wélke dat zijn weet git pas als het misgaat,
@@ -947,7 +959,7 @@
     identiteitCommando, profielCommando, ghSwitchCommando, vraagtOmInloggen,
     INLOG_ONTHOUDEN, INLOG_VRAGEN, INLOG_KEUZES,
     indicator, onveiligeRedenen, magFetchen, achterstandMelding, FETCH_INTERVAL_MS,
-    diffCommando,
+    diffCommando, isHoofdtak,
     parseBranches, lokaleBranches, huidigeBranch, nieuweRemoteBranches,
     geldigeBranchNaam, veiligeBranchNaam, checkoutCommando, nieuweBranchCommando,
     verwijderBranchCommando, verwijderRemoteBranchCommando, mergeCommando, wisselBlokkade,

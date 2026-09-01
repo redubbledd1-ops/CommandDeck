@@ -11474,6 +11474,15 @@ async function branchVerwijderen(project, kandidaten, huidig) {
   if (!doel) return
   if (doel.naam === huidig) { await meldKort(I18N.t('git.branch.wegTitel'), I18N.t('git.branch.wegHuidig')); return }
 
+  // De hoofdtak weggooien mag van git zodra hij ergens in samengevoegd is, maar
+  // het is bijna nooit de bedoeling. Eén extra vraag, met erbij waaróm.
+  if (GitTools.isHoofdtak(doel.naam)) {
+    const zeker = await vraagJaNee(I18N.t('git.branch.hoofdtakTitel'),
+      I18N.t('git.branch.hoofdtakTekst', { naam: doel.naam }),
+      I18N.t('git.branch.wegForceren'), 'gevaar')
+    if (!zeker) return
+  }
+
   const opRemote = !!doel.remote
   const ja = await vraagJaNee(I18N.t('git.branch.wegTitel'),
     I18N.t(opRemote ? 'git.branch.wegRemoteBevestig' : 'git.branch.wegBevestig', { naam: doel.naam }),

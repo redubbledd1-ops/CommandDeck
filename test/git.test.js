@@ -722,6 +722,26 @@ t('werkt met Windows-regeleindes', G.parseBranches(BR.split('\n').join('\r\n')).
 t('lege uitvoer klapt niet', G.parseBranches('').length === 0)
 t('een halve regel wordt overgeslagen', G.parseBranches('* \tref').length === 0)
 
+// Onder refs/remotes/ staat niet alleen 'origin/main'. Een kale 'origin' zag er
+// in het keuzevenster uit als een branch die zo heet.
+const BR_KAAL = [
+  '*\trefs/heads/main\tmain\torigin/main',
+  ' \trefs/remotes/origin\torigin\t',
+  ' \trefs/remotes/origin/HEAD\torigin/HEAD\t',
+  ' \trefs/remotes/origin/main\torigin/main\t',
+].join('\n')
+gelijk('een kale remote-verwijzing is geen branch',
+  G.parseBranches(BR_KAAL).map(b => b.naam), ['main', 'origin/main'])
+t('en komt dus ook niet in de keuzelijst',
+  !G.nieuweRemoteBranches(G.parseBranches(BR_KAAL)).some(b => b.naam === 'origin'))
+t('een lokale tak zonder / blijft wél gewoon staan',
+  G.parseBranches(' \trefs/heads/origin\torigin\t')[0].naam === 'origin')
+
+t('main en master gelden als hoofdtak',
+  G.isHoofdtak('main') && G.isHoofdtak('master') && G.isHoofdtak('origin/main'))
+t('een gewone tak niet', !G.isHoofdtak('feature/x') && !G.isHoofdtak('Even-testen'))
+t('en niets ook niet', !G.isHoofdtak('') && !G.isHoofdtak(null))
+
 t('lokaal wisselen is gewoon checkout',
   G.checkoutCommando({ naam: 'feature/knoppen', remote: false }) === 'git checkout feature/knoppen')
 t('een remote-tak wordt lokaal aangemaakt en volgt hem',
