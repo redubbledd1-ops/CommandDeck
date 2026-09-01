@@ -737,6 +737,42 @@ t('en komt dus ook niet in de keuzelijst',
 t('een lokale tak zonder / blijft wél gewoon staan',
   G.parseBranches(' \trefs/heads/origin\torigin\t')[0].naam === 'origin')
 
+// Vooruit/achter per branch. Dit is de informatie die ontbrak toen een branch
+// werd weggegooid terwijl er nog een commit op stond die nergens anders was.
+gelijk('ahead en behind', G.parseTrack('[ahead 2, behind 1]'), { ahead: 2, behind: 1, wegOpRemote: false })
+gelijk('alleen vooruit', G.parseTrack('[ahead 3]'), { ahead: 3, behind: 0, wegOpRemote: false })
+gelijk('alleen achter', G.parseTrack('[behind 4]'), { ahead: 0, behind: 4, wegOpRemote: false })
+gelijk('gelijk', G.parseTrack(''), { ahead: 0, behind: 0, wegOpRemote: false })
+gelijk('remote-tak verdwenen', G.parseTrack('[gone]'), { ahead: 0, behind: 0, wegOpRemote: true })
+
+const brTrack = G.parseBranches([
+  '*\trefs/heads/main\tmain\torigin/main\t',
+  ' \trefs/heads/feature\tfeature\torigin/feature\t[ahead 2, behind 1]',
+  ' \trefs/heads/los\tlos\t\t',
+  ' \trefs/heads/verweesd\tverweesd\torigin/verweesd\t[gone]',
+  ' \trefs/remotes/origin/nieuw\torigin/nieuw\t\t',
+].join('\n'))
+const brVan = (naam) => brTrack.find(b => b.naam === naam)
+
+t('cijfers komen uit de branch-lijst', brVan('feature').ahead === 2 && brVan('feature').behind === 1)
+t('een branch zonder remote heeft geen cijfers', brVan('los').ahead === 0)
+t('en een verdwenen remote wordt gemarkeerd', brVan('verweesd').wegOpRemote === true)
+
+t('gelijke branch krijgt geen tekens', G.branchOmschrijving(brVan('main')) === 'main')
+t('vooruit en achter komen in het label', G.branchOmschrijving(brVan('feature')).includes('↑2')
+  && G.branchOmschrijving(brVan('feature')).includes('↓1'))
+t('een remote-tak krijgt een wolk, want kiezen maakt hem lokaal aan',
+  G.branchOmschrijving(brVan('origin/nieuw')) === '☁ origin/nieuw')
+t('leeg klapt niet', G.branchOmschrijving(null) === '')
+
+t('vooruitlopen telt als eigen werk', G.branchHeeftEigenWerk(brVan('feature')) === true)
+t('geen remote telt als eigen werk', G.branchHeeftEigenWerk(brVan('los')) === true)
+t('een verdwenen remote ook — dat werk staat mogelijk nergens meer',
+  G.branchHeeftEigenWerk(brVan('verweesd')) === true)
+t('gelijk met de remote is geen eigen werk', G.branchHeeftEigenWerk(brVan('main')) === false)
+t('een remote-tak is per definitie geen eigen werk',
+  G.branchHeeftEigenWerk(brVan('origin/nieuw')) === false)
+
 t('main en master gelden als hoofdtak',
   G.isHoofdtak('main') && G.isHoofdtak('master') && G.isHoofdtak('origin/main'))
 t('een gewone tak niet', !G.isHoofdtak('feature/x') && !G.isHoofdtak('Even-testen'))
@@ -824,6 +860,12 @@ for (const sleutel of ['git.afsluit.titel', 'git.afsluit.commitPush', 'git.afslu
 for (const sleutel of ['git.btn.diff', 'git.diff.leegTitel', 'git.diff.nieuweKop',
                        'git.commit.nieuwTitel', 'git.commit.bekijken', 'git.commit.doorgaan']) {
   t('diff-tekst ' + sleutel + ' bestaat in nl en en', !!nl[sleutel] && !!en[sleutel])
+}
+
+for (const sleutel of ['git.branch.remoteHalenTitel', 'git.branch.remoteHalenTekst',
+                       'git.branch.eigenWerkTitel', 'git.branch.eigenWerkVooruit',
+                       'git.branch.ookRemoteTitel', 'git.branch.ookRemoteOk']) {
+  t('branch-waarschuwing ' + sleutel + ' bestaat in nl en en', !!nl[sleutel] && !!en[sleutel])
 }
 
 for (const sleutel of ['git.btn.branch', 'git.branch.titel', 'git.branch.nieuw', 'git.branch.wisselen',

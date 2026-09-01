@@ -962,5 +962,14 @@
   "git.commit.bekijken": "look first",
   "git.commit.doorgaan": "continue",
   "git.branch.hoofdtakTitel": "This is your main branch",
-  "git.branch.hoofdtakTekst": "{naam} is the branch all your work normally comes together in. Deleting it is possible, but hardly ever what you want — did you mean a different branch?"
+  "git.branch.hoofdtakTekst": "{naam} is the branch all your work normally comes together in. Deleting it is possible, but hardly ever what you want — did you mean a different branch?",
+  "git.branch.remoteHalenTitel": "This branch only exists on GitHub",
+  "git.branch.remoteHalenTekst": "{remote} does not exist here yet. A local branch {naam} will be created at the commit GitHub is on — which may be older than where you are coming from.",
+  "git.branch.remoteHalenOk": "create locally",
+  "git.branch.eigenWerkTitel": "This holds work that exists nowhere else",
+  "git.branch.eigenWerkVooruit": "{naam} is {aantal} commit(s) ahead of GitHub. Delete it and that work is gone.",
+  "git.branch.eigenWerkGeenRemote": "{naam} exists nowhere but on this pc. Delete it and everything only on it is gone.",
+  "git.branch.ookRemoteTitel": "Delete from GitHub too?",
+  "git.branch.ookRemoteTekst": "It is gone locally, but {naam} is still there. Leave it and it keeps showing up in the list, ready to be pulled back in.",
+  "git.branch.ookRemoteOk": "from GitHub too"
 }

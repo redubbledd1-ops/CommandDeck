@@ -962,5 +962,14 @@
   "git.commit.bekijken": "eerst bekijken",
   "git.commit.doorgaan": "doorgaan",
   "git.branch.hoofdtakTitel": "Dit is je hoofdtak",
-  "git.branch.hoofdtakTekst": "{naam} is de tak waar al je werk normaal in samenkomt. Verwijderen kan, maar dat wil je bijna nooit — bedoelde je een andere branch?"
+  "git.branch.hoofdtakTekst": "{naam} is de tak waar al je werk normaal in samenkomt. Verwijderen kan, maar dat wil je bijna nooit — bedoelde je een andere branch?",
+  "git.branch.remoteHalenTitel": "Deze branch staat alleen op GitHub",
+  "git.branch.remoteHalenTekst": "{remote} bestaat hier nog niet. Er wordt een lokale branch {naam} gemaakt op de commit waar GitHub staat — dat kan een oudere versie zijn dan waar je nu vandaan komt.",
+  "git.branch.remoteHalenOk": "lokaal aanmaken",
+  "git.branch.eigenWerkTitel": "Hier staat werk dat nergens anders is",
+  "git.branch.eigenWerkVooruit": "{naam} loopt {aantal} commit(s) vóór op GitHub. Verwijder je hem, dan is dat werk weg.",
+  "git.branch.eigenWerkGeenRemote": "{naam} staat nergens anders dan op deze pc. Verwijder je hem, dan is alles wat er alleen op stond weg.",
+  "git.branch.ookRemoteTitel": "Ook van GitHub verwijderen?",
+  "git.branch.ookRemoteTekst": "Lokaal is hij weg, maar {naam} staat er nog. Laat je hem staan, dan blijft hij in de lijst opduiken en haal je hem er zo weer bij.",
+  "git.branch.ookRemoteOk": "ook van GitHub"
 }

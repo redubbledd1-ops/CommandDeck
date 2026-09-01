@@ -992,7 +992,7 @@ ipcMain.handle('git:accountInfo', (_, dir) => {
 ipcMain.handle('git:branches', (_, dir) => {
   if (!dir || !fs.existsSync(dir) || !heeftGit()) return []
   return GitTools.parseBranches(
-    gitUit(dir, ['branch', '-a', '--format=%(HEAD)%09%(refname)%09%(refname:short)%09%(upstream:short)']))
+    gitUit(dir, ['branch', '-a', '--format=%(HEAD)%09%(refname)%09%(refname:short)%09%(upstream:short)%09%(upstream:track)']))
 })
 
 ipcMain.handle('git:stashLijst', (_, dir) => {

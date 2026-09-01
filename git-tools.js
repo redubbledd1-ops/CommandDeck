@@ -304,7 +304,7 @@
 
   // ── Branches ────────────────────────────────────────────────────────────────
   // Uitgelezen met:
-  //   git branch -a --format=%(HEAD)%09%(refname)%09%(refname:short)%09%(upstream:short)
+  //   git branch -a --format=%(HEAD)%09%(refname)%09%(refname:short)%09%(upstream:short)%09%(upstream:track)
   //
   // De vólledige refnaam moet erbij. `refname:short` geeft voor een remote-tak
   // gewoon 'origin/main' — niet 'remotes/origin/main' — en dan is een tak met
@@ -326,6 +326,7 @@
       const vol = String(velden[1] || '').trim()
       const kort = String(velden[2] || '').trim()
       const upstream = String(velden[3] || '').trim()
+      const track = String(velden[4] || '')
       if (!kort) continue
 
       // Onder refs/remotes/ staan ook dingen die geen branch zijn:
@@ -342,9 +343,25 @@
         huidig: String(vlag || '').trim() === '*',
         upstream: upstream || null,
         remote: isRemoteRef,
+        ...parseTrack(track),
       })
     }
     return lijst
+  }
+
+  // %(upstream:track) geeft '[ahead 1]', '[behind 2]', '[ahead 1, behind 2]',
+  // '[gone]' als de remote-tak verdwenen is, of niets. Dit is precies wat je
+  // wilt weten vóórdat je een branch weggooit: staat er werk op dat nergens
+  // anders is?
+  function parseTrack(tekst) {
+    const t = String(tekst || '')
+    const a = t.match(/ahead (\d+)/)
+    const b = t.match(/behind (\d+)/)
+    return {
+      ahead: a ? parseInt(a[1], 10) : 0,
+      behind: b ? parseInt(b[1], 10) : 0,
+      wegOpRemote: /\bgone\b/.test(t),
+    }
   }
 
   const lokaleBranches = (lijst) => (lijst || []).filter(b => !b.remote)
@@ -421,6 +438,24 @@
     if (!geldigeBranchNaam(n) && !/^[\w.-]+\/[\w./-]+$/.test(n)) return null
     return `git merge ${n}`
   }
+
+  // Hoe een branch in een keuzelijst hoort te staan. De ☁ zegt dat hij alleen
+  // op de remote bestaat — kiezen betekent dan dat er lokaal een nieuwe wordt
+  // gemaakt, en dat is iets heel anders dan ergens naartoe wisselen.
+  function branchOmschrijving(b) {
+    if (!b || !b.naam) return ''
+    if (b.remote) return '☁ ' + b.naam
+    const merk = []
+    if (b.ahead) merk.push('↑' + b.ahead)
+    if (b.behind) merk.push('↓' + b.behind)
+    if (b.wegOpRemote) merk.push('⚠')
+    return b.naam + (merk.length ? '  ' + merk.join(' ') : '')
+  }
+
+  // Staat er op deze branch werk dat nergens anders is? Dat is de vraag die
+  // vóór het verwijderen beantwoord moet worden, en die je nu pas achteraf
+  // uit een foutmelding van git moest afleiden.
+  const branchHeeftEigenWerk = (b) => !!b && !b.remote && (b.ahead > 0 || !b.upstream || !!b.wegOpRemote)
 
   // Git laat je de hoofdtak gewoon verwijderen als hij ergens in is
   // samengevoegd. Dat is zelden de bedoeling, en voor wie net begint is het een
@@ -959,7 +994,7 @@
     identiteitCommando, profielCommando, ghSwitchCommando, vraagtOmInloggen,
     INLOG_ONTHOUDEN, INLOG_VRAGEN, INLOG_KEUZES,
     indicator, onveiligeRedenen, magFetchen, achterstandMelding, FETCH_INTERVAL_MS,
-    diffCommando, isHoofdtak,
+    diffCommando, isHoofdtak, parseTrack, branchOmschrijving, branchHeeftEigenWerk,
     parseBranches, lokaleBranches, huidigeBranch, nieuweRemoteBranches,
     geldigeBranchNaam, veiligeBranchNaam, checkoutCommando, nieuweBranchCommando,
     verwijderBranchCommando, verwijderRemoteBranchCommando, mergeCommando, wisselBlokkade,

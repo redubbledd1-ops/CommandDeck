@@ -11322,8 +11322,8 @@ async function toonDiff(project) {
 // terminal. Een merge-tool bouwen hoort niet in een launcher thuis.
 
 function branchLabel(b, huidig) {
-  const merk = b.naam === huidig ? '● ' : (b.remote ? '☁ ' : '')
-  return merk + b.naam
+  const omschrijving = GitTools.branchOmschrijving(b)
+  return b.naam === huidig ? '● ' + omschrijving : omschrijving
 }
 
 // Kiezen uit een lijst branches, in dezelfde vorm als de stash-lijst: de
@@ -11336,7 +11336,7 @@ async function kiesBranch(lijst, titel, tekst, soort = '') {
   const knoppen = [{ label: I18N.t('common.cancel'), waarde: '' }]
   // column-reverse: achterste eerst, zodat de eerste uit de lijst bovenaan komt.
   for (let i = tonen.length - 1; i >= 0; i--) {
-    knoppen.push({ label: tonen[i].naam, waarde: tonen[i].naam, soort: i === 0 ? soort : '' })
+    knoppen.push({ label: GitTools.branchOmschrijving(tonen[i]), waarde: tonen[i].naam, soort: i === 0 ? soort : '' })
   }
   const naam = await vraagKeuze({
     titel,
@@ -11420,6 +11420,18 @@ async function branchWisselen(project, staat, kandidaten) {
     I18N.t('git.branch.wisselTekst'), 'primair')
   if (!doel) return
 
+  // Een ☁-branch bestaat alleen op de remote. "Wisselen" maakt er dan lokaal
+  // een nieuwe aan op de commit waar de remote staat — en dat kan een oudere
+  // zijn dan waar je vandaan komt. Dat is iets anders dan ergens naartoe gaan,
+  // dus dat hoort in het venster te staan en niet stilletjes te gebeuren.
+  if (doel.remote) {
+    const lokaleNaam = doel.naam.replace(/^[^/]+\//, '')
+    const ja = await vraagJaNee(I18N.t('git.branch.remoteHalenTitel'),
+      I18N.t('git.branch.remoteHalenTekst', { remote: doel.naam, naam: lokaleNaam }),
+      I18N.t('git.branch.remoteHalenOk'), 'primair')
+    if (!ja) return
+  }
+
   const blok = GitTools.wisselBlokkade(staat, doel.naam)
   if (blok === 'zelfde') { await meldKort(I18N.t('git.branch.zelfdeTitel'), I18N.t('git.branch.zelfdeTekst')); return }
 
@@ -11483,6 +11495,16 @@ async function branchVerwijderen(project, kandidaten, huidig) {
     if (!zeker) return
   }
 
+  // Staat er werk op dat nergens anders is? Dan moet dat vóór de vraag staan,
+  // niet erna in een foutmelding van git.
+  if (GitTools.branchHeeftEigenWerk(doel)) {
+    const zeker = await vraagJaNee(I18N.t('git.branch.eigenWerkTitel'),
+      I18N.t(doel.ahead ? 'git.branch.eigenWerkVooruit' : 'git.branch.eigenWerkGeenRemote',
+        { naam: doel.naam, aantal: doel.ahead }),
+      I18N.t('git.branch.wegForceren'), 'gevaar')
+    if (!zeker) return
+  }
+
   const opRemote = !!doel.remote
   const ja = await vraagJaNee(I18N.t('git.branch.wegTitel'),
     I18N.t(opRemote ? 'git.branch.wegRemoteBevestig' : 'git.branch.wegBevestig', { naam: doel.naam }),
@@ -11502,14 +11524,37 @@ async function branchVerwijderen(project, kandidaten, huidig) {
   // met erbij wat dat betekent. Nooit stilletjes forceren.
   let na = []
   try { na = await window.api.gitBranches(actieveLocPad(project)) } catch {}
-  if (!na.some(b => !b.remote && b.naam === doel.naam)) { await ververesGitStaat(project, true); return }
+  if (!na.some(b => !b.remote && b.naam === doel.naam)) {
+    await ruimRemoteBranchOp(project, doel.naam, na)
+    await ververesGitStaat(project, true)
+    return
+  }
 
   const forceren = await vraagJaNee(I18N.t('git.branch.wegNietSamengevoegdTitel'),
     I18N.t('git.branch.wegNietSamengevoegdTekst', { naam: doel.naam }),
     I18N.t('git.branch.wegForceren'), 'gevaar')
   if (!forceren) return
   await executeCmd(project, GitTools.verwijderBranchCommando(doel.naam, true), 'git-branch')
+
+  let daarna = []
+  try { daarna = await window.api.gitBranches(actieveLocPad(project)) } catch {}
+  await ruimRemoteBranchOp(project, doel.naam, daarna)
   await ververesGitStaat(project, true)
+}
+
+// Lokaal weg, maar op GitHub staat hij nog. Zonder deze stap blijft hij in de
+// lijst staan als ☁-branch, en dan haal je hem er per ongeluk zo weer bij.
+async function ruimRemoteBranchOp(project, naam, lijst) {
+  const rest = (lijst || []).find(b => b.remote && b.naam.replace(/^[^/]+\//, '') === naam)
+  if (!rest) return
+
+  const ja = await vraagJaNee(I18N.t('git.branch.ookRemoteTitel'),
+    I18N.t('git.branch.ookRemoteTekst', { naam: rest.naam }),
+    I18N.t('git.branch.ookRemoteOk'), 'gevaar')
+  if (!ja) return
+
+  const cmd = GitTools.verwijderRemoteBranchCommando(rest.naam.replace(/\/.*$/, ''), rest.naam)
+  if (cmd) await executeCmd(project, cmd, 'git-branch')
 }
 
 async function stashOverzicht(project) {
