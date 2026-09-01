@@ -13,16 +13,34 @@
 
   // ── De knoppen ──────────────────────────────────────────────────────────────
   // Volgorde is de volgorde waarin ze in de tools-sectie verschijnen.
+  //
+  // `standaardUit` betekent: de knop bestaat, maar staat niet in de weg tot je
+  // hem aanzet bij de projectinstellingen. Bedoeld voor wat je zelden nodig
+  // hebt — een rij van acht knoppen waarvan je er vijf gebruikt, is een rij
+  // waarin je de goede niet meer ziet. Het is geen slot: alles staat er nog,
+  // één vinkje verderop.
   const GIT_CMD_DEFS = [
     { id: 'git-koppelen', labelKey: 'git.btn.link',   label: 'github koppelen', icon: 'ti-brand-github', cls: 'gitlink'  },
     { id: 'git-status',   labelKey: 'git.btn.status', label: 'git status',      icon: 'ti-git-branch',   cls: 'gitread'  },
     { id: 'git-commit',   labelKey: 'git.btn.commit', label: 'commit',          icon: 'ti-git-commit',   cls: 'gitcommit', schrijft: true },
     { id: 'git-push',     labelKey: 'git.btn.push',   label: 'push',            icon: 'ti-arrow-up',     cls: 'gitpush',   schrijft: true },
     { id: 'git-pull',     labelKey: 'git.btn.pull',   label: 'git pull',        icon: 'ti-arrow-down',   cls: 'gitpull'  },
-    { id: 'git-fetch',    labelKey: 'git.btn.fetch',  label: 'git fetch',       icon: 'ti-refresh',      cls: 'gitfetch' },
-    { id: 'git-stash',    labelKey: 'git.btn.stash',  label: 'stash',           icon: 'ti-archive',      cls: 'gitstash',  schrijft: true, gevaar: true },
+    // Fetch haalt op wat de app zelf al elke tien minuten stil ophaalt; de
+    // knop voegt daar weinig aan toe. Stash zet werk uit beeld — nuttig, maar
+    // niet iets wat je dagelijks nodig hebt.
+    { id: 'git-fetch',    labelKey: 'git.btn.fetch',  label: 'git fetch',       icon: 'ti-refresh',      cls: 'gitfetch', standaardUit: true },
+    { id: 'git-stash',    labelKey: 'git.btn.stash',  label: 'stash',           icon: 'ti-archive',      cls: 'gitstash',  schrijft: true, gevaar: true, standaardUit: true },
+    // Terughalen staat wél aan, en verschijnt vanzelf zodra er iets in de
+    // stash zit — ook als dat er door de afsluitcontrole in is gezet en je
+    // de stash-knop nooit hebt aangeraakt. Dit is de weg terug; die mag nooit
+    // achter een instelling zitten.
+    { id: 'git-stash-lijst', labelKey: 'git.btn.stashList', label: 'stash terughalen', icon: 'ti-restore', cls: 'gitstashlijst', schrijft: true },
     { id: 'git-log',      labelKey: 'git.btn.log',    label: 'git log',         icon: 'ti-history',      cls: 'gitlog'   },
   ]
+
+  // De id's die standaard uit staan. De renderer gebruikt deze lijst om een
+  // ontbrekende voorkeur te lezen als "uit" in plaats van als "aan".
+  const STANDAARD_UIT_IDS = GIT_CMD_DEFS.filter(d => d.standaardUit).map(d => d.id)
 
   // Ronde 1 leest alleen. `pull --ff-only` kan geen merge-conflict maken: hij
   // weigert liever als je uit elkaar loopt. Dat is duidelijker dan halverwege
@@ -64,7 +82,7 @@
   //   # branch.ab +2 -0         ontbreekt dan ook
   //   1/2/u/? <...> <pad>       één regel per gewijzigd of onbekend bestand
   function parseStatusV2(uit) {
-    const r = { branch: null, upstream: null, ahead: 0, behind: 0, commits: false, vuil: 0, bestanden: [] }
+    const r = { branch: null, upstream: null, ahead: 0, behind: 0, commits: false, vuil: 0, conflicten: 0, bestanden: [] }
     for (const regel of String(uit || '').split('\n')) {
       const r2 = regel.replace(/\r$/, '')
       if (!r2) continue
@@ -83,6 +101,10 @@
         continue
       } else if ('12u?'.includes(r2[0]) && r2[1] === ' ') {
         r.vuil++
+        // Een u-regel is een bestand waar git er zelf niet uit kwam: twee
+        // versies die elkaar tegenspreken. Dat telt ook als vuil, maar het is
+        // een ander soort probleem — je moet het oplossen, niet vastleggen.
+        if (r2[0] === 'u') r.conflicten++
         const pad = padUitStatusRegel(r2)
         if (pad && r.bestanden.length < 40) r.bestanden.push(pad)
       }
@@ -112,9 +134,14 @@
   //   gekoppeld    hangt er een remote aan (dan pas is pull/fetch zinvol)
   //   branch       null bij detached HEAD of bij een repo zonder commits
   //   commits      false bij een verse `git init` zonder enkele commit
+  //   stashes      hoeveel er opzij staat; 0 laat de terughaalknop weg
+  //   conflicten   bestanden waar git er niet uit kwam (na een pop of merge)
+  //   naam/email   onder wiens naam een commit hier terechtkomt; leeg betekent
+  //                dat `git commit` gaat weigeren
   function maakStaat({ beschikbaar = true, isRepo = false, remotes = [], branch = null,
                        commits = true, upstream = null, ahead = 0, behind = 0,
-                       vuil = 0, bestanden = [] } = {}) {
+                       vuil = 0, conflicten = 0, stashes = 0, bestanden = [],
+                       naam = '', email = '' } = {}) {
     const lijst = Array.isArray(remotes) ? remotes.filter(Boolean) : parseRemotes(remotes)
     return {
       beschikbaar: !!beschikbaar,
@@ -128,7 +155,11 @@
       ahead: ahead || 0,
       behind: behind || 0,
       vuil: vuil || 0,
+      conflicten: conflicten || 0,
+      stashes: stashes || 0,
       bestanden: Array.isArray(bestanden) ? bestanden : [],
+      naam: String(naam || '').trim(),
+      email: String(email || '').trim(),
     }
   }
 
@@ -154,6 +185,10 @@
     for (const id of GIT_IDS) {
       if (id === 'git-koppelen') continue
       if (REMOTE.includes(id) && !staat.gekoppeld) continue
+      // Terughalen heeft alleen zin als er iets ligt. Zo is de knop meteen
+      // het antwoord op de vraag "is er iets weggezet?" — staat hij er, dan
+      // ligt er werk; staat hij er niet, dan is er niets kwijt.
+      if (id === 'git-stash-lijst' && !(staat.stashes > 0)) continue
       uit.push(id)
     }
     return uit
@@ -363,6 +398,307 @@
     return 'git stash -u'
   }
 
+  // ── De stash terughalen ─────────────────────────────────────────────────────
+  // Werk wegzetten kon de app al; terughalen niet. Dat is de vervelendste soort
+  // ontbrekende functie: je hebt hem pas nodig als je hem niet hebt, en tot die
+  // tijd lijkt er niets aan de hand.
+
+  // Alleen tellen, voor de vraag "moet de terughaalknop er staan". Draait mee
+  // in de achtergrondverversing, dus hier geen opmaak opvragen die we toch niet
+  // laten zien.
+  function parseStashAantal(uit) {
+    return String(uit || '').split('\n').filter(r => r.trim()).length
+  }
+
+  // Uitgelezen met een eigen opmaak, zodat er niets te raden valt:
+  //
+  //   git stash list --pretty=%gd%x09%cs%x09%gs
+  //   stash@{0}<tab>2026-09-01<tab>WIP on main: 1f4a2c3 vorige commit
+  //
+  // Waarom niet `--date=short`: dat lijkt de nette manier om aan die datum te
+  // komen, maar het verandert óók %gd, en dan staat er stash@{2026-09-01} in
+  // plaats van stash@{0}. De index is dan weg en daarmee de enige manier om de
+  // stash aan te wijzen. Vandaar %cs, dat zijn eigen vaste vorm heeft.
+  //
+  // De kale uitvoer wordt ook gelezen (stash@{0}: WIP on main: ...), zodat een
+  // git die deze opmaak niet kent niet stilletjes "er ligt niets" oplevert.
+  //
+  // Let op wat %gs bij een gewone `git stash` teruggeeft: "WIP on main:" plus
+  // het bericht van de commit waar je op stond. Dat is níét wat er in de stash
+  // zit — het is waar je vandaan kwam. Ongefilterd tonen leest als een
+  // omschrijving van je werk en dat is het niet, dus splitsen we het uit elkaar
+  // en laat de app er zelf "wijzigingen op main" van maken.
+  function parseStashLijst(uit) {
+    const lijst = []
+    for (const regel of String(uit || '').split('\n')) {
+      const r = regel.replace(/\r$/, '')
+      if (!r.trim()) continue
+
+      if (r.includes('\t')) {
+        const velden = r.split('\t')
+        const ref = (velden[0] || '').trim()
+        if (!stashRefGeldig(ref)) continue
+        lijst.push({ ref, datum: (velden[1] || '').trim(), ...parseStashOnderwerp(velden.slice(2).join('\t')) })
+        continue
+      }
+
+      const kaal = r.match(/^(stash@\{\d{1,4}\}):\s*(.*)$/)
+      if (kaal) lijst.push({ ref: kaal[1], datum: '', ...parseStashOnderwerp(kaal[2]) })
+    }
+    return lijst
+  }
+
+  // "WIP on main: 1f4a2c3 ..." is er automatisch ingezet; "On main: ..." is een
+  // bericht dat iemand zelf heeft meegegeven — dat laatste zegt wél iets, dus
+  // dat houden we heel.
+  function parseStashOnderwerp(onderwerp) {
+    const s = String(onderwerp || '').trim()
+    const wip = s.match(/^WIP on ([^:]+):\s*[0-9a-f]{4,40}\s*(.*)$/)
+    if (wip) return { branch: wip[1].trim(), bericht: '', basis: wip[2].trim(), eigen: false }
+    const eigen = s.match(/^On ([^:]+):\s*(.*)$/)
+    if (eigen) return { branch: eigen[1].trim(), bericht: eigen[2].trim(), basis: '', eigen: true }
+    return { branch: '', bericht: s, basis: '', eigen: !!s }
+  }
+
+  // Een ref komt uit onze eigen lijst, maar hij gaat wel als tekst een
+  // shell-regel in. Dus: alleen precies stash@{cijfers} mag erdoor, en al het
+  // andere levert null op in plaats van een commando.
+  function stashRefGeldig(ref) {
+    return /^stash@\{\d{1,4}\}$/.test(String(ref || '').trim())
+  }
+
+  // Pop haalt terug én ruimt de stash op. Loopt het mis op een conflict, dan
+  // laat git de stash juist staan — precies goed, want dan is er nog een weg
+  // terug. Daar rekenen we op: de app zegt na een mislukte pop dat het werk er
+  // nog is, en dat klopt dan ook.
+  function stashPopCommando(ref) {
+    return stashRefGeldig(ref) ? `git stash pop "${String(ref).trim()}"` : null
+  }
+
+  // Weggooien is het enige hier dat je niet terug kunt draaien.
+  function stashDropCommando(ref) {
+    return stashRefGeldig(ref) ? `git stash drop "${String(ref).trim()}"` : null
+  }
+
+  // ── Identiteit en accounts (fase 2) ─────────────────────────────────────────
+  //
+  // Twee dingen die bij "meerdere accounts" voortdurend door elkaar lopen, en
+  // waar het hele ontwerp aan hangt:
+  //
+  //   identiteit   user.name en user.email. Bepaalt wiens naam er in de
+  //                geschiedenis komt te staan. Staat per repo in .git/config,
+  //                dus dit kan de app volledig sturen.
+  //   account      je inloggegevens bij GitHub. Bepaalt wat je mag pushen.
+  //                Die zitten in Windows Credential Manager, gekoppeld aan je
+  //                Windows-gebruiker — daar kan de app hooguit naar wijzen.
+  //
+  // Een profiel bindt ze aan elkaar, maar ze blijven twee dingen. Committen
+  // onder de verkeerde naam kan de app voorkomen; echte scheiding tussen
+  // personen niet. Delen twee mensen één Windows-account, dan delen ze de
+  // opgeslagen tokens, en daar komt geen enkel programma omheen.
+
+  const INLOG_ONTHOUDEN = 'onthouden'   // de credential manager, zoals nu
+  const INLOG_VRAGEN    = 'vragen'      // helper uit; git vraagt per keer
+  const INLOG_KEUZES = [INLOG_ONTHOUDEN, INLOG_VRAGEN]
+
+  // Wat de app over een identiteit weet zodra hij een repo heeft bekeken.
+  //
+  //   git config --get-regexp ^user\.(name|email)$
+  //   user.name redub
+  //   user.email redubbledd@hotmail.nl
+  //
+  // Ontbreekt er één van de twee, dan weigert `git commit` met "Author
+  // identity unknown" — precies de foutmelding waar dit voor bedoeld is.
+  function parseIdentiteit(uit) {
+    const r = { naam: '', email: '' }
+    for (const regel of String(uit || '').split('\n')) {
+      const s = regel.replace(/\r$/, '')
+      if (s.startsWith('user.name ')) r.naam = s.slice(10).trim()
+      else if (s.startsWith('user.email ')) r.email = s.slice(11).trim()
+    }
+    return r
+  }
+
+  // Bewust ruim: git accepteert van alles als e-mailadres, en een adres
+  // afkeuren dat git wél zou nemen is vervelender dan er eentje doorlaten die
+  // achteraf een typefout blijkt.
+  function geldigEmail(s) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(s || '').trim())
+  }
+
+  function maakProfiel(v = {}) {
+    return {
+      id: String(v.id || '').trim(),
+      label: String(v.label || '').trim(),
+      naam: String(v.naam || '').trim(),
+      email: String(v.email || '').trim(),
+      ghGebruiker: String(v.ghGebruiker || '').trim(),
+      inloggen: v.inloggen === INLOG_VRAGEN ? INLOG_VRAGEN : INLOG_ONTHOUDEN,
+    }
+  }
+
+  // Zonder naam én adres kun je er niet mee committen; dan is het geen profiel
+  // maar een halve invulling.
+  function profielGeldig(p) {
+    return !!(p && String(p.naam || '').trim() && geldigEmail(p.email))
+  }
+
+  // Waar de gebruiker het profiel aan herkent. Het label is optioneel — heb je
+  // er geen bedacht, dan is je eigen naam een prima aanduiding.
+  function profielLabel(p) {
+    if (!p) return ''
+    return String(p.label || '').trim() || String(p.naam || '').trim() || String(p.email || '').trim()
+  }
+
+  function zoekProfiel(profielen, id) {
+    if (!id) return null
+    return (profielen || []).find(p => p && p.id === id) || null
+  }
+
+  // Welk profiel hoort bij dit project? Het profiel van het project zelf, en
+  // anders de standaard. Wijst een project naar een profiel dat is verwijderd,
+  // dan valt het terug op de standaard in plaats van naar niets — anders zou
+  // één verwijdering stilletjes elke controle uitzetten.
+  function profielVoorProject(profielen, standaardId, projectProfielId) {
+    const lijst = Array.isArray(profielen) ? profielen : []
+    if (!lijst.length) return null
+    return zoekProfiel(lijst, projectProfielId) || zoekProfiel(lijst, standaardId) || null
+  }
+
+  // Hoofdletterongevoelig vergelijken: git bewaart wat je typt, en "Redub" en
+  // "redub" zijn dezelfde persoon.
+  function zelfdeIdentiteit(a, b) {
+    const gelijk = (x, y) => String(x || '').trim().toLowerCase() === String(y || '').trim().toLowerCase()
+    return gelijk(a && a.naam, b && b.naam) && gelijk(a && a.email, b && b.email)
+  }
+
+  // De kernvraag vóór elke commit: klopt de naam waar dit onder komt te staan?
+  //
+  //   ontbreekt       geen naam of adres — `git commit` gaat weigeren
+  //   geen-profielen  niets om tegen te vergelijken; dan is alles goed
+  //   klopt           dit is het profiel dat hier hoort
+  //   ander-profiel   een profiel dat je kent, maar niet die van dit project
+  //   onbekend        een naam die bij geen enkel profiel hoort
+  //
+  // Het verschil tussen die laatste twee is de moeite waard: bij "ander
+  // profiel" weet de app precies wie het wél is en kan hij het aanbieden om
+  // recht te zetten; bij "onbekend" kan hij alleen melden wat hij ziet.
+  function identiteitStatus(profielen, staat, verwacht) {
+    if (!staat || !staat.beschikbaar || !staat.isRepo) return null
+    const huidig = { naam: staat.naam || '', email: staat.email || '' }
+    if (!huidig.naam || !huidig.email) return { soort: 'ontbreekt', huidig, gevonden: null, verwacht: verwacht || null }
+
+    const lijst = Array.isArray(profielen) ? profielen.filter(profielGeldig) : []
+    if (!lijst.length) return { soort: 'geen-profielen', huidig, gevonden: null, verwacht: null }
+
+    const gevonden = lijst.find(p => zelfdeIdentiteit(p, huidig)) || null
+    if (!gevonden) return { soort: 'onbekend', huidig, gevonden: null, verwacht: verwacht || null }
+    if (verwacht && gevonden.id !== verwacht.id) return { soort: 'ander-profiel', huidig, gevonden, verwacht }
+    return { soort: 'klopt', huidig, gevonden, verwacht: verwacht || null }
+  }
+
+  // Alleen deze twee horen de commit tegen te houden. "Onbekend" is een
+  // waarschuwing waar je doorheen mag: misschien commit je bewust een keer
+  // onder een andere naam, en dan is tegenhouden betuttelend.
+  function identiteitBlokkeert(status) {
+    return !!status && status.soort === 'ontbreekt'
+  }
+
+  // ── De commando's ───────────────────────────────────────────────────────────
+  // Alles gaat als één zichtbare regel naar de terminal, net als commit en
+  // push. Je hoort te kunnen zien wat de app in je .git/config zet.
+
+  // Zelfde behandeling als een commit-bericht: het beland tussen dubbele
+  // aanhalingstekens op een cmd-regel.
+  function veiligConfigWaarde(waarde) {
+    return String(waarde || '')
+      .replace(/[\r\n\t]+/g, ' ')
+      .replace(/"/g, "'")
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 200)
+  }
+
+  // GitHub-gebruikersnamen: letters, cijfers en streepjes, hooguit 39 lang.
+  // Alles daarbuiten weigeren we, want dit gaat een commandoregel in.
+  function geldigeGhGebruiker(naam) {
+    return /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(String(naam || '').trim())
+  }
+
+  function identiteitCommando(profiel) {
+    if (!profielGeldig(profiel)) return null
+    return `git config user.name "${veiligConfigWaarde(profiel.naam)}"`
+         + ` && git config user.email "${veiligConfigWaarde(profiel.email)}"`
+  }
+
+  // Het hele profiel toepassen op één map: naam, adres, welk GitHub-account, en
+  // of de inloggegevens onthouden mogen worden.
+  //
+  // `huidig` is wat er nú in die repo staat — nodig omdat `--unset` mislukt als
+  // er niets te wissen valt, en één mislukking de hele &&-ketting afkapt. Dus
+  // zetten we alleen wat er staat te veranderen.
+  //
+  // Let op wat dit níét doet: het raakt de opgeslagen tokens niet aan. Het
+  // wijst alleen aan wélk opgeslagen account bij deze map hoort.
+  function profielCommando(profiel, huidig = {}) {
+    if (!profielGeldig(profiel)) return null
+    const delen = []
+
+    if (!zelfdeIdentiteit(profiel, huidig)) delen.push(identiteitCommando(profiel))
+
+    // Zetten doen we op wat er effectief staat (staat het globaal al goed, dan
+    // hoeft er niets); weghalen alleen als het in déze .git/config staat, want
+    // `--unset` mislukt op iets dat daar niet in staat en kapt de ketting af.
+    const wil = geldigeGhGebruiker(profiel.ghGebruiker) ? String(profiel.ghGebruiker).trim() : ''
+    const heeft = String(huidig.ghGebruiker || '').trim()
+    if (wil && wil !== heeft) {
+      delen.push(`git config "credential.https://github.com.username" "${wil}"`)
+    } else if (!wil && huidig.ghGebruikerLokaal) {
+      delen.push('git config --unset "credential.https://github.com.username"')
+    }
+
+    // Een lege helper zet de hele keten uit, ook de manager die op
+    // systeemniveau staat. Dat is de enige manier om git per repo weer zelf te
+    // laten vragen.
+    const vraagt = profiel.inloggen === INLOG_VRAGEN
+    if (vraagt && !huidig.helperLokaal) delen.push('git config credential.helper ""')
+    else if (!vraagt && huidig.helperLokaal) delen.push('git config --unset-all credential.helper')
+
+    return delen.length ? delen.join(' && ') : null
+  }
+
+  // Met gh erbij loopt het wisselen van account via gh zelf; die houdt zijn
+  // eigen tokens bij en zet zich als credential helper voor github.com. Dan is
+  // credential.username niet de knop die iets doet.
+  function ghSwitchCommando(ghGebruiker) {
+    const naam = String(ghGebruiker || '').trim()
+    if (!geldigeGhGebruiker(naam)) return null
+    return `gh auth switch --hostname github.com --user ${naam}`
+  }
+
+  // Vraagt git om inloggegevens bij dit commando? Dan heeft het een echte
+  // terminal nodig: zonder toetsenbord blijft een push staan wachten op een
+  // token dat niemand kan intypen.
+  function vraagtOmInloggen(profiel, cmdId) {
+    if (!profiel || profiel.inloggen !== INLOG_VRAGEN) return false
+    return ['git-push', 'git-pull', 'git-fetch', 'git-koppelen'].includes(cmdId)
+  }
+
+  // Welke bestanden zitten zowel in de stash als ongewijzigd-vastgelegd in je
+  // map? Dat is de vraag die je vóór een pop wilt stellen, want git weigert
+  // dan — hij zegt "your local changes would be overwritten" en doet niets.
+  //
+  // Belangrijk: dat is géén conflict. Een conflict krijg je alleen als de
+  // stash botst met iets dat al vastligt; botst hij met werk dat nog los in je
+  // map staat, dan kapt git er meteen mee en blijft alles zoals het was. Dat
+  // is veilig, maar zonder uitleg lijkt het op een knop die stuk is.
+  function botsendeBestanden(inStash, inMap) {
+    const nu = new Set((inMap || []).map(p => String(p).replace(/\\/g, '/').replace(/^"|"$/g, '')))
+    return (inStash || [])
+      .map(p => String(p).replace(/\\/g, '/'))
+      .filter(p => nu.has(p))
+  }
+
   // Waarom een knop niet kan draaien, of null als er niets in de weg staat.
   // De renderer zet dat om in een melding in plaats van een commando dat
   // zichtbaar niets doet.
@@ -397,10 +733,17 @@
   }
 
   return {
-    GIT_CMD_DEFS, GIT_CMD_MAP, GIT_IDS, isGitId, isSchrijfKnop,
+    GIT_CMD_DEFS, GIT_CMD_MAP, GIT_IDS, isGitId, isSchrijfKnop, STANDAARD_UIT_IDS,
     parseRemotes, parseBranch, parseStatusV2, maakStaat, zichtbareGitIds,
     koppelStap, koppelCommando, veiligeRepoNaam, normaliseerRepoUrl,
     veiligCommitBericht, commitCommando, pushCommando, stashCommando, blokkade,
+    parseStashAantal, parseStashLijst, parseStashOnderwerp, stashRefGeldig,
+    stashPopCommando, stashDropCommando, botsendeBestanden,
+    parseIdentiteit, geldigEmail, maakProfiel, profielGeldig, profielLabel,
+    zoekProfiel, profielVoorProject, zelfdeIdentiteit, identiteitStatus,
+    identiteitBlokkeert, veiligConfigWaarde, geldigeGhGebruiker,
+    identiteitCommando, profielCommando, ghSwitchCommando, vraagtOmInloggen,
+    INLOG_ONTHOUDEN, INLOG_VRAGEN, INLOG_KEUZES,
     indicator, onveiligeRedenen, magFetchen, achterstandMelding, FETCH_INTERVAL_MS,
     teVragenProjecten, teStashenProjecten, afsluitSamenvatting, afsluitInstelling,
     AFSLUIT_UIT, AFSLUIT_WAARSCHUWEN, AFSLUIT_STASHEN, AFSLUIT_KEUZES,

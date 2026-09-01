@@ -2190,6 +2190,37 @@ function startVraagAutomaat() {
   $$('.proj-edit')[0].click(); await tick()
   check('de instellingen hebben per groep een hoofdschakelaar',
     $$('[data-sectie]').length === 2)
+
+  // ── knoppen die standaard uit staan ────────────────────────────────────────
+  // Het verschil dat telt: ze bestaan wél in de lijst (anders weet niemand dat
+  // ze er zijn), maar het vinkje staat uit zonder dat er ooit iets is
+  // uitgezet. Zonder de tekst erachter lijkt dat op iets wat je zelf ooit hebt
+  // weggeklikt, dus die tekst hoort erbij.
+  const cmdVink = (id) => $(`#cmdvis-section [data-cmdvis-id="${id}"]`)
+  check('fetch en stash staan in de lijst', !!cmdVink('git-fetch') && !!cmdVink('git-stash'))
+  check('maar hun vinkje staat uit', !cmdVink('git-fetch').checked && !cmdVink('git-stash').checked)
+  check('met "standaard uit" erachter, zodat je weet waaróm',
+    $$('.cmdvis-row').filter(r => r.querySelector('.cmdvis-standaard-uit'))
+      .every(r => ['git-fetch', 'git-stash'].includes(r.querySelector('[data-cmdvis-id]').dataset.cmdvisId))
+    && $$('.cmdvis-standaard-uit').length === 2)
+  check('de dagelijkse knoppen staan gewoon aan',
+    ['git-status', 'git-commit', 'git-push', 'git-pull', 'git-log'].every(id => cmdVink(id) && cmdVink(id).checked))
+  check('en terughalen ook — dat is de weg terug',
+    cmdVink('git-stash-lijst') && cmdVink('git-stash-lijst').checked)
+
+  // Aanzetten moet blijven staan. Dat is het verschil tussen "standaard uit"
+  // en "kan niet": er wordt dan wél een voorkeur vastgelegd.
+  cmdVink('git-fetch').checked = true
+  cmdVink('git-fetch').dispatchEvent(new window.Event('change'))
+  $('#modal-proj-save').click(); await tick(); await tick()
+  check('zelf aanzetten wordt bewaard', projects[0].cmdVisibility['git-fetch'] === true)
+  $$('.proj-edit')[0].click(); await tick()
+  check('en staat er de volgende keer nog steeds aan', cmdVink('git-fetch').checked)
+  cmdVink('git-fetch').checked = false
+  cmdVink('git-fetch').dispatchEvent(new window.Event('change'))
+  $('#modal-proj-save').click(); await tick(); await tick()
+
+  $$('.proj-edit')[0].click(); await tick()
   const sectieVink = (naam) => $(`[data-sectie="${naam}"]`)
   sectieVink('tools').checked = false
   sectieVink('tools').dispatchEvent(new window.Event('change')); await tick()
@@ -2765,6 +2796,60 @@ function startVraagAutomaat() {
 
   $('#hist-clear-recent').click(); await tick(); await tick()
   check('geschiedenis wissen laat woordenboek staan', store.recent.length === 0 && store.entries.length > 0)
+
+  // ── git-profielen ──────────────────────────────────────────────────────────
+  // Wie ben je in de commit. Zonder profielen laat de app je identiteit met
+  // rust; dat is de toestand waar de meeste mensen in blijven zitten en die
+  // hoort dus geen lege lijst met vraagtekens te zijn.
+  check('zonder profielen staat er uitleg en geen lege lijst',
+    !!$('#git-profiel-lijst .hint-row') && $$('.git-profiel-rij').length === 0)
+  check('de eerlijke uitleg over "elke keer vragen" staat erbij',
+    $('#settings-panel').textContent.includes('geen beveiliging'))
+
+  $('#btn-add-git-profiel').click(); await tick()
+  check('profiel toevoegen geeft een rij', $$('.git-profiel-rij').length === 1)
+  check('de eerste is meteen de standaard', $('[data-gp-std]').checked === true)
+  check('een leeg profiel is zichtbaar onaf',
+    !!$('.git-profiel-rij.onaf') && !!$('.git-profiel-onaf'))
+  check('en is bewaard in de instellingen', (settings.git.profielen || []).length === 1)
+
+  const gpId = settings.git.profielen[0].id
+  const vulGp = (attr, waarde) => {
+    const el = $(`[data-gp-${attr}="${gpId}"]`)
+    el.value = waarde
+    el.dispatchEvent(new window.Event('change'))
+  }
+  vulGp('naam', 'Jan Jansen'); await tick()
+  check('alleen een naam is nog steeds onaf', !!$('.git-profiel-rij.onaf'))
+  vulGp('email', 'geen-adres'); await tick()
+  check('een adres zonder apenstaartje telt niet', !!$('.git-profiel-rij.onaf'))
+  vulGp('email', 'jan@werk.nl'); await tick()
+  check('met naam én adres is het profiel af', !$('.git-profiel-rij.onaf'))
+  check('en het staat zo in de instellingen',
+    settings.git.profielen[0].naam === 'Jan Jansen' && settings.git.profielen[0].email === 'jan@werk.nl')
+
+  vulGp('gh', 'jan-werk'); await tick()
+  vulGp('inlog', 'vragen'); await tick()
+  check('github-naam en inloggedrag worden bewaard',
+    settings.git.profielen[0].ghGebruiker === 'jan-werk' && settings.git.profielen[0].inloggen === 'vragen')
+
+  // De keuze per project verschijnt pas als er iets te kiezen valt.
+  $('#btn-settings').click(); await tick()
+  $$('.proj-edit')[0].click(); await tick()
+  check('nu er een profiel is, staat de keuze in het projectvenster',
+    $('#f-profiel-rij').hidden === false)
+  check('en "standaard" noemt welk profiel dat is',
+    $('#f-profiel').options[0].textContent.includes('Jan Jansen'))
+  $('#f-profiel').value = gpId
+  $('#modal-proj-save').click(); await tick(); await tick()
+  check('het gekozen profiel hangt aan het project', projects[0].gitProfiel === gpId)
+
+  // Weghalen: het profiel verdwijnt en het project valt terug op de standaard.
+  $('#btn-settings').click(); await tick()
+  $(`[data-gp-del="${gpId}"]`).click(); await tick(); await tick(); await tick()
+  check('profiel verwijderd', (settings.git.profielen || []).length === 0)
+  check('en het project wijst nergens meer naartoe', !projects[0].gitProfiel)
+  // Het paneel blijft hier open staan: de controle hieronder sluit hem.
 
   // terug naar waar je vandaan kwam
   $('#btn-settings').click(); await tick()

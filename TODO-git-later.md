@@ -1,8 +1,17 @@
 # Git in CommandDeck — wat er nog niet is
 
-Wat er nu staat: koppelen, status, commit, push, pull, fetch, stash, log,
-een indicator in de projectkop, een afsluitcontrole en een achterstandmelding.
-Dat dekt de dagelijkse lus van één persoon op twee machines.
+Wat er nu staat: koppelen, status, commit, push, pull, fetch, stash, stash
+terughalen, log, een indicator in de projectkop, een afsluitcontrole en een
+achterstandmelding. Dat dekt de dagelijkse lus van één persoon op twee
+machines.
+
+Fetch en stash staan sinds fase 1 standaard uit: ze bestaan nog, maar je zet
+ze per project aan bij de projectinstellingen. Wat overblijft is de rij die je
+elke dag gebruikt.
+
+Sinds fase 2 is er ook een identiteit: profielen met naam, e-mailadres en
+GitHub-account, per project te kiezen, met een controle vóór elke commit. Wat
+de app daar wél en niet kan, staat in 1.2.
 
 Dit document gaat over de rest. Niet om alles te bouwen — CommandDeck is een
 launcher, geen git-client, en de grens bewaken is belangrijker dan de lijst
@@ -18,30 +27,68 @@ afwerken. Maar wat hier staat is wat andere gebruikers zullen missen.
 Dingen die met de huidige functies fout kunnen gaan, of die we onderweg zelf
 zijn tegengekomen.
 
-### 1.1 Een stash die je niet terug kunt halen — *klein, hoge urgentie*
+### 1.1 Een stash die je niet terug kunt halen — ~~*klein, hoge urgentie*~~ **gedaan**
 
-De afsluitcontrole kán automatisch stashen bij een Windows-shutdown, en de
-stash-knop maakt er ook een. Maar er is geen `stash list`, geen `stash pop` en
-geen manier om te zien wat erin zit. De app kan dus werk wegzetten dat je
-alleen via de terminal terugkrijgt.
+De knop `stash terughalen` verschijnt vanzelf zodra er iets in de stash zit,
+laat zien wat erin zit, en kan terughalen of weggooien. De melding bij het
+opstarten verwijst niet meer naar een commando maar naar die knop.
 
-Dat is een functie die iets kapot kan laten voelen. Zolang dit ontbreekt zou
-automatisch stashen eigenlijk niet de standaard mogen zijn — dat is het nu ook
-niet, maar het is één klik in de instellingen.
+`apply` is er bewust niet: het verschil tussen apply en pop uitleggen kost meer
+dan het oplevert, en pop laat bij een conflict de stash tóch staan.
 
-Nodig: een stash-overzicht met pop, apply en drop, en de melding bij het
-opstarten laten doorlinken naar dat overzicht in plaats van naar een
-commando dat je zelf moet typen.
+Wat het bouwen aan het licht bracht en de moeite van het onthouden waard is:
 
-### 1.2 Geen naam ingesteld → commit faalt — *klein*
+- `git stash pop` heeft **twee** manieren om niet te slagen, en ze zien er in
+  de terminal bijna hetzelfde uit. Bij een conflict voegt git samen en zet er
+  markeringen in; werk je zelf in dezelfde bestanden, dan kapt hij er meteen
+  mee ("your local changes would be overwritten") en gebeurt er niets. In
+  beide gevallen blijft de stash staan, dus daar kun je ze niet aan
+  herkennen — wel aan de `u`-regels in `status --porcelain=v2`.
+  Het tweede geval is dat wat je in de praktijk raakt.
+- `git stash list --date=short --pretty=%gd...` geeft `stash@{2026-09-01}` in
+  plaats van `stash@{0}`: een datumopmaak verandert óók `%gd`, en dan is de
+  index weg. Datum dus via `%cs`.
 
-`git commit` weigert met *"Author identity unknown"* als `user.name` en
-`user.email` niet gezet zijn. Op een verse pc gebeurt dat gewoon. De app kijkt
-daar nu niet naar: je typt een commit-bericht, drukt op ok, en krijgt een
-foutmelding in de terminal.
+### 1.2 Geen naam ingesteld → commit faalt — ~~*klein*~~ **gedaan**
 
-Nodig: bij de eerste commit controleren, en aanbieden het in te stellen.
-(Wij liepen hier zelf tegenaan bij resume.)
+De commitknop controleert nu vóór het bericht of `user.name` en `user.email`
+er zijn, en biedt aan ze in te stellen. Meteen ook de andere kant op: staat er
+een naam die bij geen enkel profiel hoort, dan zegt hij dat vóór de commit in
+plaats van erna.
+
+Nagelopen op deze pc: er is hier géén globale `user.name`/`user.email`, dus een
+vers `git init` liep echt tegen *"Author identity unknown"* aan. Dit was geen
+theoretisch geval.
+
+Daarbovenop (fase 2 uit het losse plan, niet uit dit document):
+
+- **Profielen** in de instellingen: label, naam, e-mailadres, GitHub-naam, en
+  of de inloggegevens onthouden mogen worden. Eén is de standaard.
+- **Per project** een profiel kiezen. Toepassen zet `user.name` en
+  `user.email` in `.git/config`, dus het geldt ook buiten de app om.
+- **Zichtbaar** naast de branch-indicator onder wiens naam je zit. Klopt het,
+  dan alleen bij meer dan één profiel — met één identiteit valt er niets te
+  verwisselen. Klopt het niet, dan altijd.
+- **Wisselen van GitHub-account** via `credential.https://github.com.username`
+  per repo.
+
+Wat het uitzoeken opleverde en de moeite van het onthouden waard is:
+
+- **`gh` staat niet op deze pc**, en de credential helper is Git Credential
+  Manager op systeemniveau (`C:/Program Files/Git/etc/gitconfig`). De route
+  voor accounts is dus `credential.https://github.com.username`, niet
+  `gh auth switch`. Die tweede wordt alleen aangeboden als gh zich daadwerkelijk
+  als credential helper heeft ingeschreven — dat is nu nergens getest.
+- **Een lege `credential.helper` is onzichtbaar voor `--get-all`.** Precies wat
+  "elke keer vragen" zet, geeft daar een lege regel terug: niet te
+  onderscheiden van "staat er niet". Via `--local --list` staat hij er als
+  `credential.helper=` en is hij wél te zien. Zonder dat zou terugzetten naar
+  "onthouden" de helper voorgoed uit laten staan.
+- **Een lege lokale helper zet de systeem-manager echt uit.** Nagegaan met
+  `GIT_TRACE=1` tegen een verzonnen host: mét helper draait
+  `git credential-manager get`, zonder helper gaat git meteen naar de
+  terminalprompt. Daarom lopen push en pull bij zo'n profiel via de echte
+  terminal van de app — zonder toetsenbord blijft zo'n push hangen.
 
 ### 1.3 Meerdere locaties per project worden genegeerd — *middel*
 
@@ -199,7 +246,11 @@ Ronde 4 (polish) uit `TODO-git.md`:
 
 - poll-interval instelbaar maken (nu de constante `GIT_POLL_MS` in renderer.js)
 - in het instellingenlijstje "zichtbare commando's" de knoppen doorstrepen die
-  in dít project toch niet kunnen verschijnen, met de reden erbij
+  in dít project toch niet kunnen verschijnen, met de reden erbij.
+  Half gedaan: knoppen met `standaardUit: true` krijgen daar nu "standaard uit"
+  achter hun naam, zodat een leeg vinkje niet lijkt op iets wat je zelf ooit
+  hebt weggeklikt. Wat er nog niet staat is de reden waarom een knop in dít
+  project niet kán verschijnen (geen remote, geen commits).
 - iconen en volgorde nalopen
 - de overige talen aanvullen (nu alleen nl en en; de rest valt terug op en)
 

@@ -209,7 +209,9 @@ const DEFAULT_SETTINGS = {
   //   uit          niets doen
   //   waarschuwen  vragen bij het sluiten van het venster (standaard)
   //   stashen      idem, plus bij een Windows-shutdown automatisch stashen
-  git: { afsluiten: 'waarschuwen', fetchBijOpenen: true },
+  // profielen: [{ id, label, naam, email, ghGebruiker, inloggen }] — zie
+  // "Identiteit en accounts" in git-tools.js
+  git: { afsluiten: 'waarschuwen', fetchBijOpenen: true, profielen: [], standaardProfiel: '' },
   // Volgorde van de knoppen onder het kopje "opdrachten" in de zijbalk
   navVolgorde: ['cmd', 'ps', 'bat', 'dict'],
   // Map met de broncode; wordt automatisch gevonden, hier alleen onthouden
@@ -926,11 +928,88 @@ ipcMain.handle('git:info', (_, dir) => {
   const remotes = GitTools.parseRemotes(gitUit(dir, ['remote']))
   const st = GitTools.parseStatusV2(gitUit(dir, ['status', '--porcelain=v2', '--branch']))
 
+  // Vierde aanroep, en de goedkoopste van de vier: `git stash list` leest één
+  // reflog-bestand. We hebben alleen het aantal nodig — daarmee weet de app of
+  // de terughaalknop erbij hoort. De inhoud vragen we pas als je erop klikt.
+  const stashes = GitTools.parseStashAantal(gitUit(dir, ['stash', 'list']))
+
+  // Onder wiens naam komt een commit hier terecht? In één aanroep, en bewust
+  // zonder --local: we willen weten wat git straks écht gebruikt, dus inclusief
+  // wat er globaal staat. Ontbreekt er iets, dan weigert `git commit` — dat wil
+  // je vóór het typen van een bericht weten en niet erna.
+  const ident = GitTools.parseIdentiteit(gitUit(dir, ['config', '--get-regexp', '^user\\.(name|email)$']))
+
   return GitTools.maakStaat({
     beschikbaar: true, isRepo: true, remotes,
     branch: st.branch, commits: st.commits, upstream: st.upstream,
-    ahead: st.ahead, behind: st.behind, vuil: st.vuil, bestanden: st.bestanden,
+    ahead: st.ahead, behind: st.behind, vuil: st.vuil,
+    conflicten: st.conflicten, stashes, bestanden: st.bestanden,
+    naam: ident.naam, email: ident.email,
   })
+})
+
+// Wat er in déze map aan account-instellingen staat. Apart van git:info omdat
+// het alleen nodig is op het moment dat je een profiel gaat toepassen, en
+// git:info al vaak genoeg draait.
+//
+// `helperLokaal` is de vraag of er in .git/config zelf een credential.helper
+// staat. Dat is iets anders dan of er überhaupt een helper is: die staat bij
+// een gewone Git-voor-Windows op systeemniveau. Alleen een lokale kunnen we
+// weer weghalen.
+ipcMain.handle('git:accountInfo', (_, dir) => {
+  const leeg = { naam: '', email: '', ghGebruiker: '', helperLokaal: false, ghCli: false }
+  if (!dir || !fs.existsSync(dir) || !heeftGit()) return leeg
+
+  const ident = GitTools.parseIdentiteit(gitUit(dir, ['config', '--get-regexp', '^user\\.(name|email)$']))
+
+  // Via --list en niet via --get-all, en dat is geen smaakkwestie: een helper
+  // die op "" staat — precies wat "elke keer vragen" zet — geeft bij --get-all
+  // een lege regel terug. Niet te onderscheiden van "staat er niet", en dan
+  // zou terugzetten naar "onthouden" de helper voorgoed uit laten staan.
+  // In --list staat hij als `credential.helper=` en is hij wél zichtbaar.
+  const lokaal = String(gitUit(dir, ['config', '--local', '--list']) || '')
+
+  return {
+    naam: ident.naam,
+    email: ident.email,
+    // Effectief, dus inclusief globaal: staat het elders al goed, dan hoeven
+    // we niets te zetten.
+    ghGebruiker: String(gitUit(dir, ['config', '--get', 'credential.https://github.com.username']) || '').trim(),
+    // Weghalen kan alleen wat in déze .git/config staat.
+    ghGebruikerLokaal: /^credential\.https:\/\/github\.com\.username=/m.test(lokaal),
+    helperLokaal: /^credential\.helper=/m.test(lokaal),
+    // Draait het inloggen via gh, dan is credential.username niet de knop die
+    // iets doet — dan gaat wisselen van account via `gh auth switch`.
+    ghCli: /gh auth git-credential/i.test(String(gitUit(dir, ['config', '--get-all', 'credential.helper']) || '')),
+  }
+})
+
+// Wat er in de stash staat, met datum en branch. Alleen op aanvraag: dit hangt
+// aan een klik en niet aan het tekenen, dus hier mag het iets meer kosten.
+ipcMain.handle('git:stashLijst', (_, dir) => {
+  if (!dir || !fs.existsSync(dir) || !heeftGit()) return []
+  const lijst = GitTools.parseStashLijst(gitUit(dir, ['stash', 'list', '--pretty=%gd%x09%cs%x09%gs']))
+  if (lijst.length) return lijst
+  // %cs bestaat pas vanaf git 2.21. Kent deze git hem niet, dan faalt het hele
+  // commando en levert gitUit een lege tekst op — en dan zou de app zeggen dat
+  // er niets ligt terwijl er wél iets ligt. Dat is precies het soort stilte dat
+  // deze functie moest wegnemen, dus vallen we terug op de kale uitvoer.
+  return GitTools.parseStashLijst(gitUit(dir, ['stash', 'list']))
+})
+
+// Welke bestanden zitten er in één stash. Dat is de vraag die je stelt vóór je
+// hem terughaalt of weggooit: "was dit het werk dat ik zoek?"
+ipcMain.handle('git:stashInhoud', (_, dir, ref) => {
+  if (!dir || !fs.existsSync(dir) || !heeftGit()) return []
+  if (!GitTools.stashRefGeldig(ref)) return []
+  // --include-untracked, want de stash-knop zet met -u ook nieuwe bestanden
+  // weg. Zonder deze vlag zie je die niet staan en lijkt de stash kleiner dan
+  // hij is. De vlag bestaat pas vanaf git 2.32; op een oudere git faalt het
+  // commando en levert gitUit een lege tekst op, dus dan nog eens zonder.
+  const schoon = String(ref).trim()
+  let uit = gitUit(dir, ['stash', 'show', '--name-only', '--include-untracked', schoon])
+  if (!String(uit || '').trim()) uit = gitUit(dir, ['stash', 'show', '--name-only', schoon])
+  return String(uit || '').split('\n').map(r => r.replace(/\r$/, '').trim()).filter(Boolean).slice(0, 40)
 })
 
 // ── Windows afsluiten of uitloggen ───────────────────────────────────────────

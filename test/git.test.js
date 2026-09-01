@@ -146,11 +146,15 @@ t('repo zonder remote kan niet pushen, pullen of fetchen',
   !['git-push', 'git-pull', 'git-fetch'].some(id => G.zichtbareGitIds(repoLos).includes(id)))
 t('repo zonder remote houdt de koppelknop',
   G.zichtbareGitIds(repoLos).includes('git-koppelen'))
-t('gekoppeld: alles behalve koppelen',
-  G.zichtbareGitIds(repoVol).length === G.GIT_IDS.length - 1
-  && !G.zichtbareGitIds(repoVol).includes('git-koppelen'))
+// Zonder stash valt behalve koppelen ook de terughaalknop weg: die twee zijn
+// de enige die van iets anders afhangen dan van de remote.
+t('gekoppeld: alles behalve koppelen en terughalen',
+  G.zichtbareGitIds(repoVol).length === G.GIT_IDS.length - 2
+  && !G.zichtbareGitIds(repoVol).includes('git-koppelen')
+  && !G.zichtbareGitIds(repoVol).includes('git-stash-lijst'))
 t('de volgorde volgt de knoppenlijst',
-  G.zichtbareGitIds(repoVol).join() === G.GIT_IDS.filter(i => i !== 'git-koppelen').join())
+  G.zichtbareGitIds(repoVol).join()
+  === G.GIT_IDS.filter(i => i !== 'git-koppelen' && i !== 'git-stash-lijst').join())
 
 t('commit, push en stash schrijven',
   ['git-commit', 'git-push', 'git-stash'].every(id => G.isSchrijfKnop(id)))
@@ -158,6 +162,264 @@ t('de leesknoppen schrijven niet',
   ['git-status', 'git-pull', 'git-fetch', 'git-log', 'git-koppelen'].every(id => !G.isSchrijfKnop(id)))
 t('alleen stash is als gevaarlijk gemarkeerd',
   G.GIT_CMD_DEFS.filter(d => d.gevaar).map(d => d.id).join() === 'git-stash')
+
+// ── fase 1: knoppen die standaard uit staan ──────────────────────────────────
+// Uit staan is niet hetzelfde als niet bestaan. Deze twee blijven gewoon in de
+// lijst zitten, zodat de instellingen ze kunnen tonen en je ze aan kunt zetten.
+gelijk('fetch en stash staan standaard uit', G.STANDAARD_UIT_IDS, ['git-fetch', 'git-stash'])
+t('standaard uit staat alleen op knoppen die ook echt bestaan',
+  G.STANDAARD_UIT_IDS.every(id => G.GIT_IDS.includes(id)))
+t('de dagelijkse lus staat gewoon aan',
+  ['git-koppelen', 'git-status', 'git-commit', 'git-push', 'git-pull', 'git-log']
+    .every(id => !G.STANDAARD_UIT_IDS.includes(id)))
+t('terughalen staat nooit standaard uit — dat is de weg terug',
+  !G.STANDAARD_UIT_IDS.includes('git-stash-lijst'))
+t('zichtbareGitIds trekt zich niets aan van standaard uit — dat doet de renderer',
+  G.zichtbareGitIds(repoVol).includes('git-fetch') && G.zichtbareGitIds(repoVol).includes('git-stash'))
+
+// ── fase 1: de stash terughalen ──────────────────────────────────────────────
+const repoStash = G.maakStaat({ isRepo: true, remotes: ['origin'], branch: 'main',
+                                upstream: 'origin/main', vuil: 0, stashes: 2 })
+
+t('geen stash -> geen terughaalknop', !G.zichtbareGitIds(repoVol).includes('git-stash-lijst'))
+t('wel een stash -> wel een terughaalknop', G.zichtbareGitIds(repoStash).includes('git-stash-lijst'))
+t('met een stash staat de hele lijst er, op koppelen na',
+  G.zichtbareGitIds(repoStash).join() === G.GIT_IDS.filter(i => i !== 'git-koppelen').join())
+t('een stash in een losse repo mag ook terug',
+  G.zichtbareGitIds(G.maakStaat({ isRepo: true, remotes: [], branch: 'main', stashes: 1 }))
+    .includes('git-stash-lijst'))
+t('stashes staat standaard op nul', G.maakStaat({ isRepo: true }).stashes === 0)
+
+gelijk('stash tellen', [G.parseStashAantal('stash@{0}: WIP on main: abc\nstash@{1}: On main: x\n'),
+                        G.parseStashAantal(''), G.parseStashAantal(null),
+                        G.parseStashAantal('\n  \n')], [2, 0, 0, 0])
+
+// Precies zoals `git stash list --pretty=%gd%x09%cs%x09%gs` het teruggeeft;
+// nagelopen tegen git 2.54 op deze pc.
+const stashUit = [
+  'stash@{0}\t2026-09-01\tWIP on main: 1f4a2c3 laatste commit-bericht',
+  'stash@{1}\t2026-08-30\tOn main: CommandDeck: automatisch bij afsluiten',
+  '',
+].join('\n')
+const stashLijst = G.parseStashLijst(stashUit)
+
+t('twee stashes gelezen', stashLijst.length === 2)
+gelijk('de automatische stash houdt zijn eigen bericht',
+  { ref: stashLijst[1].ref, branch: stashLijst[1].branch, bericht: stashLijst[1].bericht, eigen: stashLijst[1].eigen },
+  { ref: 'stash@{1}', branch: 'main', bericht: 'CommandDeck: automatisch bij afsluiten', eigen: true })
+// Het belangrijkste stuk: "WIP on main: <sha> <bericht>" is het bericht van de
+// commit waar je op stond, niet van je wijzigingen. Dat mag niet als
+// omschrijving van je werk op het scherm belanden.
+t('bij WIP blijft het bericht leeg', stashLijst[0].bericht === '')
+t('bij WIP kennen we wel de branch', stashLijst[0].branch === 'main')
+t('en het commit-bericht gaat apart mee als basis',
+  stashLijst[0].basis === 'laatste commit-bericht' && stashLijst[0].eigen === false)
+t('de datum komt mee', stashLijst[0].datum === '2026-09-01')
+gelijk('lege uitvoer geeft een lege lijst', G.parseStashLijst(''), [])
+gelijk('rommel zonder geldige ref wordt overgeslagen',
+  G.parseStashLijst('zomaar wat\nnog iets\n'), [])
+
+// De kale uitvoer moet er ook doorheen komen: kent een oudere git de opmaak
+// niet, dan is dit wat er terugkomt, en dan hoort de app nog steeds te weten
+// dat er werk ligt — alleen zonder datum.
+const kaalUit = 'stash@{0}: WIP on main: 1f4a2c3 laatste commit-bericht\n'
+             + 'stash@{1}: On main: eigen bericht\n'
+const kaal = G.parseStashLijst(kaalUit)
+t('kale uitvoer levert dezelfde refs', kaal.length === 2 && kaal[0].ref === 'stash@{0}' && kaal[1].ref === 'stash@{1}')
+t('kale uitvoer kent de branch nog steeds', kaal[0].branch === 'main')
+t('kale uitvoer houdt een eigen bericht heel', kaal[1].bericht === 'eigen bericht' && kaal[1].eigen === true)
+t('kale uitvoer heeft geen datum, en dat mag', kaal[0].datum === '')
+// Een datumopmaak (--date=short) maakt van %gd "stash@{2026-09-01}". Die vorm
+// wijst geen stash aan en mag er dus niet doorheen glippen als een geldige ref.
+gelijk('een datum in plaats van een index wordt geweigerd',
+  G.parseStashLijst('stash@{2026-09-01}\t2026-09-01\tWIP on main: abc1234 iets\n'), [])
+t('een branchnaam met een streepje overleeft het',
+  G.parseStashOnderwerp('WIP on feature/iets-nieuws: abc1234 test').branch === 'feature/iets-nieuws')
+t('een onbekende vorm gaat heel mee als bericht',
+  G.parseStashOnderwerp('zomaar iets').bericht === 'zomaar iets')
+
+t('geldige ref', G.stashRefGeldig('stash@{0}') && G.stashRefGeldig('stash@{12}'))
+t('ongeldige refs worden geweigerd',
+  !G.stashRefGeldig('stash@{0} && del *.*') && !G.stashRefGeldig('HEAD')
+  && !G.stashRefGeldig('') && !G.stashRefGeldig(null) && !G.stashRefGeldig('stash@{}'))
+t('pop-commando', G.stashPopCommando('stash@{0}') === 'git stash pop "stash@{0}"')
+t('drop-commando', G.stashDropCommando('stash@{1}') === 'git stash drop "stash@{1}"')
+t('een ref die niet klopt levert geen commando op — geen tekst de shell in',
+  G.stashPopCommando('stash@{0}; rm -rf /') === null
+  && G.stashDropCommando('$(kwaad)') === null)
+t('terughalen en weggooien staan niet in de vaste lijst; ze hangen aan een ref',
+  G.GIT_CMD_MAP['git-stash-lijst'] === undefined)
+t('terughalen telt als schrijfknop', G.isSchrijfKnop('git-stash-lijst'))
+
+// Nagelopen tegen echte git: `git stash pop` met eigen wijzigingen in
+// hetzelfde bestand geeft géén conflict maar een weigering ("your local
+// changes would be overwritten"). Er gebeurt dan niets. Dat is precies het
+// geval dat je in de praktijk raakt, dus dat willen we vóóraf zien aankomen.
+gelijk('botsende bestanden gevonden',
+  G.botsendeBestanden(['a.txt', 'lib/main.dart'], ['a.txt', 'leesmij.md']), ['a.txt'])
+gelijk('geen overlap is een lege lijst',
+  G.botsendeBestanden(['a.txt'], ['b.txt']), [])
+gelijk('een schone map botst nooit', G.botsendeBestanden(['a.txt'], []), [])
+gelijk('een lege stash botst ook niet', G.botsendeBestanden([], ['a.txt']), [])
+gelijk('backslashes en forward slashes zijn hetzelfde bestand',
+  G.botsendeBestanden(['lib/main.dart'], ['lib\\main.dart']), ['lib/main.dart'])
+gelijk('aanhalingstekens uit git status tellen niet mee als naam',
+  G.botsendeBestanden(['map/bestand.txt'], ['"map/bestand.txt"']), ['map/bestand.txt'])
+gelijk('niets meegegeven klapt niet', G.botsendeBestanden(null, null), [])
+
+// ── fase 2: identiteit lezen ─────────────────────────────────────────────────
+// `git config --get-regexp ^user\.(name|email)$` — bewust zonder --local, want
+// we willen weten wat git straks gaat gebruiken, dus inclusief het globale.
+gelijk('naam en adres gelezen',
+  G.parseIdentiteit('user.name redub\nuser.email redubbledd@hotmail.nl\n'),
+  { naam: 'redub', email: 'redubbledd@hotmail.nl' })
+gelijk('een naam met spaties blijft heel',
+  G.parseIdentiteit('user.name Jan de Vries\n'), { naam: 'Jan de Vries', email: '' })
+gelijk('alleen een adres is ook onaf',
+  G.parseIdentiteit('user.email jan@voorbeeld.nl\n'), { naam: '', email: 'jan@voorbeeld.nl' })
+gelijk('lege uitvoer — dit is de verse pc', G.parseIdentiteit(''), { naam: '', email: '' })
+t('identiteit staat standaard leeg in de staat',
+  G.maakStaat({ isRepo: true }).naam === '' && G.maakStaat({ isRepo: true }).email === '')
+
+t('een adres zonder apenstaartje is geen adres', !G.geldigEmail('jan'))
+t('een adres zonder punt erachter ook niet', !G.geldigEmail('jan@lokaal'))
+t('een gewoon adres wel', G.geldigEmail('jan@voorbeeld.nl'))
+t('een adres met plusje wel', G.geldigEmail('jan+git@voorbeeld.nl'))
+t('github noreply-adressen wel', G.geldigEmail('123456+naam@users.noreply.github.com'))
+
+// ── fase 2: profielen ────────────────────────────────────────────────────────
+const werk  = G.maakProfiel({ id: 'p1', label: 'werk', naam: 'Jan Jansen', email: 'jan@werk.nl', ghGebruiker: 'jan-werk' })
+const prive = G.maakProfiel({ id: 'p2', label: 'privé', naam: 'Jan', email: 'jan@thuis.nl', inloggen: 'vragen' })
+const onaf  = G.maakProfiel({ id: 'p3', label: 'half', naam: 'Jan' })
+const profielen = [werk, prive, onaf]
+
+t('een profiel met naam en adres is geldig', G.profielGeldig(werk))
+t('zonder adres is het niet af', !G.profielGeldig(onaf))
+t('zonder naam ook niet', !G.profielGeldig(G.maakProfiel({ email: 'a@b.nl' })))
+t('niets is niet geldig', !G.profielGeldig(null))
+t('inloggen valt terug op onthouden', G.maakProfiel({}).inloggen === G.INLOG_ONTHOUDEN)
+t('een onzinwaarde voor inloggen ook', G.maakProfiel({ inloggen: 'zomaar' }).inloggen === G.INLOG_ONTHOUDEN)
+t('vragen blijft vragen', prive.inloggen === G.INLOG_VRAGEN)
+
+t('label wint', G.profielLabel(werk) === 'werk')
+t('zonder label je naam', G.profielLabel(G.maakProfiel({ naam: 'Jan' })) === 'Jan')
+t('zonder naam je adres', G.profielLabel(G.maakProfiel({ email: 'a@b.nl' })) === 'a@b.nl')
+
+t('project met eigen profiel krijgt dat',
+  G.profielVoorProject(profielen, 'p1', 'p2') === prive)
+t('project zonder eigen profiel krijgt de standaard',
+  G.profielVoorProject(profielen, 'p1', '') === werk)
+// Een verwijderd profiel mag niet stilletjes elke controle uitzetten.
+t('project dat naar een verdwenen profiel wijst valt terug op de standaard',
+  G.profielVoorProject(profielen, 'p1', 'weg') === werk)
+t('zonder profielen is er niets te kiezen',
+  G.profielVoorProject([], 'p1', 'p2') === null)
+
+// ── fase 2: klopt de naam in deze map? ───────────────────────────────────────
+const repoMet = (naam, email) => G.maakStaat({ isRepo: true, remotes: ['origin'], branch: 'main', naam, email })
+
+t('geen naam -> ontbreekt',
+  G.identiteitStatus(profielen, repoMet('', ''), werk).soort === 'ontbreekt')
+t('alleen een naam is nog steeds ontbreekt',
+  G.identiteitStatus(profielen, repoMet('Jan Jansen', ''), werk).soort === 'ontbreekt')
+t('geen profielen -> niets te vergelijken',
+  G.identiteitStatus([], repoMet('Jan Jansen', 'jan@werk.nl'), null).soort === 'geen-profielen')
+t('het goede profiel -> klopt',
+  G.identiteitStatus(profielen, repoMet('Jan Jansen', 'jan@werk.nl'), werk).soort === 'klopt')
+t('hoofdletters maken geen ander mens',
+  G.identiteitStatus(profielen, repoMet('jan jansen', 'JAN@WERK.NL'), werk).soort === 'klopt')
+t('een profiel dat je kent maar hier niet hoort -> ander-profiel',
+  G.identiteitStatus(profielen, repoMet('Jan', 'jan@thuis.nl'), werk).soort === 'ander-profiel')
+t('en dan weet de app ook wie het wél is',
+  G.identiteitStatus(profielen, repoMet('Jan', 'jan@thuis.nl'), werk).gevonden === prive)
+t('een naam die nergens bij hoort -> onbekend',
+  G.identiteitStatus(profielen, repoMet('Iemand', 'iemand@elders.nl'), werk).soort === 'onbekend')
+t('zonder verwachting is een bekend profiel gewoon goed',
+  G.identiteitStatus(profielen, repoMet('Jan', 'jan@thuis.nl'), null).soort === 'klopt')
+// Een half ingevuld profiel telt niet mee als "bekend": daar kun je niet mee
+// committen, dus het is geen identiteit die de app herkent.
+t('een onaf profiel maakt niets bekend',
+  G.identiteitStatus(profielen, repoMet('Jan', ''), null).soort === 'ontbreekt')
+t('geen repo -> geen uitspraak', G.identiteitStatus(profielen, G.maakStaat({ isRepo: false }), werk) === null)
+t('geen git -> geen uitspraak', G.identiteitStatus(profielen, G.maakStaat({ beschikbaar: false }), werk) === null)
+
+// Alleen een ontbrekende naam houdt de commit tegen. De rest is een
+// waarschuwing waar je doorheen mag: soms commit je bewust anders.
+t('ontbreken blokkeert', G.identiteitBlokkeert(G.identiteitStatus(profielen, repoMet('', ''), werk)))
+t('onbekend blokkeert niet',
+  !G.identiteitBlokkeert(G.identiteitStatus(profielen, repoMet('X', 'x@y.nl'), werk)))
+t('klopt blokkeert niet',
+  !G.identiteitBlokkeert(G.identiteitStatus(profielen, repoMet('Jan Jansen', 'jan@werk.nl'), werk)))
+
+// ── fase 2: de commando's ────────────────────────────────────────────────────
+t('identiteit zetten',
+  G.identiteitCommando(werk) === 'git config user.name "Jan Jansen" && git config user.email "jan@werk.nl"')
+t('een onaf profiel levert geen commando op', G.identiteitCommando(onaf) === null)
+t('aanhalingstekens in een naam breken de regel niet',
+  G.identiteitCommando(G.maakProfiel({ naam: 'Jan "de Baas"', email: 'a@b.nl' }))
+  === `git config user.name "Jan 'de Baas'" && git config user.email "a@b.nl"`)
+
+t('github-naam mag letters, cijfers en streepjes', G.geldigeGhGebruiker('jan-werk-2'))
+t('maar geen spaties of tekens die de shell aangaan',
+  !G.geldigeGhGebruiker('jan werk') && !G.geldigeGhGebruiker('jan;del') && !G.geldigeGhGebruiker('$(kwaad)'))
+t('en niet beginnen of eindigen met een streepje',
+  !G.geldigeGhGebruiker('-jan') && !G.geldigeGhGebruiker('jan-'))
+t('en niet leeg', !G.geldigeGhGebruiker(''))
+
+// Alleen zetten wat verandert: --unset mislukt als er niets staat, en één
+// mislukking kapt de hele &&-ketting af.
+t('alles staat al goed -> geen commando',
+  G.profielCommando(werk, { naam: 'Jan Jansen', email: 'jan@werk.nl', ghGebruiker: 'jan-werk' }) === null)
+t('alleen de identiteit verschilt -> alleen die twee',
+  G.profielCommando(werk, { naam: 'Iemand', email: 'x@y.nl', ghGebruiker: 'jan-werk' })
+  === G.identiteitCommando(werk))
+t('github-account erbij als het anders is',
+  G.profielCommando(werk, { naam: 'Jan Jansen', email: 'jan@werk.nl', ghGebruiker: 'oud' })
+  === 'git config "credential.https://github.com.username" "jan-werk"')
+t('geen github-naam in het profiel maar wel lokaal in de map -> weghalen',
+  G.profielCommando(prive, { naam: 'Jan', email: 'jan@thuis.nl', ghGebruiker: 'oud', ghGebruikerLokaal: true, helperLokaal: true })
+  === 'git config --unset "credential.https://github.com.username"')
+// Staat de naam globaal, dan kunnen we hem hier niet weghalen — en een --unset
+// die mislukt kapt de hele &&-ketting af. Er blijft dan alleen de helper over.
+t('een github-naam die niet lokaal staat laten we met rust',
+  G.profielCommando(prive, { naam: 'Jan', email: 'jan@thuis.nl', ghGebruiker: 'globaal', ghGebruikerLokaal: false })
+  === 'git config credential.helper ""')
+t('en staat alles al zo, dan valt er niets te doen',
+  G.profielCommando(prive, { naam: 'Jan', email: 'jan@thuis.nl', ghGebruiker: 'globaal', helperLokaal: true }) === null)
+t('elke keer vragen zet de helper uit',
+  G.profielCommando(prive, { naam: 'Jan', email: 'jan@thuis.nl' })
+  === 'git config credential.helper ""')
+t('en onthouden haalt een lokale helper juist weg',
+  G.profielCommando(werk, { naam: 'Jan Jansen', email: 'jan@werk.nl', ghGebruiker: 'jan-werk', helperLokaal: true })
+  === 'git config --unset-all credential.helper')
+t('een lege map krijgt alles in één regel',
+  G.profielCommando(werk, {}).split(' && ').length === 3)
+t('een onaf profiel levert nooit een commando op', G.profielCommando(onaf, {}) === null)
+
+t('gh switch', G.ghSwitchCommando('jan-werk') === 'gh auth switch --hostname github.com --user jan-werk')
+t('gh switch weigert onzin', G.ghSwitchCommando('jan werk; del') === null)
+
+// Alleen commando's die het netwerk op gaan hebben een toetsenbord nodig; een
+// commit vraagt nooit om een token.
+t('push vraagt om inloggen bij "elke keer vragen"', G.vraagtOmInloggen(prive, 'git-push'))
+t('pull ook', G.vraagtOmInloggen(prive, 'git-pull'))
+t('commit niet', !G.vraagtOmInloggen(prive, 'git-commit'))
+t('en bij onthouden nooit', !G.vraagtOmInloggen(werk, 'git-push'))
+t('zonder profiel ook niet', !G.vraagtOmInloggen(null, 'git-push'))
+
+// ── fase 1: conflicten herkennen ─────────────────────────────────────────────
+// Na een `stash pop` die botst staan er u-regels in de status. Die tellen als
+// vuil (er staat immers werk in je map) maar ze zijn een ander probleem.
+const metConflict = G.parseStatusV2([
+  '# branch.head main',
+  'u UU N... 100644 100644 100644 100644 aaa bbb ccc botsing.js',
+  '1 .M N... 100644 100644 100644 ddd eee gewoon.js',
+].join('\n'))
+t('conflict wordt geteld', metConflict.conflicten === 1)
+t('en telt ook gewoon als vuil', metConflict.vuil === 2)
+t('het conflictbestand staat in de lijst', metConflict.bestanden.includes('botsing.js'))
+t('zonder u-regels geen conflicten', G.parseStatusV2('1 .M N... 100644 100644 100644 a b c.js').conflicten === 0)
+t('conflicten staan standaard op nul', G.maakStaat({ isRepo: true }).conflicten === 0)
 
 // ── ronde 2: de commando's ───────────────────────────────────────────────────
 t('commit legt alles vast', G.commitCommando('fix: iets')
@@ -352,6 +614,68 @@ for (const sleutel of ['git.achter.titel', 'git.achter.tekst', 'git.achter.tekst
                        'settings.git.fetchLabel']) {
   t('achterstand-tekst ' + sleutel + ' bestaat in nl en en', !!nl[sleutel] && !!en[sleutel])
 }
+
+for (const sleutel of ['git.stashLijst.leegTitel', 'git.stashLijst.leegTekst',
+                       'git.stashLijst.kiesTitel', 'git.stashLijst.kiesTekst',
+                       'git.stashLijst.kiesTekstMeer', 'git.stashLijst.wijzigingenOp',
+                       'git.stashLijst.actieTitel', 'git.stashLijst.actieTekst',
+                       'git.stashLijst.actieTekstBotsing',
+                       'git.stashLijst.geweigerdTitel', 'git.stashLijst.geweigerdTekst',
+                       'git.stashLijst.pop', 'git.stashLijst.drop',
+                       'git.stashLijst.dropTitel', 'git.stashLijst.dropTekst', 'git.stashLijst.dropOk',
+                       'git.stashLijst.conflictTitel', 'git.stashLijst.conflictTekst',
+                       'git.stashMelding.terughalen', 'cmdvis.defaultOff']) {
+  t('stash-tekst ' + sleutel + ' bestaat in nl en en', !!nl[sleutel] && !!en[sleutel])
+}
+
+// De oude tekst stuurde je naar de terminal omdat er niets anders was. Nu is
+// er een knop, en dan hoort er in geen enkele taal meer een commando te staan
+// dat je zelf moet typen.
+for (const sleutel of ['git.stashMelding.tekst', 'git.stash.text']) {
+  t(sleutel + ' verwijst niet meer naar een commando om te typen',
+    !/git stash pop/.test(nl[sleutel] || '') && !/git stash pop/.test(en[sleutel] || ''))
+}
+
+for (const sleutel of ['git.ident.ontbreektTitel', 'git.ident.ontbreektTekst',
+                       'git.ident.ontbreektTekstProfielen', 'git.ident.instellenOk',
+                       'git.ident.vraagNaamTitel', 'git.ident.vraagNaamTekst',
+                       'git.ident.vraagEmailTitel', 'git.ident.vraagEmailTekst',
+                       'git.ident.emailFoutTitel', 'git.ident.emailFoutTekst',
+                       'git.ident.bewaarTitel', 'git.ident.bewaarTekst', 'git.ident.bewaarOk',
+                       'git.ident.verkeerdTitel', 'git.ident.anderTekst', 'git.ident.onbekendTekst',
+                       'git.ident.tochCommitten', 'git.ident.rechtzettenOk',
+                       'git.ident.chipMis', 'git.ident.chipMisTitle',
+                       'git.ident.chipTitle', 'git.ident.chipFoutTitle',
+                       'git.profiel.toepassenTitel', 'git.profiel.toepassenTekst',
+                       'git.profiel.toepassenOk', 'git.profiel.alGoedToast',
+                       'git.profiel.ghTitel', 'git.profiel.ghTekst', 'git.profiel.ghOk',
+                       'settings.git.profielLabel', 'settings.git.profielDesc',
+                       'settings.git.profielEmptyHint', 'settings.git.profielAdd',
+                       'settings.git.profielStdTitle', 'settings.git.profielLabelPlaceholder',
+                       'settings.git.profielNamePlaceholder', 'settings.git.profielEmailPlaceholder',
+                       'settings.git.profielGhPlaceholder', 'settings.git.profielIncomplete',
+                       'settings.git.profielRemoveTitle', 'settings.git.profielRemoveText',
+                       'settings.git.profielRemoveUsed', 'settings.git.inlogRemember',
+                       'settings.git.inlogAsk', 'settings.git.inlogEerlijk',
+                       'modal.project.profielLabel', 'modal.project.profielDefault']) {
+  t('identiteit-tekst ' + sleutel + ' bestaat in nl en en', !!nl[sleutel] && !!en[sleutel])
+}
+
+// De belofte die de app doet over "elke keer vragen" moet eerlijk zijn: het is
+// een drempel, geen scheiding. Staat dat er niet in, dan wekt de instelling een
+// verwachting die hij niet waarmaakt.
+t('de inlog-uitleg zegt eerlijk dat het geen beveiliging is',
+  /geen beveiliging/i.test(nl['settings.git.inlogEerlijk'])
+  && /not security/i.test(en['settings.git.inlogEerlijk']))
+t('en wijst naar aparte Windows-accounts als je het écht wilt scheiden',
+  /Windows-accounts/i.test(nl['settings.git.inlogEerlijk'])
+  && /Windows accounts/i.test(en['settings.git.inlogEerlijk']))
+
+t('de identiteit-chip heeft opmaak in style.css',
+  css.includes('.git-ident {') && css.includes('.git-ident.fout') && css.includes('.git-ident.mis'))
+t('de profielrijen ook', css.includes('.git-profiel-rij {'))
+t('index.html heeft de profielkeuze in het projectvenster',
+  html.includes('id="f-profiel"') && html.includes('id="f-profiel-rij"'))
 
 for (const reden of ['schoon', 'geen-commits', 'niets-vooruit']) {
   t('melding voor "' + reden + '" bestaat in nl en en',

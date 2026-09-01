@@ -104,6 +104,42 @@ const TOOLS_CMD_DEFS = [
   { id: 'build-windows', label: 'build windows',   icon: 'ti-box',                   cls: 'buildwin' },
 ]
 
+// Knoppen die bestaan maar niet meteen in de weg staan. Een knop hier weglaten
+// is geen kleine keuze: wat er niet staat, bestaat voor de meeste mensen niet.
+// Daarom staan ze wél gewoon in de projectinstellingen, met "standaard uit"
+// erachter, zodat je ziet dat ze er zijn en waarom ze er niet staan.
+//
+// Het verschil met een knop die je zelf hebt weggehaald: die staat als false in
+// cmdVisibility en telt mee bij "verborgen knoppen terugzetten". Standaard uit
+// is de afwezigheid van een voorkeur, niet een voorkeur voor afwezigheid.
+const CMD_STANDAARD_UIT = new Set(
+  [...RUN_CMD_DEFS, ...TOOLS_CMD_DEFS].filter(d => d.standaardUit).map(d => d.id)
+)
+
+// Wat geldt er als je nog nooit iets over deze knop hebt gezegd?
+function cmdStandaardAan(id) {
+  return !CMD_STANDAARD_UIT.has(id)
+}
+
+// ── Git-profielen ─────────────────────────────────────────────────────────────
+// Wie ben je in de commit, en welk GitHub-account hoort daarbij. Zie de uitleg
+// bij "Identiteit en accounts" in git-tools.js voor waarom dat twee dingen zijn.
+function gitProfielen() {
+  const lijst = ((settings.git || {}).profielen) || []
+  return Array.isArray(lijst) ? lijst : []
+}
+
+function gitStandaardProfielId() {
+  return String((settings.git || {}).standaardProfiel || '')
+}
+
+// Welk profiel hoort bij dit project? Zonder profielen is dat er geen, en dan
+// doet de app ook geen enkele uitspraak over je identiteit — er valt dan niets
+// te verwisselen.
+function profielVanProject(p) {
+  return GitTools.profielVoorProject(gitProfielen(), gitStandaardProfielId(), p && p.gitProfiel)
+}
+
 // Aantal kleuren voor onbekende knoppen; bekende programma's hebben een merkkleur.
 const PROG_KLEUR_AANTAL = 12
 
@@ -131,7 +167,7 @@ const KLEUR_IDX = {
   android: 2, windows: 5, web: 3, info: 3, pub: 5, clean: 10, doctor: 8,
   apk: 9, buildweb: 0, buildwin: 11,
   gitlink: 4, gitread: 6, gitpull: 2, gitfetch: 7, gitlog: 1,
-  gitcommit: 9, gitpush: 3, gitstash: 8,
+  gitcommit: 9, gitpush: 3, gitstash: 8, gitstashlijst: 10,
   'editor-vscode': 5, 'editor-cursor': 0, 'editor-claude': 4,
   'editor-android-studio': 2, 'editor-claude-desktop': 6,
   'merk-visualstudio': 1, 'merk-codex': 8, 'merk-openai': 8, 'merk-gemini': 5,
@@ -361,9 +397,10 @@ function ontdubbelCustomEditors() {
   return true
 }
 
-// Standaard AAN tenzij expliciet op false gezet voor dit project
+// Zichtbaar tenzij deze knop voor dit project is uitgezet — of tenzij hij
+// standaard uit staat en er nooit iets over gezegd is. Zie cmdZichtbaar.
 function isCmdVisible(p, id) {
-  return !(p.cmdVisibility && p.cmdVisibility[id] === false)
+  return cmdZichtbaar(p, id, (p && p.cmdVisibility) || {})
 }
 
 // Hele sectie aan of uit. Handiger dan alle vinkjes los omzetten als je
@@ -513,7 +550,31 @@ function gitIndicatorHtml(p) {
       <i class="ti ti-git-branch"></i>
       <span class="git-ind-branch">${esc(i.branch)}</span>
       ${delen.join('')}
-    </span>`
+    </span>${identiteitChipHtml(p)}`
+}
+
+// Onder wiens naam komt je volgende commit te staan. Dit is het halve punt van
+// profielen: het moet er stáán, vóór je commit, zonder dat je ernaar hoeft te
+// zoeken.
+//
+// Wanneer wél en wanneer niet: is er iets mis, dan altijd. Klopt alles, dan
+// alleen als er meer dan één profiel is — met één identiteit valt er niets te
+// verwisselen en is het alleen maar drukte in de kop.
+function identiteitChipHtml(p) {
+  const status = GitTools.identiteitStatus(gitProfielen(), gitStaatVan(p), profielVanProject(p))
+  if (!status) return ''
+
+  if (status.soort === 'ontbreekt') {
+    return `<span class="git-ident mis" title="${esc(I18N.t('git.ident.chipMisTitle'))}">
+        <i class="ti ti-user-exclamation"></i>${esc(I18N.t('git.ident.chipMis'))}</span>`
+  }
+  if (status.soort === 'onbekend' || status.soort === 'ander-profiel') {
+    return `<span class="git-ident fout" title="${esc(I18N.t('git.ident.chipFoutTitle', { naam: status.huidig.naam, email: status.huidig.email }))}">
+        <i class="ti ti-user-exclamation"></i>${esc(status.huidig.naam)}</span>`
+  }
+  if (gitProfielen().length < 2) return ''
+  return `<span class="git-ident" title="${esc(I18N.t('git.ident.chipTitle', { naam: status.huidig.naam, email: status.huidig.email }))}">
+      <i class="ti ti-user"></i>${esc(GitTools.profielLabel(status.gevonden))}</span>`
 }
 
 // Eigen knoppen die de gebruiker vanuit het woordenboek heeft toegevoegd.
@@ -542,7 +603,12 @@ function alleCmdKnopIds(bron, sectie) {
 
 function cmdZichtbaar(bron, id, zichtbaarMap = null) {
   const map = zichtbaarMap || bron.cmdVisibility || pendingCmdVisibility
-  return map[id] !== false
+  const keuze = map[id]
+  // Niets vastgelegd → de standaard van de knop. Wél vastgelegd → wat de
+  // gebruiker heeft gekozen, ook als dat "aan" is voor een knop die standaard
+  // uit staat.
+  if (keuze === undefined || keuze === null) return cmdStandaardAan(id)
+  return keuze !== false
 }
 
 function cmdVolgordeLijst(bron, sectie) {
@@ -2684,7 +2750,14 @@ async function herstelVerborgenKnoppen() {
   if (!await vraagJaNee(I18N.t('wis.restoreTitle'), I18N.t('wis.restoreText', { count: n }),
       I18N.t('wis.restoreButton'))) return
 
-  projects.forEach(p => { p.cmdVisibility = {} })
+  // Alleen de uitzettingen terugdraaien. Een knop die standaard uit staat en
+  // die je juist expliciet hebt aangezet, is geen verborgen knop — die telt
+  // hierboven ook niet mee, dus hem hier wegvegen zou hem stilletjes laten
+  // verdwijnen bij een handeling die knoppen zou moeten terugbrengen.
+  projects.forEach(p => {
+    p.cmdVisibility = Object.fromEntries(
+      Object.entries(p.cmdVisibility || {}).filter(([, v]) => v === true))
+  })
   saveProjects()
   settings.cmd = { ...(settings.cmd || {}), quickUit: [] }
   settings.ps  = { ...(settings.ps  || {}), quickUit: [] }
@@ -7203,6 +7276,15 @@ function renderSettingsPanel() {
           </label>
           <span class="instel-uitleg">${I18N.t('settings.git.fetchDesc')}</span>
         </div>
+        <div class="instel-rij">
+          <div class="editor-row-name"><i class="ti ti-user-circle"></i> ${I18N.t('settings.git.profielLabel')}</div>
+          <span class="instel-uitleg">${I18N.t('settings.git.profielDesc')}</span>
+          <div id="git-profiel-lijst"></div>
+          <button class="add-proj-btn" id="btn-add-git-profiel" style="margin:0;margin-top:4px">
+            <i class="ti ti-plus"></i> ${I18N.t('settings.git.profielAdd')}
+          </button>
+          <span class="instel-uitleg">${I18N.t('settings.git.inlogEerlijk')}</span>
+        </div>
       </div>
       <div>
         <div class="settings-section-title">${I18N.t('settings.section.deleteTitle')}</div>
@@ -7282,6 +7364,16 @@ function renderSettingsPanel() {
   if (gitFetchVak) gitFetchVak.onchange = (e) => {
     settings.git = { ...(settings.git || {}), fetchBijOpenen: e.target.checked }
     window.api.saveSettings(settings)
+  }
+
+  renderGitProfielen()
+  const profielKnop = document.getElementById('btn-add-git-profiel')
+  if (profielKnop) profielKnop.onclick = () => {
+    const nieuw = GitTools.maakProfiel({ id: 'gp_' + Date.now().toString(36) })
+    zetGitProfielen([...gitProfielen(), nieuw],
+      gitStandaardProfielId() || nieuw.id)   // de eerste is vanzelf de standaard
+    renderGitProfielen()
+    document.querySelector(`[data-gp-naam="${nieuw.id}"]`)?.focus()
   }
 
   const wisKeuze = document.getElementById('set-wiswijze')
@@ -7657,6 +7749,101 @@ function renderCustomEditors() {
       settings.customEditors = (settings.customEditors || []).filter(x => x.id !== el.dataset.ceDel)
       renderCustomEditors()
     })
+}
+
+// ── Git-profielen beheren ─────────────────────────────────────────────────────
+// Eén profiel is één persoon: de naam die in de geschiedenis komt, en welk
+// GitHub-account daarbij hoort. Het label is er alleen voor jezelf ("werk",
+// "privé") en mag leeg blijven.
+function zetGitProfielen(lijst, standaard) {
+  settings.git = {
+    ...(settings.git || {}),
+    profielen: lijst.map(p => GitTools.maakProfiel(p)),
+    standaardProfiel: standaard !== undefined ? String(standaard || '') : gitStandaardProfielId(),
+  }
+  window.api.saveSettings(settings)
+}
+
+function renderGitProfielen() {
+  const box = document.getElementById('git-profiel-lijst')
+  if (!box) return
+  const lijst = gitProfielen()
+
+  if (!lijst.length) {
+    box.innerHTML = `<div class="hint-row">${esc(I18N.t('settings.git.profielEmptyHint'))}</div>`
+    return
+  }
+
+  const standaard = gitStandaardProfielId()
+  box.innerHTML = lijst.map(p => `
+    <div class="git-profiel-rij ${GitTools.profielGeldig(p) ? '' : 'onaf'}">
+      <label class="git-profiel-std" title="${esc(I18N.t('settings.git.profielStdTitle'))}">
+        <input type="radio" name="git-profiel-std" data-gp-std="${esc(p.id)}" ${standaard === p.id ? 'checked' : ''} />
+      </label>
+      <input class="field" data-gp-label="${esc(p.id)}" value="${esc(p.label || '')}"
+             placeholder="${esc(I18N.t('settings.git.profielLabelPlaceholder'))}" style="width:80px;padding:4px 7px" />
+      <input class="field" data-gp-naam="${esc(p.id)}" value="${esc(p.naam || '')}"
+             placeholder="${esc(I18N.t('settings.git.profielNamePlaceholder'))}" style="width:120px;padding:4px 7px" />
+      <input class="field mono" data-gp-email="${esc(p.id)}" value="${esc(p.email || '')}"
+             placeholder="${esc(I18N.t('settings.git.profielEmailPlaceholder'))}" style="flex:1;min-width:150px;padding:4px 7px" />
+      <button class="cmdvis-del" data-gp-del="${esc(p.id)}" title="${esc(I18N.t('settings.git.profielRemoveTitle'))}"><i class="ti ti-x"></i></button>
+      <div class="git-profiel-tweede">
+        <i class="ti ti-brand-github"></i>
+        <input class="field mono" data-gp-gh="${esc(p.id)}" value="${esc(p.ghGebruiker || '')}"
+               placeholder="${esc(I18N.t('settings.git.profielGhPlaceholder'))}" style="width:130px;padding:4px 7px" />
+        <select class="loc-select" data-gp-inlog="${esc(p.id)}" style="width:auto">
+          <option value="onthouden" ${p.inloggen !== 'vragen' ? 'selected' : ''}>${esc(I18N.t('settings.git.inlogRemember'))}</option>
+          <option value="vragen" ${p.inloggen === 'vragen' ? 'selected' : ''}>${esc(I18N.t('settings.git.inlogAsk'))}</option>
+        </select>
+        ${GitTools.profielGeldig(p) ? '' : `<span class="git-profiel-onaf">${esc(I18N.t('settings.git.profielIncomplete'))}</span>`}
+      </div>
+    </div>`).join('')
+
+  // Bewerken schrijft rechtstreeks in settings; onchange en niet oninput, zodat
+  // er niet bij elke aanslag naar schijf wordt geschreven.
+  const zet = (id, veld, waarde) => {
+    zetGitProfielen(gitProfielen().map(p => p.id === id ? { ...p, [veld]: waarde } : p))
+  }
+  const bind = (attr, veld, hertekenen) => {
+    box.querySelectorAll(`[data-gp-${attr}]`).forEach(el => {
+      el.onchange = () => {
+        zet(el.dataset['gp' + attr[0].toUpperCase() + attr.slice(1)], veld, el.value)
+        if (hertekenen) renderGitProfielen()
+      }
+    })
+  }
+  bind('label', 'label', false)
+  bind('naam', 'naam', true)      // hertekenen: "nog niet af" kan hierdoor weggaan
+  bind('email', 'email', true)
+  bind('gh', 'ghGebruiker', false)
+  bind('inlog', 'inloggen', false)
+
+  box.querySelectorAll('[data-gp-std]').forEach(el => {
+    el.onchange = () => { zetGitProfielen(gitProfielen(), el.dataset.gpStd) }
+  })
+
+  box.querySelectorAll('[data-gp-del]').forEach(el => {
+    el.onclick = async () => {
+      const id = el.dataset.gpDel
+      const p = GitTools.zoekProfiel(gitProfielen(), id)
+      // Projecten die naar dit profiel wijzen vallen daarna terug op de
+      // standaard. Dat is beter dan geen profiel, maar je moet het wel weten.
+      const gebruikt = projects.filter(x => x.gitProfiel === id).length
+      if (GitTools.profielGeldig(p) && !await vraagJaNee(
+        I18N.t('settings.git.profielRemoveTitle'),
+        I18N.t(gebruikt ? 'settings.git.profielRemoveUsed' : 'settings.git.profielRemoveText',
+               { naam: GitTools.profielLabel(p), aantal: gebruikt }),
+        I18N.t('common.delete'), 'gevaar')) return
+
+      const over = gitProfielen().filter(x => x.id !== id)
+      const std = gitStandaardProfielId() === id ? (over[0] ? over[0].id : '') : gitStandaardProfielId()
+      zetGitProfielen(over, std)
+      projects.forEach(x => { if (x.gitProfiel === id) x.gitProfiel = '' })
+      saveProjects()
+      renderGitProfielen()
+      hertekenWeergave()
+    }
+  })
 }
 
 // ── Gevonden editors aanbieden ────────────────────────────────────────────────
@@ -10458,7 +10645,10 @@ function vraagtOmEenVenster(cmd) {
 const STDIN_KLACHTEN = /no stdin data received|must be provided either through stdin|not a tty|inquirer|raw mode is not supported/i
 let stdinKlacht = false
 
-async function executeCmd(project, cmd, cmdKey = null) {
+// `opties.eigenTerminal` dwingt de weg met een echt toetsenbord af, ook als het
+// commando er niet naar uitziet. Nodig zodra git zelf om inloggegevens vraagt:
+// zonder terminal blijft een push wachten op een token dat niemand kan typen.
+async function executeCmd(project, cmd, cmdKey = null, opties = {}) {
   const loc = project.locations[project.activeLocation] || project.locations[0]
 
   // Alles met een / ervoor hoort bij de app zelf: van dienst wisselen, een
@@ -10517,7 +10707,7 @@ async function executeCmd(project, cmd, cmdKey = null) {
   // Iets dat om invoer vraagt: dat heeft een echt toetsenbord nodig. Dat kan
   // hier, in een eigen tabblad met een echte terminal erin. Alleen als dat niet
   // lukt gaat het alsnog naar een consolevenster van Windows.
-  if (vraagtOmEenVenster(cmd)) {
+  if (vraagtOmEenVenster(cmd) || opties.eigenTerminal) {
     springNaarOutput()
     appendLine('cmd', '> ' + cmd)
 
@@ -10758,25 +10948,211 @@ async function toonStashMeldingBijStart() {
   try {
     const m = await window.api.gitStashMelding()
     if (!m || !m.projecten || !m.projecten.length) return
-    await meldKort(
-      I18N.t('git.stashMelding.titel'),
-      I18N.t('git.stashMelding.tekst'),
-      m.projecten.map(p => p.naam + ' — git stash pop'))
+
+    // Bij precies één project weten we welke knop je nodig hebt en zetten we
+    // hem meteen open. Bij meer zou dat een willekeurige keuze zijn; dan is de
+    // lijst genoeg, want bij elk van die projecten staat de terughaalknop nu
+    // vanzelf in de rij.
+    const enkel = m.projecten.length === 1
+      ? projects.find(p => padNorm(actieveLocPad(p)) === padNorm(m.projecten[0].pad))
+      : null
+
+    const keuze = await vraagKeuze({
+      titel: I18N.t('git.stashMelding.titel'),
+      tekst: I18N.t('git.stashMelding.tekst'),
+      regels: m.projecten.map(p => p.naam),
+      knoppen: enkel
+        ? [{ label: I18N.t('common.ok'), waarde: 'ok' },
+           { label: I18N.t('git.stashMelding.terughalen'), waarde: 'open', soort: 'primair' }]
+        : [{ label: I18N.t('common.ok'), waarde: 'ok', soort: 'primair' }],
+    })
+    if (keuze !== 'open' || !enkel) return
+
+    selectProject(enkel.id)
+    await stashOverzicht(enkel)
   } catch {}
+}
+
+// ── Wie ben je in deze map? ──────────────────────────────────────────────────
+// Twee problemen die op hetzelfde moment zichtbaar horen te worden: vóór de
+// commit, niet erna.
+//
+//   1. Er staat helemaal geen naam. `git commit` weigert dan met "Author
+//      identity unknown". Op een verse pc is dat de normale toestand, en nu
+//      merk je het pas nadat je een bericht hebt getypt.
+//   2. Er staat een naam die hier niet hoort. Een commit op de verkeerde naam
+//      merk je pas dagen later, en rechtzetten betekent geschiedenis
+//      herschrijven. Dit is de fout die het duurst is om laat te ontdekken.
+
+// Het profiel op één map zetten: naam, adres, welk GitHub-account en of de
+// inloggegevens onthouden mogen worden. Gaat als zichtbaar commando naar de
+// terminal, want dit schrijft in je .git/config en dat hoor je te zien.
+//
+// Onder water is dit `git config user.name` en `user.email` per repo — dus het
+// geldt ook als je daarna buiten de app om commit.
+async function pasProfielToe(project, profiel, opties = {}) {
+  const pad = actieveLocPad(project)
+  if (!pad || !GitTools.profielGeldig(profiel)) return false
+
+  let huidig = {}
+  try { huidig = await window.api.gitAccountInfo(pad) } catch {}
+
+  const cmd = GitTools.profielCommando(profiel, huidig)
+  if (!cmd) {
+    // Alles stond al goed. Niets doen is hier het juiste antwoord, maar wel
+    // zeggen — anders lijkt de knop kapot.
+    if (!opties.stil) showToast(I18N.t('git.profiel.alGoedToast', { naam: GitTools.profielLabel(profiel) }))
+    return true
+  }
+
+  if (!opties.stil) {
+    const ja = await vraagJaNee(
+      I18N.t('git.profiel.toepassenTitel'),
+      I18N.t('git.profiel.toepassenTekst', {
+        naam: profiel.naam, email: profiel.email, map: pad,
+      }),
+      I18N.t('git.profiel.toepassenOk'), 'primair', cmd.split(' && '))
+    if (!ja) return false
+  }
+
+  await executeCmd(project, cmd, 'git-profiel')
+  await ververesGitStaat(project, true)
+
+  // Loopt het inloggen via gh, dan bepaalt gh welk account er gebruikt wordt en
+  // doet credential.username niets. Dat kunnen we niet stilzwijgend laten
+  // gebeuren, want dan lijkt het gewisseld terwijl je nog de oude bent.
+  if (huidig.ghCli && GitTools.geldigeGhGebruiker(profiel.ghGebruiker)) {
+    const ghCmd = GitTools.ghSwitchCommando(profiel.ghGebruiker)
+    const ja = await vraagJaNee(
+      I18N.t('git.profiel.ghTitel'),
+      I18N.t('git.profiel.ghTekst', { naam: profiel.ghGebruiker }),
+      I18N.t('git.profiel.ghOk'), 'primair', [ghCmd])
+    if (ja) await executeCmd(project, ghCmd, 'git-profiel', { eigenTerminal: true })
+  }
+  return true
+}
+
+// Naam en adres vragen als er nog niets staat. Geeft het ingestelde profiel
+// terug, of null bij annuleren.
+async function vraagIdentiteit(project) {
+  const naam = await vraagTekst({
+    titel: I18N.t('git.ident.vraagNaamTitel'),
+    tekst: I18N.t('git.ident.vraagNaamTekst'),
+    placeholder: I18N.t('settings.git.profielNamePlaceholder'),
+    okLabel: I18N.t('common.next'),
+  })
+  if (!naam) return null
+
+  const email = await vraagTekst({
+    titel: I18N.t('git.ident.vraagEmailTitel'),
+    tekst: I18N.t('git.ident.vraagEmailTekst'),
+    placeholder: I18N.t('settings.git.profielEmailPlaceholder'),
+    okLabel: I18N.t('git.ident.instellenOk'),
+  })
+  if (!email) return null
+
+  const profiel = GitTools.maakProfiel({ id: 'gp_' + Date.now().toString(36), naam, email })
+  if (!GitTools.profielGeldig(profiel)) {
+    await meldKort(I18N.t('git.ident.emailFoutTitel'), I18N.t('git.ident.emailFoutTekst'))
+    return null
+  }
+
+  // Stil, want je hebt de naam net zelf ingetypt: daar nog een keer "weet je
+  // het zeker" overheen is één vraag te veel.
+  if (!await pasProfielToe(project, profiel, { stil: true })) return null
+
+  // Bewaren is een aparte vraag. Eén keer instellen is genoeg om te kunnen
+  // committen; een profiel maak je pas als je er meer dan één hebt, of als je
+  // wilt dat de app hierop gaat letten.
+  if (await vraagJaNee(
+    I18N.t('git.ident.bewaarTitel'),
+    I18N.t('git.ident.bewaarTekst', { naam: profiel.naam, email: profiel.email }),
+    I18N.t('git.ident.bewaarOk'))) {
+    zetGitProfielen([...gitProfielen(), profiel], gitStandaardProfielId() || profiel.id)
+    if (project) { project.gitProfiel = profiel.id; saveProjects() }
+    if (view === 'settings') renderSettingsPanel()
+  }
+  return profiel
+}
+
+// De poort vóór de commit. `true` = doorgaan, `false` = afbreken.
+async function controleerIdentiteit(project, staat) {
+  const verwacht = profielVanProject(project)
+  const status = GitTools.identiteitStatus(gitProfielen(), staat, verwacht)
+  if (!status || status.soort === 'klopt' || status.soort === 'geen-profielen') return true
+
+  const bruikbaar = gitProfielen().filter(GitTools.profielGeldig)
+
+  if (status.soort === 'ontbreekt') {
+    // Zonder naam gáát het niet. Hier dus geen "toch doorgaan": dat zou een
+    // knop zijn die gegarandeerd een foutmelding oplevert.
+    const knoppen = [{ label: I18N.t('common.cancel'), waarde: '' }]
+    for (let i = bruikbaar.length - 1; i >= 0; i--) {
+      knoppen.push({ label: GitTools.profielLabel(bruikbaar[i]), waarde: 'p:' + bruikbaar[i].id })
+    }
+    knoppen.push({ label: I18N.t('git.ident.instellenOk'), waarde: 'nieuw', soort: 'primair' })
+
+    const keuze = await vraagKeuze({
+      titel: I18N.t('git.ident.ontbreektTitel'),
+      tekst: I18N.t(bruikbaar.length ? 'git.ident.ontbreektTekstProfielen' : 'git.ident.ontbreektTekst'),
+      knoppen,
+    })
+    if (!keuze) return false
+    if (keuze === 'nieuw') return !!await vraagIdentiteit(project)
+
+    const gekozen = GitTools.zoekProfiel(gitProfielen(), keuze.slice(2))
+    if (!gekozen) return false
+    return await pasProfielToe(project, gekozen)
+  }
+
+  // Wel een naam, maar niet de goede. Hier mag je wél doorheen: misschien
+  // commit je bewust een keer onder een andere naam. Wat de app moet doen is
+  // zorgen dat het een keuze is en geen ongeluk.
+  const sleutel = status.soort === 'ander-profiel' ? 'git.ident.anderTekst' : 'git.ident.onbekendTekst'
+  const knoppen = [
+    { label: I18N.t('common.cancel'), waarde: '' },
+    { label: I18N.t('git.ident.tochCommitten'), waarde: 'door' },
+  ]
+  if (verwacht) knoppen.push({ label: I18N.t('git.ident.rechtzettenOk', { naam: GitTools.profielLabel(verwacht) }), waarde: 'zet', soort: 'primair' })
+
+  const keuze = await vraagKeuze({
+    titel: I18N.t('git.ident.verkeerdTitel'),
+    tekst: I18N.t(sleutel, {
+      naam: status.huidig.naam, email: status.huidig.email,
+      profiel: GitTools.profielLabel(status.gevonden), verwacht: GitTools.profielLabel(verwacht),
+    }),
+    knoppen,
+  })
+  if (!keuze) return false
+  if (keuze === 'door') return true
+  return await pasProfielToe(project, verwacht)
 }
 
 // ── Git-knoppen ──────────────────────────────────────────────────────────────
 
 async function runGitCmd(project, cmdKey) {
   if (cmdKey === 'git-koppelen') { await koppelGithub(project); return }
+  // Terughalen schrijft ook, maar het is geen commando met één vaste vraag
+  // ervoor: eerst moet je zien wat er ligt. Dus een eigen weg, net als koppelen.
+  if (cmdKey === 'git-stash-lijst') { await stashOverzicht(project); return }
   if (GitTools.isSchrijfKnop(cmdKey)) { await schrijfGitCmd(project, cmdKey); return }
 
   const cmd = GitTools.GIT_CMD_MAP[cmdKey]
   if (!cmd) return
-  await executeCmd(project, cmd, cmdKey)
+  await executeCmd(project, cmd, cmdKey, { eigenTerminal: eigenTerminalNodig(project, cmdKey) })
   // Een pull of fetch kan de toestand veranderen (eerste upstream, andere
   // branch), dus daarna opnieuw kijken.
   await ververesGitStaat(project, true)
+}
+
+// Vraagt git bij dit commando zelf om inloggegevens? Dan heeft het een echt
+// toetsenbord nodig. In de gewone uitvoer is er geen terminal om op te typen,
+// en dan blijft een push staan wachten op iets wat niemand kan invoeren.
+//
+// De app ziet dat token nooit: git vraagt het, jij typt het in zijn eigen
+// prompt. Wij zetten alleen de terminal klaar waarin dat kan.
+function eigenTerminalNodig(project, cmdKey) {
+  return GitTools.vraagtOmInloggen(profielVanProject(project), cmdKey)
 }
 
 // Commit, push en stash veranderen iets. Ze vragen daarom eerst, en ze laten
@@ -10793,6 +11169,10 @@ async function schrijfGitCmd(project, cmdKey) {
   let cmd = null
 
   if (cmdKey === 'git-commit') {
+    // Eerst: onder wiens naam gaat dit? Zonder identiteit weigert git, en met
+    // de verkeerde identiteit staat het er morgen nog. Beide vragen horen vóór
+    // het bericht — daarna is het te laat om er nog iets aan te doen.
+    if (!await controleerIdentiteit(project, staat)) return
     const bericht = await vraagTekst({
       titel: I18N.t('git.commit.title'),
       tekst: I18N.t('git.commit.text', { aantal: staat.vuil }),
@@ -10825,8 +11205,141 @@ async function schrijfGitCmd(project, cmdKey) {
   }
 
   if (!cmd) return
-  await executeCmd(project, cmd, cmdKey)
+  await executeCmd(project, cmd, cmdKey, { eigenTerminal: eigenTerminalNodig(project, cmdKey) })
   await ververesGitStaat(project, true)
+}
+
+// ── De stash terughalen ──────────────────────────────────────────────────────
+// De app kon werk wegzetten zonder het terug te kunnen geven. Dat is de reden
+// dat dit er is: niet omdat stash zo'n gemis was, maar omdat de weg terug
+// alleen door de terminal liep.
+//
+// Hoe een stash zich laat lezen. `git stash list` geeft "WIP on main: 1f4a2c3
+// vorige commit" — dat is de commit waar je op stond, niet je wijzigingen.
+// Alleen dát tonen is misleidend, dus we halen het uit elkaar en zetten de
+// bestanden erbij die er echt in zitten.
+function stashLabel(s) {
+  if (!s) return ''
+  const wat = s.eigen && s.bericht
+    ? s.bericht
+    : I18N.t('git.stashLijst.wijzigingenOp', { branch: s.branch || '?' })
+  return s.datum ? `${wat} — ${s.datum}` : wat
+}
+
+async function stashOverzicht(project) {
+  const pad = actieveLocPad(project)
+  if (!pad) return
+
+  // De cijfers moeten kloppen op het moment van vragen. De knop kan van een
+  // verversing geleden zijn en er kan intussen in de terminal van alles zijn
+  // gebeurd.
+  const staat = await ververesGitStaat(project, true)
+  if (!staat || !staat.isRepo) return
+
+  let lijst = []
+  try { lijst = await window.api.gitStashLijst(pad) } catch {}
+
+  if (!lijst.length) {
+    // Kan gebeuren: je hebt hem in de terminal al leeggehaald, of de knop
+    // stond nog van een verversing geleden. Dan meteen de toestand bijwerken,
+    // zodat de knop ook verdwijnt.
+    await meldKort(I18N.t('git.stashLijst.leegTitel'), I18N.t('git.stashLijst.leegTekst'))
+    await ververesGitStaat(project, true)
+    return
+  }
+
+  // Bij één stash valt er niets te kiezen. Bij meer wel — nieuwste bovenaan,
+  // want dat is bijna altijd degene die je zoekt. De knoppenbak staat in
+  // column-reverse, dus achterste eerst (zie .modal-footer.kolom).
+  let gekozen = lijst[0]
+  if (lijst.length > 1) {
+    const tonen = lijst.slice(0, 8)
+    const knoppen = [{ label: I18N.t('common.cancel'), waarde: '' }]
+    for (let i = tonen.length - 1; i >= 0; i--) {
+      knoppen.push({ label: stashLabel(tonen[i]), waarde: tonen[i].ref, soort: i === 0 ? 'primair' : '' })
+    }
+    const ref = await vraagKeuze({
+      titel: I18N.t('git.stashLijst.kiesTitel'),
+      tekst: lijst.length > tonen.length
+        ? I18N.t('git.stashLijst.kiesTekstMeer', { aantal: lijst.length, getoond: tonen.length })
+        : I18N.t('git.stashLijst.kiesTekst', { aantal: lijst.length }),
+      knoppen,
+    })
+    if (!ref) return
+    gekozen = lijst.find(s => s.ref === ref)
+    if (!gekozen) return
+  }
+
+  // Wát er in zit, vóór de keuze om hem terug te halen of weg te gooien. Zonder
+  // die lijst is "stash@{0}" een naam zonder inhoud en klik je op goed geluk.
+  let bestanden = []
+  try { bestanden = await window.api.gitStashInhoud(pad, gekozen.ref) } catch {}
+
+  // Zitten er bestanden in die je nú ook aan het bewerken bent, dan weigert
+  // `git stash pop` en gebeurt er niets. Dat is veilig, maar het ziet eruit
+  // als een knop die niet werkt. Beter dat je het vooraf weet, met de namen
+  // erbij, dan achteraf uit een foutmelding in de terminal.
+  const botsend = GitTools.botsendeBestanden(bestanden, staat.bestanden)
+
+  // Terughalen bovenaan, weggooien onderaan met de cancel ertussen: de rode
+  // knop hoort niet direct onder de knop die je waarschijnlijk wilt.
+  const keuze = await vraagKeuze({
+    titel: I18N.t('git.stashLijst.actieTitel'),
+    tekst: I18N.t(botsend.length ? 'git.stashLijst.actieTekstBotsing' : 'git.stashLijst.actieTekst', {
+      omschrijving: stashLabel(gekozen), aantal: bestanden.length, botsend: botsend.length,
+    }),
+    regels: bestanden,
+    knoppen: [
+      { label: I18N.t('git.stashLijst.drop'), waarde: 'drop', soort: 'gevaar' },
+      { label: I18N.t('common.cancel'), waarde: '' },
+      { label: I18N.t('git.stashLijst.pop'), waarde: 'pop', soort: 'primair' },
+    ],
+  })
+  if (!keuze) return
+
+  if (keuze === 'drop') {
+    const ja = await vraagJaNee(
+      I18N.t('git.stashLijst.dropTitel'),
+      I18N.t('git.stashLijst.dropTekst', { omschrijving: stashLabel(gekozen) }),
+      I18N.t('git.stashLijst.dropOk'), 'gevaar', bestanden)
+    if (!ja) return
+    const cmd = GitTools.stashDropCommando(gekozen.ref)
+    if (!cmd) return
+    await executeCmd(project, cmd, 'git-stash-lijst')
+    await ververesGitStaat(project, true)
+    return
+  }
+
+  const cmd = GitTools.stashPopCommando(gekozen.ref)
+  if (!cmd) return
+  await executeCmd(project, cmd, 'git-stash-lijst')
+  const na = await ververesGitStaat(project, true)
+  if (!na) return
+
+  // Twee manieren waarop een pop niet gewoon slaagt, en ze zien er in de
+  // terminal ongeveer hetzelfde uit terwijl ze iets heel anders betekenen.
+  // Beide laten de stash staan, dus daar kun je ze niet aan herkennen — wel
+  // aan de conflictregels in de status.
+  //
+  //   conflicten > 0   git heeft samengevoegd en er zijn markeringen ingezet;
+  //                    je moet ze uit elkaar halen
+  //   anders           git heeft niets gedaan en meteen afgekapt, omdat je in
+  //                    dezelfde bestanden aan het werk was
+  if (na.conflicten > 0) {
+    // Zelf een conflict oplossen doet deze app niet — dat is werk in
+    // bestanden, en daar is een editor of Claude Code voor.
+    await meldKort(
+      I18N.t('git.stashLijst.conflictTitel'),
+      I18N.t('git.stashLijst.conflictTekst', { aantal: na.conflicten, ref: gekozen.ref }))
+    return
+  }
+
+  if (na.stashes >= (staat.stashes || 0)) {
+    await meldKort(
+      I18N.t('git.stashLijst.geweigerdTitel'),
+      I18N.t('git.stashLijst.geweigerdTekst', { ref: gekozen.ref }),
+      botsend.length ? botsend : bestanden)
+  }
 }
 
 // Koppelen doen we in stappen en niet in één klik. Een map die nog helemaal
@@ -11431,7 +11944,7 @@ function openNewModal() {
   cmdvisSorteerModus = ''
   document.getElementById('modal-proj').hidden = false
   buildEmojiPicker()
-  refreshEmojiPicker(); refreshLocList(); renderCmdVisibilitySection()
+  refreshEmojiPicker(); refreshLocList(); renderCmdVisibilitySection(); vulProfielKeuze('')
   focusField('f-name')
 }
 
@@ -11453,7 +11966,7 @@ function openEditModal(id) {
   cmdvisSorteerModus = ''
   document.getElementById('modal-proj').hidden = false
   buildEmojiPicker()
-  refreshEmojiPicker(); refreshLocList(); renderCmdVisibilitySection()
+  refreshEmojiPicker(); refreshLocList(); renderCmdVisibilitySection(); vulProfielKeuze(p.gitProfiel || '')
 
   const footer = document.querySelector('#modal-proj .modal-footer')
   if (!footer.querySelector('.btn-delete')) {
@@ -11465,6 +11978,23 @@ function openEditModal(id) {
   }
   document.getElementById('modal-proj').hidden = false
   focusField('f-name')
+}
+
+// De profielkeuze verschijnt pas zodra er profielen zijn. Een keuzelijst met
+// één regel "standaard" erin is geen keuze, alleen een vraag zonder antwoord.
+function vulProfielKeuze(gekozenId) {
+  const rij = document.getElementById('f-profiel-rij')
+  const keuze = document.getElementById('f-profiel')
+  if (!rij || !keuze) return
+  const lijst = gitProfielen()
+  rij.hidden = lijst.length === 0
+  if (!lijst.length) return
+
+  const std = GitTools.zoekProfiel(lijst, gitStandaardProfielId())
+  keuze.innerHTML =
+    `<option value="">${esc(I18N.t('modal.project.profielDefault', { naam: std ? GitTools.profielLabel(std) : '—' }))}</option>`
+    + lijst.map(p => `<option value="${esc(p.id)}" ${p.id === gekozenId ? 'selected' : ''}>${esc(GitTools.profielLabel(p))}</option>`).join('')
+  keuze.value = GitTools.zoekProfiel(lijst, gekozenId) ? gekozenId : ''
 }
 
 function focusField(id) {
@@ -11483,12 +12013,20 @@ function closeProjectModal() {
 function saveProjectModal() {
   const name   = document.getElementById('f-name').value.trim()
   const device = document.getElementById('f-device').value.trim()
+  const profielId = (document.getElementById('f-profiel')?.value || '').trim()
   const locs   = pendingLocs.filter(l => l.path.trim())
   if (!name) { document.getElementById('f-name').focus(); return }
   if (!locs.length) { showToast(I18N.t('project.needLocationToast')); return }
 
+  // Een gewijzigd profiel is pas echt gewijzigd als het ook in de map staat.
+  // Dat vragen we na het opslaan, want het schrijft in .git/config en dat is
+  // iets anders dan een instelling van de app.
+  let profielTeZetten = null
+
   if (editingId) {
     const p = projects.find(x => x.id === editingId)
+    if ((p.gitProfiel || '') !== profielId) profielTeZetten = p
+    p.gitProfiel = profielId
     p.name = name; p.icon = selEmoji; p.device = device; p.locations = locs
     p.cmdVisibility = { ...pendingCmdVisibility }
     p.secties = { ...pendingSecties }
@@ -11499,7 +12037,8 @@ function saveProjectModal() {
     }
     if (p.activeLocation >= locs.length) p.activeLocation = 0
   } else {
-    projects.push({ id: 'proj_' + Date.now(), name, icon: selEmoji, device, locations: locs, activeLocation: 0, release: false, cmdVisibility: { ...pendingCmdVisibility }, secties: { ...pendingSecties }, customCmds: pendingCustomCmds.map(c => ({ ...c })), cmdVolgorde: { run: [...(pendingCmdVolgorde.run || [])], tools: [...(pendingCmdVolgorde.tools || [])] } })
+    projects.push({ id: 'proj_' + Date.now(), name, icon: selEmoji, device, gitProfiel: profielId, locations: locs, activeLocation: 0, release: false, cmdVisibility: { ...pendingCmdVisibility }, secties: { ...pendingSecties }, customCmds: pendingCustomCmds.map(c => ({ ...c })), cmdVolgorde: { run: [...(pendingCmdVolgorde.run || [])], tools: [...(pendingCmdVolgorde.tools || [])] } })
+    if (profielId) profielTeZetten = projects[projects.length - 1]
   }
 
   saveProjects(); renderSidebar()
@@ -11517,6 +12056,15 @@ function saveProjectModal() {
   if (editingId === activeId) renderMain()
   if (view === 'settings') renderSettingsPanel()
   closeProjectModal()
+
+  // Pas na het sluiten van het venster: anders staat de vraag achter de modal.
+  if (profielTeZetten) {
+    const profiel = profielVanProject(profielTeZetten)
+    if (GitTools.profielGeldig(profiel)) {
+      const staat = gitStaatVan(profielTeZetten)
+      if (staat && staat.isRepo) pasProfielToe(profielTeZetten, profiel)
+    }
+  }
 }
 
 function refreshLocList() {
@@ -11558,6 +12106,11 @@ function renderCmdVisibilitySection() {
   const container = document.getElementById('cmdvis-section')
   if (!container) return
 
+  // Het vinkje volgt dezelfde regel als de knoppenrij zelf: geen keuze
+  // vastgelegd betekent de standaard van die knop, en die is niet voor
+  // iedereen "aan".
+  const aan = (id) => cmdZichtbaar({}, id, pendingCmdVisibility)
+
   const rowHtml = (row, i, sectie, totaal) => {
     const sorteren = cmdvisSorteerModus === sectie
     const wrapOpen = sorteren ? `<div class="cmdvis-sort-item cmd-sort-item" data-cmdvis-index="${i}">${pijlenHtml(i === 0, i === totaal - 1, true)}` : ''
@@ -11565,17 +12118,22 @@ function renderCmdVisibilitySection() {
     if (row.custom) {
       const c = row.custom
       return `${wrapOpen}<label class="cmdvis-row custom">
-      <input type="checkbox" data-cmdvis-id="custom:${esc(c.id)}" ${pendingCmdVisibility['custom:' + c.id] !== false ? 'checked' : ''} />
+      <input type="checkbox" data-cmdvis-id="custom:${esc(c.id)}" ${aan('custom:' + c.id) ? 'checked' : ''} />
       <i class="ti ${esc(c.icon || 'ti-player-play')}"></i>
       <span class="cmdvis-custom-label">${esc(c.label || c.cmd)}</span>
       <span class="cmdvis-custom-cmd mono">${esc(c.cmd)}</span>
       <button class="cmdvis-del" data-del-custom="${esc(c.id)}" title="${esc(I18N.t('cmdvis.removeButtonTitle'))}"><i class="ti ti-x"></i></button>
     </label>${wrapClose}`
     }
+    // "standaard uit" erbij zetten is het halve punt van het mechanisme: zonder
+    // die tekst is een leeg vinkje niet te onderscheiden van iets dat je zelf
+    // ooit hebt uitgezet en vergeten bent.
+    const hint = CMD_STANDAARD_UIT.has(row.id)
+      ? `<span class="cmdvis-standaard-uit">${esc(I18N.t('cmdvis.defaultOff'))}</span>` : ''
     return `${wrapOpen}<label class="cmdvis-row">
-      <input type="checkbox" data-cmdvis-id="${row.id}" ${pendingCmdVisibility[row.id] !== false ? 'checked' : ''} />
+      <input type="checkbox" data-cmdvis-id="${row.id}" ${aan(row.id) ? 'checked' : ''} />
       ${row.kleurCls ? `<span class="prog-kleur-vak ${row.kleurCls}"></span>` : `<i class="ti ${row.icon}"></i>`}
-      ${esc(row.label)}
+      ${esc(row.label)}${hint}
     </label>${wrapClose}`
   }
 

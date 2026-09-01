@@ -553,6 +553,41 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
 .cmd-btn.gitpush:hover { background: rgba(167,139,250,0.12); border-color: #a78bfa; }
 .cmd-btn.gitstash { border-color: rgba(248,113,113,0.4); color: #f87171; }
 .cmd-btn.gitstash:hover { background: rgba(248,113,113,0.12); border-color: #f87171; }
+/* Onder wiens naam commit je. Staat naast de branch-indicator, want dat is waar
+   je kijkt vlak voordat je op commit drukt. Neutraal als het klopt, oranje als
+   het niet klopt, rood als er helemaal geen naam is — dan gaat git weigeren. */
+.git-ident {
+  display: inline-flex; align-items: center; gap: 4px; margin-left: 6px;
+  padding: 1px 7px; border-radius: 10px; font-size: 10.5px;
+  background: var(--s2); border: 1px solid var(--border);
+  color: var(--muted2); vertical-align: middle;
+}
+.git-ident i { font-size: 11px; }
+.git-ident.fout { border-color: rgba(251,191,36,0.45); color: #fbbf24; background: rgba(251,191,36,0.08); }
+.git-ident.mis  { border-color: rgba(248,113,113,0.45); color: #f87171; background: rgba(248,113,113,0.08); }
+
+/* Profielen in de instellingen. Twee regels per profiel: bovenaan wie je bent,
+   eronder waar je mee inlogt — dat zijn twee verschillende dingen en dat mag
+   je aan de indeling zien. */
+.git-profiel-rij {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  padding: 7px 8px; margin-top: 5px;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--s1);
+}
+.git-profiel-rij.onaf { border-color: rgba(251,191,36,0.35); }
+.git-profiel-std { display: flex; align-items: center; }
+.git-profiel-std input { accent-color: var(--accent); width: 14px; height: 14px; cursor: pointer; }
+.git-profiel-tweede {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  flex-basis: 100%; padding-left: 20px;
+}
+.git-profiel-tweede i { font-size: 13px; color: var(--muted2); }
+.git-profiel-onaf { font-size: 10.5px; color: #fbbf24; }
+
+/* Terughalen is het tegenovergestelde van stash en mag daar niet op lijken:
+   groen tegenover rood, en hij staat er alleen als er echt iets ligt. */
+.cmd-btn.gitstashlijst { border-color: rgba(134,239,172,0.4); color: #86efac; }
+.cmd-btn.gitstashlijst:hover { background: rgba(134,239,172,0.12); border-color: #86efac; }
 .cmd-btn.merk-visualstudio, .prog-kleur-vak.merk-visualstudio { }
 .cmd-btn.merk-visualstudio { border-color: rgba(167,139,250,0.35); color: #c4b5fd; }
 .cmd-btn.merk-visualstudio:hover { background: rgba(167,139,250,0.1); border-color: #c4b5fd; }
@@ -889,6 +924,9 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
 }
 .cmdvis-row:hover { border-color: var(--border2); color: var(--text); }
 .cmdvis-row i { font-size: 13px; }
+/* Waarom dit vinkje leeg staat. Zonder deze tekst lijkt een knop die standaard
+   uit staat op een knop die je zelf ooit hebt weggeklikt. */
+.cmdvis-standaard-uit { margin-left: 6px; font-size: 10px; color: var(--muted2); opacity: 0.75; }
 .cmdvis-row input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; cursor: pointer; }
 
 .modal-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }

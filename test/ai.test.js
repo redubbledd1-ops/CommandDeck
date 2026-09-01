@@ -351,7 +351,11 @@ check('zonder systeemprompt blijft het veld weg',
   // niets bewaard om uit te herstellen.
   const herstel = bron.slice(bron.indexOf('async function herstelVerborgenKnoppen'), bron.indexOf('function wisKnopHtml'))
   check('er is een knop om weggehaalde knoppen terug te zetten',
-    /cmdVisibility = \{\}/.test(herstel) && /quickUit: \[\]/.test(herstel))
+    /p\.cmdVisibility = Object\.fromEntries/.test(herstel) && /quickUit: \[\]/.test(herstel))
+  // Sinds knoppen standaard uit kunnen staan is "alles wissen" niet meer goed
+  // genoeg: een knop die je juist expliciet hebt aangezet is geen verborgen
+  // knop, en zou anders verdwijnen bij een handeling die knoppen terugbrengt.
+  check('maar wat je expliciet hebt aangezet blijft staan', /v === true/.test(herstel))
   check('die vraagt eerst en zegt hoeveel er terugkomen',
     /vraagJaNee/.test(herstel) && /count: n/.test(herstel))
   check('en staat alleen bij "alleen hier"',
