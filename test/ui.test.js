@@ -355,6 +355,7 @@ Object.defineProperty(window.navigator, 'clipboard', { value: { writeText: () =>
 window.Element.prototype.scrollIntoView = function (o) { inBeeldGehaald.push(this) }
 window.eval(fs.readFileSync(path.join(APP, 'i18n.js'), 'utf8') + '\nglobalThis.I18N = I18N;')
 window.eval(fs.readFileSync(path.join(APP, 'git-tools.js'), 'utf8'))
+window.eval(fs.readFileSync(path.join(APP, 'accounts.js'), 'utf8'))
 window.eval(fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8'))
 startVraagAutomaat()
 const W = window
@@ -3560,6 +3561,7 @@ function startVraagAutomaat() {
     Object.defineProperty(w.navigator, 'clipboard', { value: { writeText: () => {} }, configurable: true })
     w.eval(fs.readFileSync(path.join(APP, 'i18n.js'), 'utf8') + '\nglobalThis.I18N = I18N;')
     w.eval(fs.readFileSync(path.join(APP, 'git-tools.js'), 'utf8'))
+    w.eval(fs.readFileSync(path.join(APP, 'accounts.js'), 'utf8'))
     w.eval(fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8'))
     w.document.dispatchEvent(new w.Event('DOMContentLoaded'))
     await new Promise(r => setTimeout(r, 0)); await new Promise(r => setTimeout(r, 0))

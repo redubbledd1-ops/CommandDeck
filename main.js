@@ -12,6 +12,7 @@ const { BUILTIN_COMMANDS } = require('./cmd-library')
 const { psCommandLaunch, psWindowLaunch } = require('./ps-launch')
 const { EDITORS } = require('./editor-catalog')
 const GitTools = require('./git-tools')
+const Accounts = require('./accounts')
 const { maakAi } = require('./ai-runtime')
 const { SUPPORTED_LANGUAGES } = require('./locales/languages')
 const { isArchief, isZipArchief, leesZip, pakZipUit,
@@ -90,7 +91,7 @@ function createWindow() {
   // zou het venster onsluitbaar zijn. Vandaar de noodrem.
   win.on('close', (e) => {
     if (afsluitenBevestigd) return
-    if (loadSettings().git.afsluiten === 'uit') return
+    if (actieveInstellingen().git.afsluiten === 'uit') return
     if (!win.webContents || win.webContents.isDestroyed()) return
 
     e.preventDefault()
@@ -165,18 +166,33 @@ const DEFAULT_PROJECTS = [
   },
 ]
 
-function loadProjects() {
+// Elk account heeft zijn eigen projectenlijst. Het eerste account erft
+// projects.json, zodat een bestaande installatie niets kwijtraakt.
+function projectPad(accountId) {
+  const st = accountStand()
+  const naam = Accounts.projectBestand(accountId || st.actiefAccount, st.accounts[0] && st.accounts[0].id)
+  return path.join(app.getPath('userData'), naam)
+}
+
+function loadProjects(accountId) {
+  const bestand = projectPad(accountId)
   try {
-    if (fs.existsSync(DATA_FILE)) {
-      const data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'))
+    if (fs.existsSync(bestand)) {
+      const data = JSON.parse(fs.readFileSync(bestand, 'utf8'))
       if (Array.isArray(data) && data.length > 0) return data
     }
   } catch {}
-  return DEFAULT_PROJECTS
+  // Een nieuw account begint leeg, niet met de voorbeeldprojecten: die horen
+  // bij een verse installatie, niet bij een collega die erbij komt.
+  const st = accountStand()
+  const isEerste = !st.accounts.length || (accountId || st.actiefAccount) === st.accounts[0].id
+  return isEerste ? DEFAULT_PROJECTS : []
 }
-function saveProjects(projects) {
-  fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true })
-  fs.writeFileSync(DATA_FILE, JSON.stringify(projects, null, 2))
+
+function saveProjects(projects, accountId) {
+  const bestand = projectPad(accountId)
+  fs.mkdirSync(path.dirname(bestand), { recursive: true })
+  fs.writeFileSync(bestand, JSON.stringify(projects, null, 2))
 }
 ipcMain.handle('projects:load', () => loadProjects())
 ipcMain.handle('projects:save', (_, p) => { saveProjects(p); return true })
@@ -212,6 +228,10 @@ const DEFAULT_SETTINGS = {
   // profielen: [{ id, label, naam, email, ghGebruiker, inloggen }] — zie
   // "Identiteit en accounts" in git-tools.js
   git: { afsluiten: 'waarschuwen', fetchBijOpenen: true, pollSec: 30, profielen: [], standaardProfiel: '' },
+  // Accounts binnen de app: gescheiden inhoud, geen beveiliging. Zie accounts.js.
+  accounts: [],
+  actiefAccount: '',
+  perAccount: {},
   // Volgorde van de knoppen onder het kopje "opdrachten" in de zijbalk
   navVolgorde: ['cmd', 'ps', 'bat', 'dict'],
   // Map met de broncode; wordt automatisch gevonden, hier alleen onthouden
@@ -379,8 +399,79 @@ function saveSettings(s) {
   fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true })
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(s, null, 2))
 }
-ipcMain.handle('settings:load', () => loadSettings())
-ipcMain.handle('settings:save', (_, s) => { saveSettings(s); return true })
+// ── Accounts ─────────────────────────────────────────────────────────────────
+// De accountlijst en welk account actief is, staan in settings.json. Bij een
+// bestaande installatie is er nog geen lijst; dan maken we er één van wat er
+// al ligt, zodat niemand iets hoeft over te zetten.
+function accountStand() {
+  const s = loadSettings()
+  const st = Accounts.migreer(s)
+  if (st.gemigreerd) {
+    saveSettings({ ...s, accounts: st.accounts, actiefAccount: st.actiefAccount })
+  }
+  return st
+}
+
+// Wat de renderer krijgt: de gedeelde instellingen met de persoonlijke stukken
+// van het actieve account eroverheen. Zo werkt een vers account meteen goed.
+function actieveInstellingen() {
+  const st = accountStand()
+  return Accounts.samengevoegd(loadSettings(), st.actiefAccount)
+}
+
+ipcMain.handle('settings:load', () => actieveInstellingen())
+ipcMain.handle('settings:save', (_, s) => {
+  // De persoonlijke stukken (git) gaan naar het account, de rest is gedeeld.
+  const st = accountStand()
+  const opslaan = Accounts.metAccountInstellingen(s, st.actiefAccount, s)
+  saveSettings(opslaan)
+  return true
+})
+
+ipcMain.handle('accounts:list', () => {
+  const st = accountStand()
+  return { accounts: st.accounts, actief: st.actiefAccount }
+})
+
+ipcMain.handle('accounts:add', (_, { naam, icoon } = {}) => {
+  const st = accountStand()
+  if (!Accounts.naamVrij(st.accounts, naam)) return { ok: false, reden: 'naam-bezet' }
+  const nieuw = Accounts.maakAccount({ naam, icoon })
+  if (!Accounts.accountGeldig(nieuw)) return { ok: false, reden: 'naam-leeg' }
+  const s = loadSettings()
+  saveSettings({ ...s, accounts: [...st.accounts, nieuw], actiefAccount: st.actiefAccount })
+  return { ok: true, account: nieuw }
+})
+
+ipcMain.handle('accounts:rename', (_, { id, naam } = {}) => {
+  const st = accountStand()
+  if (!st.accounts.some(a => a.id === id)) return { ok: false, reden: 'onbekend' }
+  if (!Accounts.naamVrij(st.accounts, naam, id)) return { ok: false, reden: 'naam-bezet' }
+  const s = loadSettings()
+  saveSettings({ ...s, accounts: st.accounts.map(a => a.id === id ? { ...a, naam: Accounts.schoneNaam(naam) } : a) })
+  return { ok: true }
+})
+
+ipcMain.handle('accounts:switch', (_, id) => {
+  const st = accountStand()
+  if (!st.accounts.some(a => a.id === id)) return { ok: false, reden: 'onbekend' }
+  saveSettings({ ...loadSettings(), actiefAccount: id })
+  return { ok: true, projects: loadProjects(id), settings: Accounts.samengevoegd(loadSettings(), id) }
+})
+
+// Verwijderen laat het projectbestand met rust. Dat is bewust: het is de enige
+// plek waar iemands werk staat, en een verkeerd aangeklikt account mag geen
+// projectenlijst kosten. De map opruimen doe je zelf.
+ipcMain.handle('accounts:remove', (_, id) => {
+  const st = accountStand()
+  const na = Accounts.naVerwijderen(st.accounts, st.actiefAccount, id)
+  if (!na) return { ok: false, reden: 'laatste' }
+  const s = loadSettings()
+  const perAccount = { ...(s.perAccount || {}) }
+  delete perAccount[id]
+  saveSettings({ ...s, accounts: na.accounts, actiefAccount: na.actiefAccount, perAccount })
+  return { ok: true, actief: na.actiefAccount, bestand: path.basename(projectPad(id)) }
+})
 
 // ── Geschiedenis & commando-woordenboek ───────────────────────────────────────
 // Twee lijsten in één bestand:
@@ -1043,7 +1134,7 @@ const STASH_MELDING_FILE = path.join(app.getPath('userData'), 'git-stash-melding
 
 app.on('session-end', () => {
   try {
-    if (loadSettings().git.afsluiten !== 'stashen') return
+    if (actieveInstellingen().git.afsluiten !== 'stashen') return
 
     const teStashen = GitTools.teStashenProjecten(gitProjectenVoorAfsluiten, 'stashen')
     if (!teStashen.length) return

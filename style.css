@@ -390,6 +390,16 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
 .proj-header-icon { font-size: 22px; line-height: 1; }
 .proj-header-name { font-size: 16px; font-weight: 600; color: var(--text); }
 
+/* ── Accounts in de instellingen ─────────────────────────────────────────── */
+.account-rij.actief .editor-row-name { color: var(--accent); font-weight: 500; }
+/* De eerlijkheidsregel mag niet wegvallen tussen de rest: wie hier accounts
+   aanmaakt denkt al snel dat het ook afschermt, en dat doet het niet. */
+.account-eerlijk {
+  display: block; line-height: 1.5; color: var(--amber);
+  background: var(--amber-d); border: 1px solid rgba(251,191,36,0.25);
+  border-radius: var(--radius); padding: 7px 9px;
+}
+
 /* ── Git-indicator in de projectkop ──────────────────────────────────────── */
 /* Rustig grijs zolang alles ergens anders ook staat. Zodra er werk is dat
    alleen op deze pc bestaat, kleurt de hele indicator op — dat is het signaal

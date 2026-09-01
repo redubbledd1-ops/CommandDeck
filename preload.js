@@ -45,6 +45,12 @@ contextBridge.exposeInMainWorld('api', {
   gitFetch:      (p)     => ipcRenderer.invoke('git:fetch', p),
   gitProjecten:  (l)     => ipcRenderer.send('git:projecten', l),
   gitStashMelding:()     => ipcRenderer.invoke('git:stashMelding'),
+  accountsList:  ()      => ipcRenderer.invoke('accounts:list'),
+  accountAdd:    (o)     => ipcRenderer.invoke('accounts:add', o),
+  accountRename: (o)     => ipcRenderer.invoke('accounts:rename', o),
+  accountSwitch: (id)    => ipcRenderer.invoke('accounts:switch', id),
+  accountRemove: (id)    => ipcRenderer.invoke('accounts:remove', id),
+
   gitBranches:   (p)     => ipcRenderer.invoke('git:branches', p),
   gitStashLijst: (p)     => ipcRenderer.invoke('git:stashLijst', p),
   gitStashInhoud:(p, r)  => ipcRenderer.invoke('git:stashInhoud', p, r),

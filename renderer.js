@@ -775,6 +775,10 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
   if (!history || !Array.isArray(history.recent)) history = { entries: [], recent: [] }
 
+  // Accounts ophalen vóór de rest: welk account actief is bepaalt welke
+  // projecten en git-instellingen je ziet.
+  await laadAccounts()
+
   if (migreerStandaardEditors() || ontdubbelCustomEditors() || normaliseerEditorKleuren()) window.api.saveSettings(settings)
 
   await I18N.init(settings.language)
@@ -833,6 +837,10 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   // Het main-proces houdt het sluiten tegen en vraagt ons na te kijken.
   try { window.api.opAfsluitControle(() => controleerVoorAfsluiten()) } catch {}
+
+  // Zijn er meerdere accounts, dan eerst vragen wie er achter de pc zit. Bij
+  // één account is er niets te kiezen en vragen we dus ook niets.
+  setTimeout(() => kiesAccountBijStart(), 300)
   setTimeout(() => toonStashMeldingBijStart(), 2000)
 
   document.addEventListener('keydown', (e) => {
@@ -7198,6 +7206,79 @@ function saveAddBtnModal() {
 }
 
 // ── Settings panel ────────────────────────────────────────────────────────────
+// ── Accounts ─────────────────────────────────────────────────────────────────
+// Gescheiden inhoud, geen beveiliging — zie de uitleg in accounts.js en de
+// tekst die onder het blok in de instellingen staat.
+let accounts = []
+let actiefAccount = ''
+
+async function laadAccounts() {
+  try {
+    const r = await window.api.accountsList()
+    accounts = (r && r.accounts) || []
+    actiefAccount = (r && r.actief) || ''
+  } catch { accounts = []; actiefAccount = '' }
+}
+
+const huidigAccount = () => accounts.find(a => a.id === actiefAccount) || null
+
+// Wisselen betekent: andere projecten, andere git-instellingen. Alles wat aan
+// het vorige account hing moet dus weg, anders zie je even de projectenlijst
+// van iemand anders of blijft een git-toestand van een ander pad hangen.
+async function wisselAccount(id) {
+  if (!id || id === actiefAccount) return
+  const r = await window.api.accountSwitch(id)
+  if (!r || !r.ok) return
+
+  actiefAccount = id
+  projects = r.projects || []
+  settings = r.settings || settings
+  gitStaten = {}
+  activeId = projects[0] ? projects[0].id : ''
+  setView(projects.length ? 'project' : 'cmd')
+  renderSidebar()
+  renderMain()
+  await ververesAlleGitStaten(true)
+  startGitPolling()
+  showToast(I18N.t('accounts.gewisseld', { naam: (huidigAccount() || {}).naam || '' }))
+}
+
+// Bij het opstarten vragen wie er achter de pc zit. Alleen als er iets te
+// kiezen valt — bij één account is dit een venster dat niets toevoegt.
+async function kiesAccountBijStart() {
+  if (accounts.length < 2) return
+
+  const tonen = accounts.slice(0, 8)
+  const knoppen = []
+  // column-reverse: achterste eerst, dus het huidige account bovenaan.
+  for (let i = tonen.length - 1; i >= 0; i--) {
+    const a = tonen[i]
+    knoppen.push({
+      label: `${a.icoon || '👤'} ${a.naam}`,
+      waarde: a.id,
+      soort: a.id === actiefAccount ? 'primair' : '',
+    })
+  }
+  const id = await vraagKeuze({
+    titel: I18N.t('accounts.kiesTitel'),
+    tekst: I18N.t('accounts.kiesTekst'),
+    knoppen,
+  })
+  if (id) await wisselAccount(id)
+}
+
+function accountRijenHtml() {
+  return accounts.map(a => `
+    <div class="instel-rij account-rij ${a.id === actiefAccount ? 'actief' : ''}" data-account="${esc(a.id)}">
+      <div class="editor-row-name">${esc(a.icoon || '👤')} ${esc(a.naam)}</div>
+      ${a.id === actiefAccount
+        ? `<span class="instel-uitleg">${esc(I18N.t('accounts.ditBenJij'))}</span>`
+        : `<button class="term-btn" data-account-kies="${esc(a.id)}">${esc(I18N.t('accounts.wisselen'))}</button>`}
+      <button class="term-btn" data-account-hernoem="${esc(a.id)}" title="${esc(I18N.t('accounts.hernoemen'))}"><i class="ti ti-pencil" style="font-size:13px"></i></button>
+      ${accounts.length > 1 ? `<button class="term-btn" data-account-weg="${esc(a.id)}" title="${esc(I18N.t('accounts.verwijderen'))}"><i class="ti ti-trash" style="font-size:13px"></i></button>` : ''}
+    </div>`).join('')
+}
+
 function gitAfsluitWijze() {
   return GitTools.afsluitInstelling((settings.git || {}).afsluiten)
 }
@@ -7227,6 +7308,57 @@ function renderSettingsPanel() {
       <span class="settings-header-title">${I18N.t('sidebar.settingsTitle')}</span>
     </div>
     <div class="settings-body">
+      <div>
+        <div class="settings-section-title">${I18N.t('settings.section.accountsTitle')}</div>
+        ${accountRijenHtml()}
+        <div class="instel-rij">
+          <button class="add-proj-btn" id="btn-account-add" style="margin:0">
+            <i class="ti ti-plus"></i> ${I18N.t('accounts.toevoegen')}
+          </button>
+          <span class="instel-uitleg">${I18N.t('accounts.uitleg')}</span>
+        </div>
+        <div class="instel-rij">
+          <span class="instel-uitleg account-eerlijk">${I18N.t('accounts.eerlijk')}</span>
+        </div>
+      </div>
+      <div>
+        <div class="settings-section-title">${I18N.t('settings.section.gitTitle')}</div>
+        <div class="instel-rij">
+          <div class="editor-row-name"><i class="ti ti-git-branch"></i> ${I18N.t('settings.git.label')}</div>
+          <select class="loc-select" id="set-git-afsluiten">
+            <option value="uit" ${gitAfsluitWijze() === 'uit' ? 'selected' : ''}>${I18N.t('settings.git.off')}</option>
+            <option value="waarschuwen" ${gitAfsluitWijze() === 'waarschuwen' ? 'selected' : ''}>${I18N.t('settings.git.warn')}</option>
+            <option value="stashen" ${gitAfsluitWijze() === 'stashen' ? 'selected' : ''}>${I18N.t('settings.git.stash')}</option>
+          </select>
+          <span class="instel-uitleg">${I18N.t('settings.git.desc')}</span>
+        </div>
+        <div class="instel-rij">
+          <label class="bat-opt">
+            <input type="checkbox" id="set-git-fetch" ${(settings.git || {}).fetchBijOpenen !== false ? 'checked' : ''} />
+            ${I18N.t('settings.git.fetchLabel')}
+          </label>
+          <span class="instel-uitleg">${I18N.t('settings.git.fetchDesc')}</span>
+        </div>
+        <div class="instel-rij">
+          <div class="editor-row-name"><i class="ti ti-refresh"></i> ${I18N.t('settings.git.pollLabel')}</div>
+          <select class="loc-select" id="set-git-poll">
+            ${[0, 15, 30, 60, 300].map(sec => `
+              <option value="${sec}" ${gitPollSec() === sec ? 'selected' : ''}>
+                ${sec === 0 ? esc(I18N.t('settings.git.pollUit')) : esc(I18N.t('settings.git.pollSec', { sec }))}
+              </option>`).join('')}
+          </select>
+          <span class="instel-uitleg">${I18N.t('settings.git.pollDesc')}</span>
+        </div>
+        <div class="instel-rij">
+          <div class="editor-row-name"><i class="ti ti-user-circle"></i> ${I18N.t('settings.git.profielLabel')}</div>
+          <span class="instel-uitleg">${I18N.t('settings.git.profielDesc')}</span>
+          <div id="git-profiel-lijst"></div>
+          <button class="add-proj-btn" id="btn-add-git-profiel" style="margin:0;margin-top:4px">
+            <i class="ti ti-plus"></i> ${I18N.t('settings.git.profielAdd')}
+          </button>
+          <span class="instel-uitleg">${I18N.t('settings.git.inlogEerlijk')}</span>
+        </div>
+      </div>
       <div>
         <div class="settings-section-title">${I18N.t('settings.section.autofixTitle')}</div>
         <div class="editor-row enabled" id="autofix-row">
@@ -7289,44 +7421,6 @@ function renderSettingsPanel() {
         <button class="add-proj-btn" id="btn-add-custom-editor" style="margin:0;margin-top:4px">
           <i class="ti ti-plus"></i> ${I18N.t('settings.customEditors.addButton')}
         </button>
-      </div>
-      <div>
-        <div class="settings-section-title">${I18N.t('settings.section.gitTitle')}</div>
-        <div class="instel-rij">
-          <div class="editor-row-name"><i class="ti ti-git-branch"></i> ${I18N.t('settings.git.label')}</div>
-          <select class="loc-select" id="set-git-afsluiten">
-            <option value="uit" ${gitAfsluitWijze() === 'uit' ? 'selected' : ''}>${I18N.t('settings.git.off')}</option>
-            <option value="waarschuwen" ${gitAfsluitWijze() === 'waarschuwen' ? 'selected' : ''}>${I18N.t('settings.git.warn')}</option>
-            <option value="stashen" ${gitAfsluitWijze() === 'stashen' ? 'selected' : ''}>${I18N.t('settings.git.stash')}</option>
-          </select>
-          <span class="instel-uitleg">${I18N.t('settings.git.desc')}</span>
-        </div>
-        <div class="instel-rij">
-          <label class="bat-opt">
-            <input type="checkbox" id="set-git-fetch" ${(settings.git || {}).fetchBijOpenen !== false ? 'checked' : ''} />
-            ${I18N.t('settings.git.fetchLabel')}
-          </label>
-          <span class="instel-uitleg">${I18N.t('settings.git.fetchDesc')}</span>
-        </div>
-        <div class="instel-rij">
-          <div class="editor-row-name"><i class="ti ti-refresh"></i> ${I18N.t('settings.git.pollLabel')}</div>
-          <select class="loc-select" id="set-git-poll">
-            ${[0, 15, 30, 60, 300].map(sec => `
-              <option value="${sec}" ${gitPollSec() === sec ? 'selected' : ''}>
-                ${sec === 0 ? esc(I18N.t('settings.git.pollUit')) : esc(I18N.t('settings.git.pollSec', { sec }))}
-              </option>`).join('')}
-          </select>
-          <span class="instel-uitleg">${I18N.t('settings.git.pollDesc')}</span>
-        </div>
-        <div class="instel-rij">
-          <div class="editor-row-name"><i class="ti ti-user-circle"></i> ${I18N.t('settings.git.profielLabel')}</div>
-          <span class="instel-uitleg">${I18N.t('settings.git.profielDesc')}</span>
-          <div id="git-profiel-lijst"></div>
-          <button class="add-proj-btn" id="btn-add-git-profiel" style="margin:0;margin-top:4px">
-            <i class="ti ti-plus"></i> ${I18N.t('settings.git.profielAdd')}
-          </button>
-          <span class="instel-uitleg">${I18N.t('settings.git.inlogEerlijk')}</span>
-        </div>
       </div>
       <div>
         <div class="settings-section-title">${I18N.t('settings.section.deleteTitle')}</div>
@@ -7400,6 +7494,53 @@ function renderSettingsPanel() {
   if (gitKeuze) gitKeuze.onchange = () => {
     settings.git = { ...(settings.git || {}), afsluiten: gitKeuze.value }
     window.api.saveSettings(settings)
+  }
+
+  panel.querySelectorAll('[data-account-kies]').forEach(btn => {
+    btn.onclick = () => wisselAccount(btn.dataset.accountKies)
+  })
+  panel.querySelectorAll('[data-account-hernoem]').forEach(btn => {
+    btn.onclick = async () => {
+      const a = accounts.find(x => x.id === btn.dataset.accountHernoem)
+      if (!a) return
+      const naam = await vraagTekst({
+        titel: I18N.t('accounts.hernoemen'), waarde: a.naam,
+        okLabel: I18N.t('common.save'),
+      })
+      if (!naam) return
+      const r = await window.api.accountRename({ id: a.id, naam })
+      if (!r || !r.ok) { await meldKort(I18N.t('accounts.hernoemen'), I18N.t('accounts.naamBezet')); return }
+      await laadAccounts(); renderSettingsPanel()
+    }
+  })
+  panel.querySelectorAll('[data-account-weg]').forEach(btn => {
+    btn.onclick = async () => {
+      const a = accounts.find(x => x.id === btn.dataset.accountWeg)
+      if (!a) return
+      const ja = await vraagJaNee(I18N.t('accounts.verwijderen'),
+        I18N.t('accounts.verwijderTekst', { naam: a.naam }),
+        I18N.t('accounts.verwijderen'), 'gevaar')
+      if (!ja) return
+      const r = await window.api.accountRemove(a.id)
+      if (!r || !r.ok) { await meldKort(I18N.t('accounts.verwijderen'), I18N.t('accounts.laatsteAccount')); return }
+      // Het projectbestand blijft staan; dat zeggen we er ook bij.
+      await meldKort(I18N.t('accounts.verwijderd'), I18N.t('accounts.bestandBlijft', { bestand: r.bestand || '' }))
+      const wasActief = a.id === actiefAccount
+      await laadAccounts()
+      if (wasActief) await wisselAccount(r.actief)
+      renderSettingsPanel()
+    }
+  })
+  const accountAdd = document.getElementById('btn-account-add')
+  if (accountAdd) accountAdd.onclick = async () => {
+    const naam = await vraagTekst({
+      titel: I18N.t('accounts.toevoegen'), tekst: I18N.t('accounts.toevoegenTekst'),
+      placeholder: I18N.t('accounts.naamPlaceholder'), okLabel: I18N.t('common.add'),
+    })
+    if (!naam) return
+    const r = await window.api.accountAdd({ naam })
+    if (!r || !r.ok) { await meldKort(I18N.t('accounts.toevoegen'), I18N.t('accounts.naamBezet')); return }
+    await laadAccounts(); renderSettingsPanel()
   }
 
   const gitPoll = document.getElementById('set-git-poll')
