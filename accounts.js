@@ -33,11 +33,52 @@
     return String(naam || '').replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, MAX_NAAM)
   }
 
-  function maakAccount({ id = '', naam = '', icoon = '👤' } = {}, nu = Date.now(), toeval = Math.random()) {
+  // Het account is de git-identiteit. Niet een account mét ergens een profiel
+  // ernaast dat je kunt vergeten in te vullen: wie je bent in de app en wie je
+  // bent in git zijn dezelfde persoon, dus dat is één ding.
+  function maakAccount({ id = '', naam = '', icoon = '👤',
+                         gitNaam = '', gitEmail = '', ghGebruiker = '' } = {},
+                       nu = Date.now(), toeval = Math.random()) {
     return {
       id: geldigAccountId(id) ? id : nieuwAccountId(nu, toeval),
       naam: schoneNaam(naam) || 'Account',
       icoon: String(icoon || '👤').slice(0, 4),
+      gitNaam: schoneNaam(gitNaam),
+      gitEmail: String(gitEmail || '').trim().slice(0, 120),
+      ghGebruiker: String(ghGebruiker || '').trim().slice(0, 40),
+    }
+  }
+
+  // Hetzelfde account, in de vorm die git-tools verwacht. De id is die van het
+  // account: zo is er geen apart profiel-id dat uit de pas kan gaan lopen.
+  function accountProfiel(account) {
+    if (!account) return null
+    return {
+      id: account.id,
+      label: account.naam,
+      naam: account.gitNaam || '',
+      email: account.gitEmail || '',
+      ghGebruiker: account.ghGebruiker || '',
+      inloggen: account.inloggen || 'onthouden',
+    }
+  }
+
+  // Is de git-kant van dit account ingevuld? Zonder naam en adres weigert git
+  // te committen, dus dit is de vraag die vóór de eerste commit gesteld hoort
+  // te worden en niet erna.
+  const gitCompleet = (account) =>
+    !!(account && String(account.gitNaam || '').trim() && String(account.gitEmail || '').trim())
+
+  // Bestaande installatie: de git-gegevens stonden in een losse profielenlijst.
+  // Die halen we eenmalig naar het account toe, zodat niemand iets opnieuw hoeft
+  // in te vullen.
+  function neemProfielOver(account, profiel) {
+    if (!account || gitCompleet(account) || !profiel) return account
+    return {
+      ...account,
+      gitNaam: schoneNaam(profiel.naam || ''),
+      gitEmail: String(profiel.email || '').trim(),
+      ghGebruiker: String(profiel.ghGebruiker || '').trim(),
     }
   }
 
@@ -197,6 +238,7 @@
   return {
     MAX_NAAM, PERSOONLIJK,
     nieuwAccountId, geldigAccountId, schoneNaam, maakAccount, accountGeldig, naamVrij,
+    accountProfiel, gitCompleet, neemProfielOver,
     projectBestand, migreer, accountInstellingen, samengevoegd, metAccountInstellingen,
     normaliseerPad, padHoortBij,
     PIN_MIN, PIN_MAX, geldigePin, pinNodig, heeftPin, accountsZonderPin, cijferUitToets,

@@ -52,6 +52,7 @@ contextBridge.exposeInMainWorld('api', {
   accountsList:  ()      => ipcRenderer.invoke('accounts:list'),
   accountAdd:    (o)     => ipcRenderer.invoke('accounts:add', o),
   accountRename: (o)     => ipcRenderer.invoke('accounts:rename', o),
+  accountSetGit: (o)     => ipcRenderer.invoke('accounts:setGit', o),
   accountSwitch: (o)     => ipcRenderer.invoke('accounts:switch', o),
   accountSetPin: (o)     => ipcRenderer.invoke('accounts:setPin', o),
   accountCheck:  (o)     => ipcRenderer.invoke('accounts:check', o),

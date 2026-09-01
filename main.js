@@ -406,10 +406,22 @@ function saveSettings(s) {
 function accountStand() {
   const s = loadSettings()
   const st = Accounts.migreer(s)
-  if (st.gemigreerd) {
-    saveSettings({ ...s, accounts: st.accounts, actiefAccount: st.actiefAccount })
+
+  // De git-gegevens stonden vroeger in een losse profielenlijst naast het
+  // account. Die halen we eenmalig naar binnen: het account ís de identiteit,
+  // en niemand hoeft iets opnieuw in te vullen.
+  const metGit = st.accounts.map(a => {
+    if (Accounts.gitCompleet(a)) return a
+    const eigen = Accounts.samengevoegd(s, a.id).git || {}
+    const lijst = Array.isArray(eigen.profielen) ? eigen.profielen : []
+    const std = lijst.find(p => p && p.id === eigen.standaardProfiel) || lijst[0] || null
+    return Accounts.neemProfielOver(a, std)
+  })
+  const veranderd = st.gemigreerd || metGit.some((a, i) => a !== st.accounts[i])
+  if (veranderd) {
+    saveSettings({ ...s, accounts: metGit, actiefAccount: st.actiefAccount })
   }
-  return st
+  return { ...st, accounts: metGit }
 }
 
 // Wat de renderer krijgt: de gedeelde instellingen met de persoonlijke stukken
@@ -454,7 +466,11 @@ function pinKlopt(account, pin) {
 
 // De renderer krijgt de accounts nooit mét hash en salt: die hoeven daar niet
 // te zijn, en wat er niet is kan ook niet per ongeluk in beeld komen.
-const zonderGeheim = (a) => ({ id: a.id, naam: a.naam, icoon: a.icoon, heeftPin: Accounts.heeftPin(a) })
+const zonderGeheim = (a) => ({
+  id: a.id, naam: a.naam, icoon: a.icoon, heeftPin: Accounts.heeftPin(a),
+  gitNaam: a.gitNaam || '', gitEmail: a.gitEmail || '', ghGebruiker: a.ghGebruiker || '',
+  gitCompleet: Accounts.gitCompleet(a),
+})
 
 ipcMain.handle('accounts:list', () => {
   const st = accountStand()
@@ -484,18 +500,31 @@ ipcMain.handle('accounts:check', (_, { id, pin } = {}) => {
   return { ok: pinKlopt(a, pin) }
 })
 
-ipcMain.handle('accounts:add', (_, { naam, icoon, pin } = {}) => {
+ipcMain.handle('accounts:add', (_, { naam, icoon, pin, gitNaam, gitEmail, ghGebruiker } = {}) => {
   const st = accountStand()
   if (!Accounts.naamVrij(st.accounts, naam)) return { ok: false, reden: 'naam-bezet' }
   // Aanmaken kan alleen mét pincode. Achteraf toevoegen zou betekenen dat er
   // een account bestaat waar iedereen zo in kan, precies zolang niemand eraan
   // denkt hem te zetten.
   if (!Accounts.geldigePin(pin)) return { ok: false, reden: 'pin-ongeldig' }
-  const nieuw = { ...Accounts.maakAccount({ naam, icoon }), pin: maakPin(pin) }
+  const nieuw = { ...Accounts.maakAccount({ naam, icoon, gitNaam, gitEmail, ghGebruiker }), pin: maakPin(pin) }
   if (!Accounts.accountGeldig(nieuw)) return { ok: false, reden: 'naam-leeg' }
   const s = loadSettings()
   saveSettings({ ...s, accounts: [...st.accounts, nieuw], actiefAccount: st.actiefAccount })
   return { ok: true, account: zonderGeheim(nieuw) }
+})
+
+ipcMain.handle('accounts:setGit', (_, { id, gitNaam, gitEmail, ghGebruiker } = {}) => {
+  const st = accountStand()
+  if (!st.accounts.some(a => a.id === id)) return { ok: false, reden: 'onbekend' }
+  const s = loadSettings()
+  saveSettings({
+    ...s,
+    accounts: st.accounts.map(a => a.id === id
+      ? { ...a, ...Accounts.maakAccount({ ...a, gitNaam, gitEmail, ghGebruiker }) , pin: a.pin }
+      : a),
+  })
+  return { ok: true }
 })
 
 ipcMain.handle('accounts:rename', (_, { id, naam } = {}) => {

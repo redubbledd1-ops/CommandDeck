@@ -124,13 +124,23 @@ function cmdStandaardAan(id) {
 // ── Git-profielen ─────────────────────────────────────────────────────────────
 // Wie ben je in de commit, en welk GitHub-account hoort daarbij. Zie de uitleg
 // bij "Identiteit en accounts" in git-tools.js voor waarom dat twee dingen zijn.
+// Het account ís de identiteit. Het staat vooraan in de lijst en is altijd de
+// standaard — je kunt dus niet in de situatie komen dat je een account hebt
+// maar vergeten bent er een profiel bij te kiezen.
+//
+// De rest van de lijst blijft bestaan voor het geval één project onder een
+// andere naam moet (een klantproject, een repo van een vereniging). Dat is een
+// uitzondering per project en geen tweede jij.
 function gitProfielen() {
-  const lijst = ((settings.git || {}).profielen) || []
-  return Array.isArray(lijst) ? lijst : []
+  const extra = ((settings.git || {}).profielen) || []
+  const eigen = Accounts.accountProfiel(huidigAccount())
+  const rest = (Array.isArray(extra) ? extra : []).filter(p => p && p.id !== (eigen && eigen.id))
+  return eigen ? [eigen, ...rest] : rest
 }
 
+// Altijd het account: er is geen losse keuze meer die uit de pas kan lopen.
 function gitStandaardProfielId() {
-  return String((settings.git || {}).standaardProfiel || '')
+  return actiefAccount || String((settings.git || {}).standaardProfiel || '')
 }
 
 // Welk profiel hoort bij dit project? Zonder profielen is dat er geen, en dan
@@ -7283,6 +7293,42 @@ async function vraagBestaandePin(account) {
 // Inloggen bij GitHub zonder de omweg via cmd. `gh auth login --web` opent je
 // browser en toont een code; er gaat nooit een wachtwoord door deze app heen,
 // en er komt geen token in beeld dat iemand kan meelezen.
+// Naam, adres en GitHub-account: de drie dingen die bepalen onder wiens naam
+// je commit en met wiens account je pusht. In één keer vragen, want los van
+// elkaar zijn ze onaf.
+async function vraagGitIdentiteit(accountNaam, huidig) {
+  const naam = await vraagTekst({
+    titel: I18N.t('accounts.gitTitel', { naam: accountNaam }),
+    tekst: I18N.t('accounts.gitNaamTekst'),
+    waarde: huidig.gitNaam || accountNaam || '',
+    placeholder: 'jouw naam',
+    okLabel: I18N.t('common.next'),
+  })
+  if (naam === null || !naam) return null
+
+  const email = await vraagTekst({
+    titel: I18N.t('accounts.gitTitel', { naam: accountNaam }),
+    tekst: I18N.t('accounts.gitEmailTekst'),
+    waarde: huidig.gitEmail || '',
+    placeholder: 'jij@voorbeeld.nl',
+    okLabel: I18N.t('common.next'),
+  })
+  if (email === null || !email) return null
+
+  // Het GitHub-account mag leeg blijven: niet iedereen pusht ergens heen, en
+  // dan is een verplicht veld alleen maar in de weg.
+  const gh = await vraagTekst({
+    titel: I18N.t('accounts.gitTitel', { naam: accountNaam }),
+    tekst: I18N.t('accounts.gitGhTekst'),
+    waarde: huidig.ghGebruiker || '',
+    placeholder: 'gebruikersnaam (mag leeg)',
+    okLabel: I18N.t('common.save'),
+  })
+  if (gh === null) return null
+
+  return { gitNaam: naam, gitEmail: email, ghGebruiker: gh }
+}
+
 async function githubInloggen() {
   const gh = await window.api.gitGh()
   if (!gh) {
@@ -7337,9 +7383,7 @@ async function activeerGitVoorAccount() {
 // Het profiel dat bij dit app-account hoort. De profielenlijst staat al per
 // account, dus dit is simpelweg het standaardprofiel van wie er nu werkt.
 function gitStandaardProfiel() {
-  const lijst = ((settings.git || {}).profielen) || []
-  const id = gitStandaardProfielId()
-  return lijst.find(p => p.id === id) || lijst[0] || null
+  return Accounts.accountProfiel(huidigAccount())
 }
 
 async function laadAccounts() {
@@ -7430,10 +7474,19 @@ async function kiesAccountBijStart() {
   await wisselAccount(id)
 }
 
+function accountGitRegel(a) {
+  if (!a.gitCompleet) return `<span class="account-git onaf">${esc(I18N.t('accounts.gitOnaf'))}</span>`
+  const gh = a.ghGebruiker ? `  ·  ${esc(a.ghGebruiker)}` : ''
+  return `<span class="account-git"><i class="ti ti-git-commit"></i> ${esc(a.gitNaam)} &lt;${esc(a.gitEmail)}&gt;${gh}</span>`
+}
+
 function accountRijenHtml() {
   return accounts.map(a => `
     <div class="instel-rij account-rij ${a.id === actiefAccount ? 'actief' : ''}" data-account="${esc(a.id)}">
       <div class="editor-row-name">${esc(a.icoon || '👤')} ${esc(a.naam)}</div>
+      ${accountGitRegel(a)}
+      <button class="term-btn ${a.gitCompleet ? '' : 'btn-danger'}" data-account-git="${esc(a.id)}"
+        title="${esc(I18N.t('accounts.gitBewerken'))}"><i class="ti ti-git-commit" style="font-size:13px"></i></button>
       ${a.id === actiefAccount
         ? `<span class="instel-uitleg">${esc(I18N.t('accounts.ditBenJij'))}</span>`
         : `<button class="term-btn" data-account-kies="${esc(a.id)}">${esc(I18N.t('accounts.wisselen'))}</button>`}
@@ -7720,10 +7773,15 @@ function renderSettingsPanel() {
     })
     if (!naam) return
 
+    // Meteen de git-kant erbij: dit account ís straks de naam onder de commits,
+    // en achteraf invullen is precies hoe je met de verkeerde naam commit.
+    const git = await vraagGitIdentiteit(naam, {})
+    if (!git) return
+
     const pin = await vraagNieuwePin(I18N.t('accounts.pinVoorTitel', { naam }))
     if (pin === null) return
 
-    const r = await window.api.accountAdd({ naam, pin })
+    const r = await window.api.accountAdd({ naam, pin, ...git })
     if (!r || !r.ok) {
       await meldKort(I18N.t('accounts.toevoegen'),
         I18N.t(r && r.reden === 'pin-ongeldig' ? 'accounts.pinOngeldig' : 'accounts.naamBezet'))
@@ -7731,6 +7789,20 @@ function renderSettingsPanel() {
     }
     await laadAccounts(); renderSettingsPanel()
   }
+
+  panel.querySelectorAll('[data-account-git]').forEach(btn => {
+    btn.onclick = async () => {
+      const a = accounts.find(x => x.id === btn.dataset.accountGit)
+      if (!a) return
+      const git = await vraagGitIdentiteit(a.naam, a)
+      if (!git) return
+      const r = await window.api.accountSetGit({ id: a.id, ...git })
+      if (!r || !r.ok) return
+      await laadAccounts()
+      if (a.id === actiefAccount) await activeerGitVoorAccount()
+      renderSettingsPanel()
+    }
+  })
 
   panel.querySelectorAll('[data-account-pin]').forEach(btn => {
     btn.onclick = async () => {

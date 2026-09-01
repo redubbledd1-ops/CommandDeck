@@ -995,7 +995,7 @@
   "settings.git.pollUit": "not automatically",
   "settings.git.pollDesc": "How often the indicator in the project header is updated. Pauses while the window is hidden. Off means: only after a git action or when switching location.",
   "settings.section.accountsTitle": "Accounts",
-  "accounts.uitleg": "Each account has its own project list and git settings.",
+  "accounts.uitleg": "An account is also your git identity: the name on your commits and the GitHub account you push with. Switch account and git switches along.",
   "accounts.eerlijk": "Note: this separates content, it does not secure anything. Everything lives in your Windows user folder, so anyone on this Windows login can reach every account. If you really need separation, give everyone their own Windows account.",
   "accounts.toevoegen": "add account",
   "accounts.toevoegenTekst": "What is the name of the person who will use this account?",
@@ -1035,5 +1035,11 @@
   "git.inlog.geenProject": "There is no project to run this in yet. Add one first.",
   "git.inlog.klaarTitel": "GitHub accounts on this pc",
   "git.inlog.klaarTekst": "These accounts are ready now: {namen}. Set the right one on your git profile and it will switch along when you change account.",
-  "accounts.ghWisselMislukt": "Could not switch to GitHub account {naam}. Your name is set correctly, but check who you are pushing as."
+  "accounts.ghWisselMislukt": "Could not switch to GitHub account {naam}. Your name is set correctly, but check who you are pushing as.",
+  "accounts.gitTitel": "Git identity for {naam}",
+  "accounts.gitNaamTekst": "What name should your commits carry? This is what others see in the history.",
+  "accounts.gitEmailTekst": "Which email address goes with it? GitHub links your commits to this.",
+  "accounts.gitGhTekst": "Your GitHub username, if you have one. That tells git which account to push with when several are on this pc. Leaving it empty is fine.",
+  "accounts.gitOnaf": "git identity not filled in yet",
+  "accounts.gitBewerken": "edit git identity"
 }

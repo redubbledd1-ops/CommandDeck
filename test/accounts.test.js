@@ -132,6 +132,40 @@ t('letters doen niets', A.cijferUitToets('KeyA', 'a') === '')
 t('de punt op het numerieke blok ook niet', A.cijferUitToets('NumpadDecimal', 'Delete') === '')
 t('niets in, niets uit', A.cijferUitToets('', '') === '' && A.cijferUitToets(null, null) === '')
 
+// ── het account ís de git-identiteit ─────────────────────────────────────────
+// Geen account mét ergens een profiel ernaast dat je kunt vergeten: wie je in
+// de app bent en wie je in git bent, is dezelfde persoon.
+const metGit = A.maakAccount({ naam: 'Redub', gitNaam: 'redub',
+  gitEmail: 'redubbledd@hotmail.nl', ghGebruiker: 'redubbledd1-ops' })
+
+t('de git-gegevens staan op het account zelf',
+  metGit.gitNaam === 'redub' && metGit.gitEmail === 'redubbledd@hotmail.nl')
+t('een vers account heeft ze nog niet', A.maakAccount({ naam: 'X' }).gitNaam === '')
+
+const prof = A.accountProfiel(metGit)
+t('het profiel krijgt de id van het account — geen tweede id dat kan afwijken',
+  prof.id === metGit.id)
+t('naam en adres komen mee', prof.naam === 'redub' && prof.email === 'redubbledd@hotmail.nl')
+t('het GitHub-account ook', prof.ghGebruiker === 'redubbledd1-ops')
+t('zonder account geen profiel', A.accountProfiel(null) === null)
+
+t('compleet zodra naam en adres er staan', A.gitCompleet(metGit) === true)
+t('zonder adres niet', A.gitCompleet({ ...metGit, gitEmail: '' }) === false)
+t('zonder naam ook niet', A.gitCompleet({ ...metGit, gitNaam: '' }) === false)
+t('spaties tellen niet als ingevuld', A.gitCompleet({ gitNaam: ' ', gitEmail: ' ' }) === false)
+
+// Bestaande installatie: de gegevens stonden in een losse profielenlijst.
+const leegAcc = A.maakAccount({ naam: 'Collega' })
+const overgenomen = A.neemProfielOver(leegAcc, { naam: 'jan', email: 'j@x.nl', ghGebruiker: 'jan-dev' })
+t('een leeg account neemt het oude profiel over', overgenomen.gitNaam === 'jan')
+t('met adres en GitHub-account erbij',
+  overgenomen.gitEmail === 'j@x.nl' && overgenomen.ghGebruiker === 'jan-dev')
+t('een account dat het al heeft, blijft ongemoeid',
+  A.neemProfielOver(metGit, { naam: 'iemand-anders', email: 'x@x.nl' }).gitNaam === 'redub')
+t('zonder oud profiel verandert er niets',
+  A.neemProfielOver(leegAcc, null).gitNaam === '')
+t('de id blijft altijd hetzelfde', overgenomen.id === leegAcc.id)
+
 // ── isolatie: welke mappen horen bij dit account ─────────────────────────────
 // Dit is het deel dat sluitend moet zijn. Niet tegen meelezen — dat kan de app
 // niet — maar tegen gedrag: nooit een git-actie in de map van een ander
@@ -183,8 +217,18 @@ const mainBron = fs.readFileSync(path.join(APP, 'main.js'), 'utf8')
 t('de pincode wordt gehasht opgeslagen, niet als tekst',
   /scryptSync/.test(mainBron) && /randomBytes/.test(mainBron))
 t('vergelijken gebeurt in vaste tijd', /timingSafeEqual/.test(mainBron))
-t('de renderer krijgt hash en salt niet',
-  /const zonderGeheim = \(a\) => \(\{ id: a\.id, naam: a\.naam, icoon: a\.icoon, heeftPin/.test(mainBron))
+// Op de bedoeling toetsen, niet op de exacte regel: die verandert zodra er een
+// veld bijkomt, en dan faalt de test om de verkeerde reden.
+const zonderGeheimBlok = (mainBron.match(/const zonderGeheim = \(a\) => \(\{[\s\S]*?\n\}\)/) || [''])[0]
+t('er is een functie die het account uitkleedt voor de renderer', zonderGeheimBlok.length > 0)
+t('en die geeft de pincode, hash noch salt door',
+  zonderGeheimBlok.length > 0
+  && !/\bpin\b\s*:/.test(zonderGeheimBlok)
+  && !/hash/.test(zonderGeheimBlok.replace(/heeftPin/g, ''))
+  && !/salt/.test(zonderGeheimBlok))
+t('maar wel of er een pincode ingesteld is', /heeftPin/.test(zonderGeheimBlok))
+t('en de git-identiteit, want dat is het account zelf',
+  /gitNaam/.test(zonderGeheimBlok) && /gitEmail/.test(zonderGeheimBlok))
 t('wisselen wordt in main gecontroleerd, niet alleen in het venster',
   /pinNodig\(st\.accounts\) && !pinKlopt\(doel, pin\)/.test(mainBron))
 t('een account aanmaken kan niet zonder pincode',

@@ -995,7 +995,7 @@
   "settings.git.pollUit": "niet automatisch",
   "settings.git.pollDesc": "Hoe vaak de indicator in de projectkop wordt bijgewerkt. Staat stil als het venster verborgen is. Uit betekent: alleen na een git-actie of bij het wisselen van locatie.",
   "settings.section.accountsTitle": "Accounts",
-  "accounts.uitleg": "Elk account heeft zijn eigen projectenlijst en git-instellingen.",
+  "accounts.uitleg": "Een account is meteen je git-identiteit: de naam onder je commits en het GitHub-account waarmee je pusht. Wissel je van account, dan wisselt git mee.",
   "accounts.eerlijk": "Let op: dit scheidt inhoud, het beveiligt niets. Alles staat in de map van je Windows-gebruiker, dus wie op deze Windows-login kan, kan bij alle accounts. Wil je het echt gescheiden houden, geef iedereen dan een eigen Windows-account.",
   "accounts.toevoegen": "account toevoegen",
   "accounts.toevoegenTekst": "Hoe heet degene die dit account gaat gebruiken?",
@@ -1035,5 +1035,11 @@
   "git.inlog.geenProject": "Er is nog geen project om dit in te draaien. Voeg er eerst één toe.",
   "git.inlog.klaarTitel": "GitHub-accounts op deze pc",
   "git.inlog.klaarTekst": "Deze accounts staan nu klaar: {namen}. Zet de juiste bij je git-profiel, dan schakelt hij mee als je van account wisselt.",
-  "accounts.ghWisselMislukt": "Kon niet naar GitHub-account {naam} wisselen. Je naam staat wel goed, maar controleer met wie je pusht."
+  "accounts.ghWisselMislukt": "Kon niet naar GitHub-account {naam} wisselen. Je naam staat wel goed, maar controleer met wie je pusht.",
+  "accounts.gitTitel": "Git-identiteit van {naam}",
+  "accounts.gitNaamTekst": "Onder welke naam komen je commits te staan? Dit is wat anderen in de geschiedenis zien.",
+  "accounts.gitEmailTekst": "Welk e-mailadres hoort daarbij? GitHub koppelt je commits hieraan.",
+  "accounts.gitGhTekst": "Je GitHub-gebruikersnaam, als je die hebt. Daarmee weet git met welk account hij moet pushen als er meerdere op deze pc staan. Leeg laten mag.",
+  "accounts.gitOnaf": "git-identiteit nog niet ingevuld",
+  "accounts.gitBewerken": "git-identiteit aanpassen"
 }
