@@ -408,6 +408,8 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
 .git-ind-behind { color: #60a5fa; }
 .git-ind-dirty  { color: var(--amber); }
 .git-ind-los    { color: var(--muted); font-style: italic; }
+/* Een andere locatie van dit project heeft ook werk staan. */
+.git-ind-anders { color: var(--amber); opacity: 0.85; }
 
 .loc-switcher { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .loc-switcher label { font-size: 11px; color: var(--muted); }

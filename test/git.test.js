@@ -610,6 +610,49 @@ t('het bericht overleeft de opschoning voor cmd.exe',
   G.veiligCommitBericht(G.automatischCommitBericht(stB(13, ['renderer.js', 'style.css'])))
   === 'wijzigingen in 13 bestanden (renderer.js, style.css, +11)')
 
+// ── meerdere locaties per project ────────────────────────────────────────────
+const pTwee = { name: 'resume', locations: [
+  { label: 'main', path: 'C:\\resume' }, { label: 'extensie', path: 'C:\\resume\\extension' }] }
+const pEen = { name: 'DD-Music', locations: [{ label: 'main', path: 'C:\\music' }] }
+
+gelijk('beide locaties komen terug, met hun index', G.projectLocaties(pTwee),
+  [{ index: 0, pad: 'C:\\resume', label: 'main' },
+   { index: 1, pad: 'C:\\resume\\extension', label: 'extensie' }])
+t('de index klopt met de plek in de lijst',
+  G.projectLocaties(pTwee)[1].index === 1)
+t('hetzelfde pad twee keer telt één keer',
+  G.projectLocaties({ name: 'x', locations: [{ label: 'a', path: 'C:\\z' }, { label: 'b', path: 'C:\\z' }] }).length === 1)
+t('locaties zonder pad vallen af',
+  G.projectLocaties({ name: 'x', locations: [{ label: 'a', path: '' }, { label: 'b', path: 'C:\\z' }] }).length === 1)
+t('geen project klapt niet', G.projectLocaties(null).length === 0)
+t('project zonder locaties klapt niet', G.projectLocaties({ name: 'x' }).length === 0)
+
+t('bij meerdere locaties staat erbij wélke',
+  G.locatieNaam(pTwee, G.projectLocaties(pTwee)[1]) === 'resume — extensie')
+t('bij één locatie is de projectnaam genoeg',
+  G.locatieNaam(pEen, G.projectLocaties(pEen)[0]) === 'DD-Music')
+t('zonder label geen streepje achter de naam',
+  G.locatieNaam({ name: 'x', locations: [{ path: 'a' }, { path: 'b' }] },
+    { index: 0, pad: 'a', label: '' }) === 'x')
+t('zonder project een lege naam in plaats van een fout',
+  G.locatieNaam(null, null) === '')
+
+// De afsluitcontrole werkt per regel, dus twee locaties van hetzelfde project
+// horen er allebei los in te kunnen staan.
+const tweeLocs = [
+  { id: 'r', naam: 'resume — main', pad: 'C:\\resume', locIndex: 0,
+    staat: G.maakStaat({ ...BASIS, vuil: 2 }) },
+  { id: 'r', naam: 'resume — extensie', pad: 'C:\\resume\\extension', locIndex: 1,
+    staat: G.maakStaat({ ...BASIS, ahead: 1 }) },
+]
+gelijk('beide locaties van hetzelfde project houden het afsluiten tegen',
+  G.teVragenProjecten(tweeLocs, 'waarschuwen').map(x => x.naam),
+  ['resume — main', 'resume — extensie'])
+t('en de locIndex blijft bewaard, anders commit je in de verkeerde map',
+  G.teVragenProjecten(tweeLocs, 'waarschuwen')[1].locIndex === 1)
+gelijk('stashen pakt alleen de locatie met niet-vastgelegd werk',
+  G.teStashenProjecten(tweeLocs, 'stashen').map(x => x.naam), ['resume — main'])
+
 // ── bedrading naar de app ────────────────────────────────────────────────────
 // Zonder deze twee zie je de knoppen wel staan, maar grijs en zonder icoon —
 // ze lijken dan uitgeschakeld. Dat is precies wat er de eerste keer misging.

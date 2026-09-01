@@ -915,5 +915,6 @@
   "settings.git.profielRemoveUsed": "{naam} disappears from the list. {aantal} project(s) use this profile; they fall back to the default. What is set in your repositories does not change.",
   "settings.git.inlogRemember": "remember sign-in details",
   "settings.git.inlogAsk": "ask for a token every time",
-  "settings.git.inlogEerlijk": "\"Ask every time\" turns off the credential manager for that folder, so git asks for a token on each push. That is a speed bump, not security: anyone who can sign in as this Windows user can reach the stored tokens of the other profiles. To really separate two people, separate Windows accounts are the answer."
+  "settings.git.inlogEerlijk": "\"Ask every time\" turns off the credential manager for that folder, so git asks for a token on each push. That is a speed bump, not security: anyone who can sign in as this Windows user can reach the stored tokens of the other profiles. To really separate two people, separate Windows accounts are the answer.",
+  "git.ind.otherLocTitle": "another location of this project also has work that exists nowhere else"
 }

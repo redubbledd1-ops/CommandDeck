@@ -452,6 +452,10 @@ function actieveLocPad(p) {
   return (loc && loc.path) || ''
 }
 
+// Beide staan in git-tools.js, zodat ze zonder venster te testen zijn.
+const projectLocaties = (p) => GitTools.projectLocaties(p)
+const locNaam = (p, loc) => GitTools.locatieNaam(p, loc)
+
 function gitStaatVan(p) {
   const pad = actieveLocPad(p)
   return pad ? (gitStaten[pad] || null) : null
@@ -493,8 +497,7 @@ async function ververesGitStaat(p, forceer = false) {
 // git-processen naast elkaar zijn.
 async function ververesAlleGitStaten(forceer = false) {
   for (const p of projects) {
-    const pad = actieveLocPad(p)
-    if (pad) await ververesGitPad(pad, forceer)
+    for (const loc of projectLocaties(p)) await ververesGitPad(loc.pad, forceer)
   }
   meldGitProjectenAanMain()
 }
@@ -504,9 +507,13 @@ async function ververesAlleGitStaten(forceer = false) {
 function gitProjectenLijst() {
   const uit = []
   for (const p of projects) {
-    const pad = actieveLocPad(p)
-    const staat = pad ? gitStaten[pad] : null
-    if (staat && staat.isRepo) uit.push({ id: p.id, naam: p.name, pad, staat })
+    for (const loc of projectLocaties(p)) {
+      const staat = gitStaten[loc.pad]
+      if (!staat || !staat.isRepo) continue
+      // locIndex moet mee: commit en push draaien op de actieve locatie van het
+      // project, dus die moet eerst naar déze locatie voordat er iets draait.
+      uit.push({ id: p.id, naam: locNaam(p, loc), pad: loc.pad, locIndex: loc.index, staat })
+    }
   }
   return uit
 }
@@ -535,6 +542,20 @@ function startGitPolling() {
 
 // De indicator in de projectkop: welke branch, hoeveel vooruit/achter, hoeveel
 // gewijzigd. Hij licht op zodra er werk is dat alleen op deze pc bestaat.
+// Staat er in een ándere locatie van dit project werk dat nergens anders is?
+// De kop toont de actieve locatie, dus zonder dit merk je zoiets pas bij het
+// afsluiten.
+function andereLocatiesOnveilig(p) {
+  const actief = actieveLocPad(p)
+  let n = 0
+  for (const loc of projectLocaties(p)) {
+    if (loc.pad === actief) continue
+    const i = GitTools.indicator(gitStaten[loc.pad])
+    if (i && i.onveilig) n++
+  }
+  return n
+}
+
 function gitIndicatorHtml(p) {
   const i = GitTools.indicator(gitStaatVan(p))
   if (!i) return ''
@@ -546,7 +567,10 @@ function gitIndicatorHtml(p) {
   if (!i.gekoppeld) delen.push(`<span class="git-ind-los" title="${esc(I18N.t('git.ind.noRemoteTitle'))}">${esc(I18N.t('git.ind.noRemote'))}</span>`)
   else if (!i.volgt) delen.push(`<span class="git-ind-los" title="${esc(I18N.t('git.ind.noUpstreamTitle'))}">${esc(I18N.t('git.ind.noUpstream'))}</span>`)
 
-  return `<span class="git-ind ${i.onveilig ? 'onveilig' : ''}">
+  const anders = andereLocatiesOnveilig(p)
+  if (anders) delen.push(`<span class="git-ind-anders" title="${esc(I18N.t('git.ind.otherLocTitle'))}">+${anders}</span>`)
+
+  return `<span class="git-ind ${i.onveilig || anders ? 'onveilig' : ''}">
       <i class="ti ti-git-branch"></i>
       <span class="git-ind-branch">${esc(i.branch)}</span>
       ${delen.join('')}
@@ -10912,6 +10936,14 @@ async function vraagOverProject(project) {
   const p = projects.find(x => x.id === project.id)
   if (!p) return 'door'
 
+  // executeCmd draait op de áctieve locatie van het project. Gaat deze melding
+  // over een andere locatie, dan moet die eerst actief worden — anders wordt er
+  // gecommit in de verkeerde map, en dat merk je pas veel later.
+  if (typeof project.locIndex === 'number' && p.activeLocation !== project.locIndex) {
+    p.activeLocation = project.locIndex
+    saveProjects()
+  }
+
   if (project.staat.vuil > 0) {
     const bericht = await vraagTekst({
       titel: I18N.t('git.commit.title'),
@@ -10955,9 +10987,20 @@ async function toonStashMeldingBijStart() {
     // hem meteen open. Bij meer zou dat een willekeurige keuze zijn; dan is de
     // lijst genoeg, want bij elk van die projecten staat de terughaalknop nu
     // vanzelf in de rij.
-    const enkel = m.projecten.length === 1
-      ? projects.find(p => padNorm(actieveLocPad(p)) === padNorm(m.projecten[0].pad))
-      : null
+    // Over álle locaties zoeken: de stash kan gemaakt zijn in een locatie die
+    // op dit moment niet de actieve is. Vinden we hem, dan zetten we die
+    // locatie meteen actief, zodat de terughaalknop op de goede map werkt.
+    let enkel = null
+    if (m.projecten.length === 1) {
+      const doel = padNorm(m.projecten[0].pad)
+      for (const kandidaat of projects) {
+        const loc = projectLocaties(kandidaat).find(l => padNorm(l.pad) === doel)
+        if (!loc) continue
+        if (kandidaat.activeLocation !== loc.index) { kandidaat.activeLocation = loc.index; saveProjects() }
+        enkel = kandidaat
+        break
+      }
+    }
 
     const keuze = await vraagKeuze({
       titel: I18N.t('git.stashMelding.titel'),

@@ -271,6 +271,30 @@
     }
   }
 
+  // ── Locaties van een project ────────────────────────────────────────────────
+  // Een project kan meerdere mappen hebben — Resume heeft er een voor de app en
+  // een voor de extensie — en die kunnen los van elkaar vuil staan. Alles wat
+  // over "het project" gaat moet ze dus alle langs, niet alleen de actieve.
+  function projectLocaties(project) {
+    const uit = []
+    const locs = (project && project.locations) || []
+    for (let i = 0; i < locs.length; i++) {
+      const pad = locs[i] && locs[i].path
+      if (!pad) continue
+      if (uit.some(x => x.pad === pad)) continue   // hetzelfde pad twee keer telt één keer
+      uit.push({ index: i, pad, label: String((locs[i].label || '')).trim() })
+    }
+    return uit
+  }
+
+  // Hoe heet dit in een melding? Bij één locatie is de projectnaam genoeg; bij
+  // meerdere moet erbij staan wélke, anders weet je niet waar je moet zijn.
+  function locatieNaam(project, loc) {
+    const naam = (project && project.name) || ''
+    const meer = projectLocaties(project).length > 1
+    return (meer && loc && loc.label) ? `${naam} — ${loc.label}` : naam
+  }
+
   // ── Afsluitcontrole (ronde 5) ───────────────────────────────────────────────
   // Twee heel verschillende momenten:
   //
@@ -768,6 +792,7 @@
     identiteitCommando, profielCommando, ghSwitchCommando, vraagtOmInloggen,
     INLOG_ONTHOUDEN, INLOG_VRAGEN, INLOG_KEUZES,
     indicator, onveiligeRedenen, magFetchen, achterstandMelding, FETCH_INTERVAL_MS,
+    projectLocaties, locatieNaam,
     teVragenProjecten, teStashenProjecten, afsluitSamenvatting, afsluitInstelling,
     AFSLUIT_UIT, AFSLUIT_WAARSCHUWEN, AFSLUIT_STASHEN, AFSLUIT_KEUZES,
     KOPPEL_INIT, KOPPEL_COMMIT, KOPPEL_GH, KOPPEL_URL, KOPPEL_AL_GEDAAN,

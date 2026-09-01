@@ -915,5 +915,6 @@
   "settings.git.profielRemoveUsed": "{naam} verdwijnt uit de lijst. {aantal} project(en) gebruiken dit profiel; die vallen daarna terug op de standaard. Wat er in je repositories staat ingesteld verandert hier niet van.",
   "settings.git.inlogRemember": "inloggegevens onthouden",
   "settings.git.inlogAsk": "elke keer om een token vragen",
-  "settings.git.inlogEerlijk": "\"Elke keer vragen\" zet de credential manager uit voor die map, zodat git per push zelf om een token vraagt. Dat is een drempel, geen beveiliging: wie op deze Windows-gebruiker kan inloggen, kan bij de opgeslagen tokens van de andere profielen. Wil je twee mensen écht scheiden, dan zijn aparte Windows-accounts het antwoord."
+  "settings.git.inlogEerlijk": "\"Elke keer vragen\" zet de credential manager uit voor die map, zodat git per push zelf om een token vraagt. Dat is een drempel, geen beveiliging: wie op deze Windows-gebruiker kan inloggen, kan bij de opgeslagen tokens van de andere profielen. Wil je twee mensen écht scheiden, dan zijn aparte Windows-accounts het antwoord.",
+  "git.ind.otherLocTitle": "een andere locatie van dit project heeft ook werk dat nergens anders staat"
 }
