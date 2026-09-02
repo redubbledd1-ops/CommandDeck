@@ -164,6 +164,12 @@
     <button class="add-loc-btn" id="btn-add-loc"><i class="ti ti-plus"></i> <span data-i18n="modal.project.addLocation">locatie toevoegen</span></button>
     <label class="field-label" data-i18n="modal.project.visibleCommandsLabel">zichtbare commando's</label>
     <div id="cmdvis-section"></div>
+    <!-- Alles wat met de git-koppeling van dít project te maken heeft. Verborgen
+         bij een nieuw project: er is dan nog geen map om iets over te zeggen. -->
+    <div id="f-git-sectie" hidden>
+      <label class="field-label" data-i18n="modal.project.gitLabel">git</label>
+      <div id="git-sectie"></div>
+    </div>
     <div class="modal-footer">
       <button class="btn-ghost" id="modal-proj-cancel" data-i18n="common.cancel">annuleren</button>
       <button class="btn-primary" id="modal-proj-save" data-i18n="common.save">opslaan</button>

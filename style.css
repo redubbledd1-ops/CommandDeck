@@ -1908,3 +1908,55 @@ button.thema-regel.wis:hover .thema-aantal { color: var(--red); }
    volgende regel springt in plaats van tot één woord breed te krimpen. */
 .instel-uitleg { flex: 1 1 200px; min-width: 0; font-size: 11px; color: var(--muted); line-height: 1.45; }
 .instel-rij .term-btn { margin-left: auto; flex-shrink: 0; }
+
+/* ── Git-sectie bij de projectinstellingen ─────────────────────────────────
+   Het onderhoud aan de koppeling: welke adressen eraan hangen, wat er mis is,
+   en per punt de knop die het oplost. Bewust apart van de knoppenrij in het
+   projectvenster — dit is wat je één keer per jaar nodig hebt. */
+#git-sectie { display: flex; flex-direction: column; gap: 8px; }
+.git-set-leeg { color: var(--muted); font-size: 12px; padding: 6px 0; }
+
+.git-set-kop {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 12px; color: var(--text);
+  border: 1px solid var(--border2); border-radius: var(--radius);
+  background: var(--s2); padding: 8px 10px;
+}
+.git-set-kop.e-fout   { border-color: rgba(248,113,113,0.45); }
+.git-set-kop.e-let-op { border-color: rgba(251,191,36,0.40); }
+
+.git-set-status { margin-left: auto; font-size: 11px; padding: 2px 7px; border-radius: 999px; }
+.git-set-status.s-ok       { color: #34d399; background: rgba(52,211,153,0.12); }
+.git-set-status.s-stuk     { color: #f87171; background: rgba(248,113,113,0.14); }
+.git-set-status.s-geen     { color: var(--muted); background: rgba(148,163,184,0.12); }
+.git-set-status.s-onbekend { color: var(--muted); background: rgba(148,163,184,0.12); }
+
+.git-set-remotes { display: flex; flex-direction: column; gap: 4px; }
+.git-set-remote {
+  display: flex; align-items: center; gap: 8px;
+  border: 1px solid var(--border2); border-radius: var(--radius);
+  padding: 6px 8px; font-size: 12px;
+}
+/* De remote waar deze branch daadwerkelijk naartoe gaat. Bij meerdere adressen
+   is dat het enige dat telt, en dus het enige dat je meteen moet zien. */
+.git-set-remote.actief { border-color: var(--border); background: var(--s2); }
+.git-set-remote-tekst { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.git-set-remote-naam { color: var(--text); font-weight: 600; }
+.git-set-remote-url { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.git-set-problemen { display: flex; flex-direction: column; gap: 4px; }
+.git-set-probleem {
+  display: flex; align-items: center; gap: 8px; font-size: 12px;
+  border-radius: var(--radius); padding: 6px 8px;
+  border: 1px solid transparent;
+}
+.git-set-probleem span { flex: 1; }
+.git-set-probleem.e-fout   { color: #fca5a5; background: rgba(248,113,113,0.09); border-color: rgba(248,113,113,0.28); }
+.git-set-probleem.e-let-op { color: var(--amber); background: rgba(251,191,36,0.08); border-color: rgba(251,191,36,0.25); }
+.git-set-probleem.e-info   { color: var(--muted); background: var(--s2); border-color: var(--border2); }
+
+.git-set-ok { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #34d399; padding: 2px 0; }
+.git-set-acties { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.btn-mini { font-size: 11px; padding: 4px 8px; flex-shrink: 0; }
+.btn-mini.gevaar { color: #f87171; }

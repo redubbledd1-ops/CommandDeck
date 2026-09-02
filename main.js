@@ -1156,13 +1156,13 @@ ipcMain.handle('git:remoteCheck', async (_, dir) => {
   if (!padToegestaan(dir)) return { ok: null, reden: 'onbekend' }
   if (!dir || !fs.existsSync(dir) || !heeftGit()) return { ok: null, reden: 'onbekend' }
 
-  const remotes = GitTools.parseRemotes(gitUit(dir, ['remote']))
-  if (!remotes.length) return { ok: null, reden: '', geen: true }
+  const remoteLijst = GitTools.parseRemoteRegels(gitUit(dir, ['remote', '-v']))
+  if (!remoteLijst.length) return { ok: null, reden: '', geen: true }
 
   const st = GitTools.parseStatusV2(gitUit(dir, ['status', '--porcelain=v2', '--branch']))
-  const staat = GitTools.maakStaat({ beschikbaar: true, isRepo: true, remotes, upstream: st.upstream })
+  const staat = GitTools.maakStaat({ beschikbaar: true, isRepo: true, remoteLijst, upstream: st.upstream })
   const remote = staat.remote
-  const url = String(gitUit(dir, ['remote', 'get-url', remote]) || '').trim()
+  const url = staat.remoteUrl
 
   const bekend = remoteUitCache(dir, url)
   if (bekend) return { ok: bekend.ok, reden: bekend.reden, remote, url, uitCache: true }
@@ -1218,7 +1218,9 @@ ipcMain.handle('git:info', (_, dir) => {
   // welke bestanden vuil zijn. `git remote` blijft apart nodig: een repo kan
   // een remote hebben zonder dat de branch er al naartoe wijst — precies de
   // situatie vlak na `gh repo create`, waar push -u voor bedoeld is.
-  const remotes = GitTools.parseRemotes(gitUit(dir, ['remote']))
+  // `git remote -v` in plaats van `git remote`: dezelfde aanroep, maar met de
+  // adressen erbij. Daarmee vervalt de losse `git remote get-url` hieronder.
+  const remoteLijst = GitTools.parseRemoteRegels(gitUit(dir, ['remote', '-v']))
   const st = GitTools.parseStatusV2(gitUit(dir, ['status', '--porcelain=v2', '--branch']))
 
   // Vierde aanroep, en de goedkoopste van de vier: `git stash list` leest één
@@ -1235,21 +1237,20 @@ ipcMain.handle('git:info', (_, dir) => {
   // Werkt dat adres ook? Dat weet alleen git:remoteCheck, en die kost netwerk.
   // Hier lezen we alleen wat daar al uit kwam. Nog niets gecontroleerd betekent
   // remoteOk: null, en dan blijft de koppeling gewoon bruikbaar.
-  let remoteOk = null, remoteReden = '', remoteUrl = ''
-  if (remotes.length) {
-    const kies = GitTools.maakStaat({ beschikbaar: true, isRepo: true, remotes, upstream: st.upstream })
-    remoteUrl = String(gitUit(dir, ['remote', 'get-url', kies.remote]) || '').trim()
-    const bekend = remoteUitCache(dir, remoteUrl)
+  let remoteOk = null, remoteReden = ''
+  if (remoteLijst.length) {
+    const kies = GitTools.maakStaat({ beschikbaar: true, isRepo: true, remoteLijst, upstream: st.upstream })
+    const bekend = remoteUitCache(dir, kies.remoteUrl)
     if (bekend) { remoteOk = bekend.ok; remoteReden = bekend.reden }
   }
 
   return GitTools.maakStaat({
-    beschikbaar: true, isRepo: true, remotes,
+    beschikbaar: true, isRepo: true, remoteLijst,
     branch: st.branch, commits: st.commits, upstream: st.upstream,
     nieuw: st.nieuw, nieuweBestanden: st.nieuweBestanden,
     ahead: st.ahead, behind: st.behind, vuil: st.vuil,
     conflicten: st.conflicten, stashes, bestanden: st.bestanden,
-    remoteOk, remoteReden, remoteUrl,
+    remoteOk, remoteReden,
     naam: ident.naam, email: ident.email,
   })
 })

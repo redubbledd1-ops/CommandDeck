@@ -73,6 +73,22 @@
     return String(uit || '').split('\n').map(r => r.trim()).filter(Boolean)
   }
 
+  // `git remote -v` geeft twee regels per remote (fetch en push) met het adres
+  // erbij. Eén aanroep meer levert niets op — dit vervangt `git remote` — maar
+  // het scheelt wel een `git remote get-url` per project per ronde, en de
+  // instellingen kunnen nu álle adressen tonen in plaats van alleen het
+  // gekozene. Dat laatste is precies wat je nodig hebt als er twee remotes
+  // staan en er één weg moet.
+  function parseRemoteRegels(uit) {
+    const gezien = new Map()
+    for (const regel of String(uit || '').split('\n')) {
+      const m = regel.replace(/\r$/, '').match(/^(\S+)\s+(\S+)/)
+      if (!m) continue
+      if (!gezien.has(m[1])) gezien.set(m[1], { naam: m[1], url: m[2] })
+    }
+    return [...gezien.values()]
+  }
+
   // `git rev-parse --abbrev-ref HEAD` geeft de branchnaam, of "HEAD" als je
   // losgekoppeld staat (detached). Een verse repo zonder commits geeft een
   // foutmelding op stderr en niets op stdout.
@@ -213,9 +229,14 @@
                        commits = true, upstream = null, ahead = 0, behind = 0,
                        vuil = 0, conflicten = 0, nieuw = 0, stashes = 0,
                        bestanden = [], nieuweBestanden = [],
-                       remoteOk = null, remoteReden = '', remoteUrl = '',
+                       remoteOk = null, remoteReden = '', remoteUrl = '', remoteLijst = [],
                        naam = '', email = '' } = {}) {
-    const lijst = Array.isArray(remotes) ? remotes.filter(Boolean) : parseRemotes(remotes)
+    // Twee vormen die hetzelfde beschrijven: alleen namen (zoals `git remote`
+    // geeft) of namen mét adres (`git remote -v`). Beide mogen, want de tests
+    // en de oudere aanroepen kennen alleen de eerste.
+    const metUrl = Array.isArray(remoteLijst) ? remoteLijst.filter(r => r && r.naam) : parseRemoteRegels(remoteLijst)
+    const gegeven = Array.isArray(remotes) ? remotes.filter(Boolean) : parseRemotes(remotes)
+    const lijst = gegeven.length ? gegeven : metUrl.map(r => r.naam)
     const heeftRemote = !!isRepo && lijst.length > 0
 
     // Welke remote is "de" remote? Niet blind origin: een repo kan er meer
@@ -245,8 +266,12 @@
       // herstelknop nodig: een dood adres moet weg vóór je een nieuw aanmaakt.
       heeftRemote,
       remoteReden: koppeling === KOPPELING_STUK ? String(remoteReden || '') : '',
-      remoteUrl: String(remoteUrl || ''),
+      remoteUrl: String(remoteUrl || (metUrl.find(r => r.naam === remote) || {}).url || ''),
       remotes: lijst,
+      // Alle adressen, niet alleen dat van de gekozen remote. De git-sectie in
+      // de projectinstellingen laat ze allemaal zien, want bij twee remotes
+      // waarvan er één dood is moet je kunnen zien wélke.
+      remoteLijst: metUrl,
       remote,
       branch: branch || null,
       commits: !!commits,
@@ -743,9 +768,74 @@
   // Losmaken zonder iets nieuws: het adres eraf, de geschiedenis blijft.
   // Daarna staat de gewone koppelknop er weer en begin je schoon opnieuw.
   function ontkoppelCommando(staat) {
-    const remote = (staat && staat.remote) || null
-    if (!remote) return null
-    return `git remote remove ${remote}`
+    return remoteWegCommando(staat && staat.remote)
+  }
+
+  // Dezelfde twee handelingen, maar dan op een remote die je zelf aanwijst.
+  // Nodig zodra er meer dan één is: dan is "de" remote niet genoeg.
+  function remoteWegCommando(naam) {
+    return naam ? `git remote remove ${naam}` : null
+  }
+
+  function remoteUrlCommando(naam, url) {
+    const schoon = normaliseerRepoUrl(url)
+    return (naam && schoon) ? `git remote set-url ${naam} ${schoon}` : null
+  }
+
+  // ── Wat is er mis met deze repo? ────────────────────────────────────────────
+  // De git-sectie bij de projectinstellingen laat dit zien met per punt een
+  // knop. Het staat hier en niet in de renderer omdat het puur een oordeel over
+  // de toestand is — en omdat "welke problemen zie je" precies het soort vraag
+  // is dat je wilt kunnen testen zonder een venster te openen.
+  //
+  //   ernst 'fout'   je loopt hier vast: dit moet eerst
+  //   ernst 'let-op' het werkt, maar het gaat een keer misgaan
+  //   ernst 'info'   niets kapots, alleen nog niet gedaan
+  //
+  // `actie` zegt welke knop erbij hoort; null betekent: alleen uitleg.
+  function gitProblemen(staat) {
+    const uit = []
+    if (!staat) return uit
+    if (!staat.beschikbaar) return [{ id: 'geen-git', ernst: 'fout', actie: null }]
+    if (!staat.isRepo) return [{ id: 'geen-repo', ernst: 'info', actie: 'koppelen' }]
+
+    // Bovenaan wat je tegenhoudt, daaronder wat later pijn doet. De volgorde
+    // is de volgorde waarin je het wilt oplossen.
+    if (staat.koppelingStuk) {
+      uit.push({ id: 'koppeling-stuk', ernst: 'fout', actie: 'herstellen',
+                 reden: staat.remoteReden || 'onbekend', remote: staat.remote, url: staat.remoteUrl })
+    }
+    if (staat.conflicten > 0) uit.push({ id: 'conflicten', ernst: 'fout', actie: 'diff', aantal: staat.conflicten })
+    if (!staat.naam || !staat.email) uit.push({ id: 'geen-identiteit', ernst: 'fout', actie: 'profiel' })
+    if (staat.commits && !staat.branch) uit.push({ id: 'losgekoppeld', ernst: 'fout', actie: 'branch' })
+
+    // De branch volgt een remote die niet meer bestaat. Dan lijkt `git status`
+    // te werken maar weet git niet meer waar vooruit/achter op slaat.
+    const volgt = String(staat.upstream || '').split('/')[0]
+    if (volgt && !staat.remotes.includes(volgt)) {
+      uit.push({ id: 'upstream-weg', ernst: 'fout', actie: 'push', remote: volgt })
+    }
+
+    if (!staat.commits) uit.push({ id: 'geen-commits', ernst: 'info', actie: 'commit' })
+    else if (!staat.heeftRemote) uit.push({ id: 'geen-remote', ernst: 'info', actie: 'koppelen' })
+    else if (!staat.koppelingStuk && !staat.upstream) uit.push({ id: 'geen-upstream', ernst: 'let-op', actie: 'push' })
+
+    // Twee remotes is zelden bedoeld en bijna altijd het spoor van een eerdere
+    // koppelpoging. Het is niet kapot, maar het is wel hoe een push in de
+    // verkeerde repo belandt.
+    if (staat.remotes.length > 1) {
+      uit.push({ id: 'meerdere-remotes', ernst: 'let-op', actie: 'remotes', aantal: staat.remotes.length })
+    }
+    return uit
+  }
+
+  // Het ergste wat er in de lijst staat. Bepaalt de kleur van de sectiekop, en
+  // of er überhaupt iets te melden valt.
+  function ergsteErnst(problemen) {
+    const lijst = problemen || []
+    if (lijst.some(p => p.ernst === 'fout')) return 'fout'
+    if (lijst.some(p => p.ernst === 'let-op')) return 'let-op'
+    return lijst.length ? 'info' : ''
   }
 
   // De commandoregel die bij een stap hoort. Eén regel, zodat hij in de
@@ -1286,6 +1376,8 @@
     KOPPELING_GEEN, KOPPELING_ONBEKEND, KOPPELING_OK, KOPPELING_STUK,
     remoteFoutReden, remoteUitslag, lsRemoteArgs, koppelingProbleem,
     herstelCommando, ontkoppelCommando, KOPPEL_HERSTEL,
+    parseRemoteRegels, remoteWegCommando, remoteUrlCommando,
+    gitProblemen, ergsteErnst,
     veiligCommitBericht, automatischCommitBericht, commitCommando, pushCommando, stashCommando, blokkade,
     parseStashAantal, parseStashLijst, parseStashOnderwerp, stashRefGeldig,
     stashPopCommando, stashDropCommando, botsendeBestanden,

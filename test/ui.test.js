@@ -127,7 +127,20 @@ let programmas = [
 let madeExes = []
 let exeFail = false
 
+// ── nagebootste git ──────────────────────────────────────────────────────────
+// De git-sectie bij de projectinstellingen is DOM-code die alleen hier draait.
+// `gitStaatNu` is wat git:info teruggeeft; `gitCheckNu` wat de netwerkcontrole
+// zegt. De tests zetten die om en kijken wat de sectie ervan maakt.
+let gitStaatNu = null
+let gitChecks = []
+let gitVergeten = []
+
 const api = {
+  gitInfo: async () => gitStaatNu ? JSON.parse(JSON.stringify(gitStaatNu)) : null,
+  gitRemoteCheck: async (p) => { gitChecks.push(p); return { ok: null, reden: '' } },
+  gitRemoteVergeet: async (p) => { gitVergeten.push(p); return true },
+  gitPaden: async () => true,
+  gitProjecten: async () => true,
   loadProjects: async () => JSON.parse(JSON.stringify(projects)),
   saveProjects: async (p) => { projects.length = 0; projects.push(...JSON.parse(JSON.stringify(p))); return true },
   loadLocale: async (code) => {
@@ -3621,6 +3634,81 @@ function startVraagAutomaat() {
   check('verdwenen project valt terug op het startscherm',
     w2.document.querySelector('#main .empty-state') !== null)
   global.window = window; global.document = window.document
+
+  // ── de git-sectie bij de projectinstellingen ───────────────────────────────
+  // Waar dit vandaan komt: een project stond met een remote in .git/config naar
+  // een repo die niet bestond. De app zei "gekoppeld", haalde de koppelknop weg
+  // en toonde push/pull/fetch die alleen konden falen. Deze sectie is de plek
+  // waar je dat ziet én losmaakt.
+  {
+    const maakStaat = window.GitTools.maakStaat
+    const gezond = { beschikbaar: true, isRepo: true, branch: 'main', commits: true,
+                     upstream: 'origin/main', naam: 'a', email: 'b@c', remoteOk: true,
+                     remoteLijst: [{ naam: 'origin', url: 'https://github.com/a/b.git' }] }
+
+    gitStaatNu = maakStaat(gezond)
+    $$('.proj-edit')[0].click(); await tick(); await tick()
+    check('de git-sectie staat in de projectinstellingen', !$('#f-git-sectie').hidden)
+    check('en meldt dat de koppeling werkt', !!$('.git-set-status.s-ok'))
+    check('bij een gezonde repo staat er niets in de weg', !!$('.git-set-ok'))
+    check('het adres staat erbij',
+      $('.git-set-remote-url').textContent === 'https://github.com/a/b.git')
+    check('controleren kan altijd', !!$('#git-set-check'))
+    $('#modal-proj-save').click(); await tick(); await tick()
+
+    // Precies de situatie van het echte project: twee adressen, geen van beide
+    // bereikbaar, en een branch die het verdwenen adres volgt.
+    gitStaatNu = maakStaat({ ...gezond, upstream: 'github/master', branch: 'master',
+      remoteOk: false, remoteReden: 'weg',
+      remoteLijst: [{ naam: 'github', url: 'https://github.com/x/weg.git' },
+                    { naam: 'origin', url: 'https://github.com/x/ook-weg.git' }] })
+    $$('.proj-edit')[0].click(); await tick(); await tick()
+    check('een kapotte koppeling wordt als kapot getoond', !!$('.git-set-status.s-stuk'))
+    check('de kop kleurt mee', !!$('.git-set-kop.e-fout'))
+    check('beide adressen staan er los onder', $$('.git-set-remote').length === 2)
+    check('en je kunt ze allebei weghalen', $$('[data-remote-weg]').length === 2)
+    check('het adres dat de branch volgt is aangewezen',
+      $('.git-set-remote.actief .git-set-remote-naam').textContent === 'github')
+    const probs = $$('.git-set-probleem').map(e => e.textContent)
+    check('het kapotte adres wordt gemeld', probs.some(x => x.includes('antwoordt niet')))
+    check('en dat er twee adressen staan', probs.some(x => x.includes('2 adressen')))
+    check('elk probleem heeft een knop', $$('[data-git-actie]').length >= 2)
+    check('herstellen is bereikbaar', !!$('#git-set-herstel'))
+
+    // Weghalen vraagt eerst. Dat moet: het is de enige knop hier die iets
+    // ongedaan maakt wat je zelf hebt ingesteld. En de vraag moet zéggen welk
+    // adres eraf gaat — bij twee remotes is dat het hele punt.
+    executed.length = 0
+    laatsteVraag = null
+    kiesKnop('annuleren')
+    $$('[data-remote-weg]')[0].click(); await tick(); await tick()
+    check('weghalen vraagt eerst om bevestiging', !!laatsteVraag)
+    check('en noemt het adres dat eraf gaat', laatsteVraag.alles.includes('github'))
+    check('annuleren doet niets', executed.length === 0)
+
+    kiesKnop('')
+    gitVergeten.length = 0
+    $$('[data-remote-weg]')[0].click(); await tick(); await tick()
+    check('bevestigen draait het juiste commando',
+      executed.some(e => e.ran === 'git remote remove github'))
+    check('daarna wordt de koppeling opnieuw gecontroleerd', gitVergeten.includes('C:\\a'))
+    $('#modal-proj-save').click(); await tick(); await tick()
+
+    // Een map zonder repo hoort geen adressen of problemen te tonen, alleen de
+    // weg vooruit.
+    gitStaatNu = maakStaat({ beschikbaar: true, isRepo: false })
+    $$('.proj-edit')[0].click(); await tick(); await tick()
+    check('een map zonder repo toont geen adressen', $$('.git-set-remote').length === 0)
+    check('en wijst naar koppelen', !!$('[data-git-actie="koppelen"]'))
+    check('zonder herstelknop, want er is niets te herstellen', !$('#git-set-herstel'))
+    $('#modal-proj-save').click(); await tick(); await tick()
+
+    // Bij een nieuw project is er nog geen map om iets over te zeggen.
+    $('#btn-add-proj').click(); await tick()
+    check('een nieuw project toont geen git-sectie', $('#f-git-sectie').hidden)
+    $('#modal-proj-cancel').click(); await tick()
+    gitStaatNu = null
+  }
 
   console.log(ok ? '\n✓ ALLE UI-TESTS GESLAAGD' : '\n✗ ER ZIJN TESTS GEFAALD')
   process.exit(ok ? 0 : 1)

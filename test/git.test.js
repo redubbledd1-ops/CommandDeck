@@ -1410,5 +1410,138 @@ t('de kapotte-koppeling-indicator heeft opmaak in style.css',
   t('bij het wisselen van account vervalt wat we wisten', ren.includes('gitRemoteGedaan.clear()'))
 }
 
+
+// ── De git-sectie bij de projectinstellingen ─────────────────────────────────
+// Het onderhoud aan de koppeling hoort niet tussen de dagelijkse knoppen. Wat
+// hier getest wordt is het oordeel: welke problemen ziet de app, in welke
+// volgorde, en met welke knop erbij.
+
+t('twee regels per remote worden één remote',
+  G.parseRemoteRegels('origin\thttps://a/b.git (fetch)\norigin\thttps://a/b.git (push)').length === 1)
+t('en het adres komt mee',
+  G.parseRemoteRegels('origin\thttps://a/b.git (fetch)')[0].url === 'https://a/b.git')
+t('meerdere remotes blijven apart',
+  G.parseRemoteRegels('github\thttps://a/b.git (fetch)\norigin\thttps://a/c.git (fetch)')
+    .map(r => r.naam).join(',') === 'github,origin')
+t('rommel levert niets op', G.parseRemoteRegels('').length === 0)
+t('de staat neemt de adressen over',
+  G.maakStaat({ isRepo: true, remoteLijst: [{ naam: 'origin', url: 'https://a/b.git' }] }).remoteUrl === 'https://a/b.git')
+t('en leidt de namen eruit af',
+  G.maakStaat({ isRepo: true, remoteLijst: [{ naam: 'origin', url: 'u' }] }).remotes.join() === 'origin')
+t('het adres hoort bij de gekozen remote, niet bij de eerste',
+  G.maakStaat({ isRepo: true, upstream: 'github/main',
+                remoteLijst: [{ naam: 'origin', url: 'fout' }, { naam: 'github', url: 'goed' }] }).remoteUrl === 'goed')
+
+const probIds = (s) => G.gitProblemen(s).map(p => p.id)
+const gezond = { beschikbaar: true, isRepo: true, remotes: ['origin'], branch: 'main',
+                 commits: true, upstream: 'origin/main', remoteOk: true, naam: 'a', email: 'b@c' }
+
+t('een gezonde repo heeft geen problemen', probIds(G.maakStaat(gezond)).length === 0)
+t('geen git is het enige dat telt',
+  probIds(G.maakStaat({ beschikbaar: false })).join() === 'geen-git')
+t('geen repo ook',
+  probIds(G.maakStaat({ beschikbaar: true, isRepo: false })).join() === 'geen-repo')
+t('zonder identiteit weigert git te committen — dat is een fout',
+  probIds(G.maakStaat({ ...gezond, naam: '', email: '' })).includes('geen-identiteit'))
+t('een half ingevulde identiteit telt ook',
+  probIds(G.maakStaat({ ...gezond, email: '' })).includes('geen-identiteit'))
+t('conflicten worden gemeld',
+  probIds(G.maakStaat({ ...gezond, conflicten: 2, vuil: 2 })).includes('conflicten'))
+t('detached HEAD wordt gemeld',
+  probIds(G.maakStaat({ ...gezond, branch: null })).includes('losgekoppeld'))
+t('maar een verse repo zonder commits heet niet losgekoppeld',
+  !probIds(G.maakStaat({ beschikbaar: true, isRepo: true, commits: false, branch: null, naam: 'a', email: 'b' })).includes('losgekoppeld'))
+t('een verse repo krijgt wel "nog niets vastgelegd"',
+  probIds(G.maakStaat({ beschikbaar: true, isRepo: true, commits: false, naam: 'a', email: 'b' })).includes('geen-commits'))
+t('een repo zonder remote krijgt "hangt nergens aan"',
+  probIds(G.maakStaat({ ...gezond, remotes: [], upstream: null, remoteOk: null })).includes('geen-remote'))
+t('een branch die nog nooit gepusht is wordt gemeld',
+  probIds(G.maakStaat({ ...gezond, upstream: null })).includes('geen-upstream'))
+t('een kapotte koppeling staat bovenaan',
+  probIds(G.maakStaat({ ...gezond, remoteOk: false, remoteReden: 'weg' }))[0] === 'koppeling-stuk')
+t('twee remotes is een let-op, geen fout',
+  G.gitProblemen(G.maakStaat({ ...gezond, remotes: ['origin', 'github'] }))
+    .find(p => p.id === 'meerdere-remotes').ernst === 'let-op')
+
+// Dit is DayKit: de branch volgt github, maar dat adres is er niet meer.
+t('een upstream naar een verdwenen remote wordt gemeld',
+  probIds(G.maakStaat({ ...gezond, remotes: ['origin'], upstream: 'github/master' })).includes('upstream-weg'))
+t('en zwijgt als de remote er wel is',
+  !probIds(G.maakStaat({ ...gezond, remotes: ['origin', 'github'], upstream: 'github/master' })).includes('upstream-weg'))
+
+// Bij een kapotte koppeling is "nog nooit gepusht" ruis: eerst het adres.
+t('geen dubbele meldingen bij een kapotte koppeling',
+  !probIds(G.maakStaat({ ...gezond, upstream: null, remoteOk: false, remoteReden: 'weg' })).includes('geen-upstream'))
+
+t('elk probleem heeft een ernst',
+  G.gitProblemen(G.maakStaat({ ...gezond, remoteOk: false, remotes: ['a', 'b'], naam: '' }))
+    .every(p => ['fout', 'let-op', 'info'].includes(p.ernst)))
+t('het ergste bepaalt de kleur',
+  G.ergsteErnst([{ ernst: 'let-op' }, { ernst: 'fout' }]) === 'fout')
+t('let-op wint van info', G.ergsteErnst([{ ernst: 'info' }, { ernst: 'let-op' }]) === 'let-op')
+t('niets is niets', G.ergsteErnst([]) === '')
+
+t('een adres weghalen noemt de remote', G.remoteWegCommando('github') === 'git remote remove github')
+t('zonder naam geen commando', G.remoteWegCommando('') === null)
+t('een adres wijzigen zet, niet toevoegen',
+  G.remoteUrlCommando('origin', 'a/b') === 'git remote set-url origin https://github.com/a/b.git')
+t('een onzin-adres wijzigt niets', G.remoteUrlCommando('origin', 'zomaar wat') === null)
+
+// Elke probleem-id en elke actie moet een tekst hebben, anders staat er een
+// lege regel in de sectie waar juist de uitleg hoort.
+{
+  const alle = new Set()
+  const acties = new Set()
+  const staten = [
+    G.maakStaat({ beschikbaar: false }),
+    G.maakStaat({ beschikbaar: true, isRepo: false }),
+    G.maakStaat({ ...gezond, naam: '', conflicten: 1, branch: null, remoteOk: false, remoteReden: 'weg', remotes: ['a', 'b'] }),
+    G.maakStaat({ ...gezond, upstream: null }),
+    G.maakStaat({ ...gezond, remotes: [], upstream: null, remoteOk: null }),
+    G.maakStaat({ beschikbaar: true, isRepo: true, commits: false, naam: 'a', email: 'b' }),
+    G.maakStaat({ ...gezond, remotes: ['origin'], upstream: 'weg/main' }),
+  ]
+  for (const s of staten) for (const p of G.gitProblemen(s)) { alle.add(p.id); if (p.actie) acties.add(p.actie) }
+  t('alle elf probleemsoorten komen in de tests voor', alle.size === 11)
+  for (const id of alle) t('tekst voor probleem ' + id, !!nl['gitset.prob.' + id] && !!en['gitset.prob.' + id])
+  for (const a of acties) t('tekst voor actie ' + a, !!nl['gitset.actie.' + a] && !!en['gitset.actie.' + a])
+}
+
+for (const sleutel of ['modal.project.gitLabel', 'gitset.kopRepo', 'gitset.kopGeenRepo',
+                       'gitset.koppelOk', 'gitset.koppelStuk', 'gitset.koppelGeen', 'gitset.koppelOnbekend',
+                       'gitset.adresWijzigen', 'gitset.adresWeg', 'gitset.wegTitel', 'gitset.wegTekst',
+                       'gitset.nietsMis', 'gitset.controleren', 'gitset.herstellen', 'gitset.koppelen',
+                       'gitset.opnieuwKoppelen', 'gitset.remotesTitel', 'gitset.remotesTekst', 'gitset.laden']) {
+  t('tekst ' + sleutel + ' staat in nl en en', !!nl[sleutel] && !!en[sleutel])
+}
+
+{
+  const css = fs.readFileSync(path.join(APP, 'style.css'), 'utf8')
+  for (const klasse of ['#git-sectie', '.git-set-kop', '.git-set-status', '.git-set-remote',
+                        '.git-set-probleem', '.git-set-acties', '.btn-mini']) {
+    t('opmaak voor ' + klasse, css.includes(klasse))
+  }
+  // Zonder deze regels is een fout niet van een waarschuwing te onderscheiden.
+  t('fout en let-op zien er anders uit',
+    css.includes('.git-set-probleem.e-fout') && css.includes('.git-set-probleem.e-let-op'))
+
+  t('index.html heeft de git-sectie in het projectvenster',
+    html.includes('id="f-git-sectie"') && html.includes('id="git-sectie"'))
+
+  const ren = fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8')
+  t('de sectie wordt getekend', ren.includes('function tekenGitSectie'))
+  // Een nieuw project heeft nog geen map; dan valt er niets te zeggen.
+  t('en blijft weg zolang er geen map is', /vak\.hidden = !p \|\| !actieveLocPad\(p\)/.test(ren))
+  t('de sectie gaat open bij bewerken', /openEditModal[\s\S]{0,1200}toonGitSectie\(p\)/.test(ren))
+  t('en leeg bij een nieuw project', /openNewModal[\s\S]{0,900}toonGitSectie\(null\)/.test(ren))
+  t('je kunt een los adres weghalen', ren.includes('data-remote-weg'))
+  t('en een los adres wijzigen', ren.includes('data-remote-url'))
+  t('elk probleem krijgt zijn eigen knop', ren.includes('data-git-actie'))
+  // De klacht die hier begon: de app zag het niet. Dus moet je het altijd zelf
+  // kunnen laten kijken, ook als de app niets mis ziet.
+  t('controleren kan altijd met de hand', ren.includes("id=\"git-set-check\""))
+  t('herstellen ook', ren.includes("id=\"git-set-herstel\""))
+}
+
 console.log(ok ? '\nALLE GIT-TESTS OK' : '\nER ZIJN GIT-TESTS GEZAKT')
 process.exit(ok ? 0 : 1)

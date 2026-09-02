@@ -13153,6 +13153,160 @@ function buildEmojiPicker() {
   })
 }
 
+
+// ── De git-sectie bij de projectinstellingen ─────────────────────────────────
+// De knoppen in het projectvenster doen het gewone werk: committen, pushen,
+// koppelen. Wat hier hoort is het onderhoud eromheen — wat er precies aan
+// remotes vastzit, wat er mis is, en hoe je dat losmaakt of repareert. Dat wil
+// je één keer per jaar doen en dan wél kunnen vinden, dus het staat niet
+// tussen de knoppen die je elke dag gebruikt.
+//
+// Alles wat hier staat gaat over de actieve locatie van het project: een
+// project met twee mappen heeft twee repo's, en die kunnen los van elkaar stuk
+// zijn.
+let gitSectieProject = null
+
+function toonGitSectie(p) {
+  const vak = document.getElementById('f-git-sectie')
+  if (!vak) return
+  gitSectieProject = p || null
+  // Een nieuw project heeft nog geen map. Dan valt er niets te zeggen.
+  vak.hidden = !p || !actieveLocPad(p)
+  if (vak.hidden) return
+  tekenGitSectie()
+  // De staat kan oud zijn; opnieuw ophalen en dan nog een keer tekenen.
+  ververesGitStaat(p, true).then(() => tekenGitSectie())
+}
+
+function tekenGitSectie() {
+  const doel = document.getElementById('git-sectie')
+  const p = gitSectieProject
+  if (!doel || !p) return
+  const pad = actieveLocPad(p)
+  const staat = gitStaten[pad] || null
+
+  if (!staat) { doel.innerHTML = `<div class="git-set-leeg">${esc(I18N.t('gitset.laden'))}</div>`; return }
+
+  const problemen = GitTools.gitProblemen(staat)
+  const ernst = GitTools.ergsteErnst(problemen)
+
+  // 1. Waar staat het, en werkt het.
+  const kop = staat.isRepo
+    ? I18N.t('gitset.kopRepo', { branch: staat.branch || 'HEAD' })
+    : I18N.t('gitset.kopGeenRepo')
+  const koppelTekst = !staat.isRepo ? ''
+    : staat.koppeling === 'geen'     ? I18N.t('gitset.koppelGeen')
+    : staat.koppeling === 'ok'       ? I18N.t('gitset.koppelOk')
+    : staat.koppeling === 'stuk'     ? I18N.t('gitset.koppelStuk')
+    :                                  I18N.t('gitset.koppelOnbekend')
+
+  const delen = [`<div class="git-set-kop ${ernst ? 'e-' + ernst : ''}">
+      <i class="ti ti-git-branch"></i>
+      <span>${esc(kop)}</span>
+      ${koppelTekst ? `<span class="git-set-status s-${esc(staat.koppeling)}">${esc(koppelTekst)}</span>` : ''}
+    </div>`]
+
+  // 2. Elk adres apart, met een knop om het te wijzigen of weg te halen. Bij
+  //    twee remotes waarvan er één dood is, is dit de plek waar je ziet welke.
+  if (staat.remoteLijst && staat.remoteLijst.length) {
+    delen.push(`<div class="git-set-remotes">` + staat.remoteLijst.map(r => `
+      <div class="git-set-remote${r.naam === staat.remote ? ' actief' : ''}">
+        <div class="git-set-remote-tekst">
+          <span class="git-set-remote-naam">${esc(r.naam)}</span>
+          <span class="git-set-remote-url mono">${esc(r.url)}</span>
+        </div>
+        <button class="btn-ghost btn-mini" data-remote-url="${esc(r.naam)}">${esc(I18N.t('gitset.adresWijzigen'))}</button>
+        <button class="btn-ghost btn-mini gevaar" data-remote-weg="${esc(r.naam)}">${esc(I18N.t('gitset.adresWeg'))}</button>
+      </div>`).join('') + `</div>`)
+  }
+
+  // 3. Wat er mis is, met per punt de knop die het oplost.
+  if (problemen.length) {
+    delen.push(`<div class="git-set-problemen">` + problemen.map(pr => `
+      <div class="git-set-probleem e-${esc(pr.ernst)}">
+        <i class="ti ${pr.ernst === 'fout' ? 'ti-alert-triangle' : pr.ernst === 'let-op' ? 'ti-alert-circle' : 'ti-info-circle'}"></i>
+        <span>${esc(I18N.t('gitset.prob.' + pr.id, { aantal: pr.aantal || 0, remote: pr.remote || '', url: pr.url || '' }))}</span>
+        ${pr.actie ? `<button class="btn-ghost btn-mini" data-git-actie="${esc(pr.actie)}">${esc(I18N.t('gitset.actie.' + pr.actie))}</button>` : ''}
+      </div>`).join('') + `</div>`)
+  } else if (staat.isRepo) {
+    delen.push(`<div class="git-set-ok"><i class="ti ti-check"></i> ${esc(I18N.t('gitset.nietsMis'))}</div>`)
+  }
+
+  // 4. Altijd bereikbaar, ook als de app níéts mis ziet — want "de app ziet
+  //    het niet" is precies de klacht die hier begon.
+  delen.push(`<div class="git-set-acties">
+      <button class="btn-ghost btn-mini" id="git-set-check"><i class="ti ti-refresh"></i> ${esc(I18N.t('gitset.controleren'))}</button>
+      ${staat.heeftRemote ? `<button class="btn-ghost btn-mini" id="git-set-herstel">${esc(I18N.t('gitset.herstellen'))}</button>` : ''}
+      ${staat.isRepo ? `<button class="btn-ghost btn-mini" id="git-set-koppel">${esc(I18N.t(staat.heeftRemote ? 'gitset.opnieuwKoppelen' : 'gitset.koppelen'))}</button>` : ''}
+    </div>`)
+
+  doel.innerHTML = delen.join('')
+  bindGitSectie(p, pad, staat)
+}
+
+function bindGitSectie(p, pad, staat) {
+  const doel = document.getElementById('git-sectie')
+  if (!doel) return
+
+  // Na élke handeling opnieuw controleren én opnieuw tekenen: de sectie is de
+  // plek waar je komt kijken of het gelukt is.
+  const naAfloop = async () => { await controleerKoppeling(pad, true); tekenGitSectie() }
+
+  doel.querySelector('#git-set-check')?.addEventListener('click', async (e) => {
+    e.target.closest('button').disabled = true
+    await naAfloop()
+  })
+  doel.querySelector('#git-set-herstel')?.addEventListener('click', async () => {
+    // De herstelweg wil een kapotte koppeling zien. Is hij niet kapot, dan
+    // laten we hem hier toch los — de gebruiker vraagt er expliciet om.
+    const nu = gitStaten[pad] || staat
+    await herstelKoppeling(p, pad, nu.koppelingStuk ? nu : { ...nu, koppelingStuk: true, remoteReden: nu.remoteReden || 'onbekend' })
+    await naAfloop()
+  })
+  doel.querySelector('#git-set-koppel')?.addEventListener('click', async () => {
+    await koppelGithub(p)
+    await naAfloop()
+  })
+
+  doel.querySelectorAll('[data-remote-weg]').forEach(el => el.addEventListener('click', async () => {
+    const naam = el.dataset.remoteWeg
+    const ja = await vraagJaNee(I18N.t('gitset.wegTitel'),
+      I18N.t('gitset.wegTekst', { remote: naam }), I18N.t('gitset.adresWeg'), 'gevaar')
+    if (!ja) return
+    await executeCmd(p, GitTools.remoteWegCommando(naam), 'git-koppelen')
+    await naAfloop()
+  }))
+
+  doel.querySelectorAll('[data-remote-url]').forEach(el => el.addEventListener('click', async () => {
+    const naam = el.dataset.remoteUrl
+    const oud = (staat.remoteLijst.find(r => r.naam === naam) || {}).url || ''
+    const ruw = await vraagTekst({
+      titel: I18N.t('git.link.urlTitle'), tekst: I18N.t('git.link.urlText'),
+      waarde: oud, placeholder: 'https://github.com/gebruiker/repo.git',
+      okLabel: I18N.t('common.save'),
+    })
+    if (!ruw) return
+    const cmd = GitTools.remoteUrlCommando(naam, ruw)
+    if (!cmd) { await meldKort(I18N.t('git.link.urlBadTitle'), I18N.t('git.link.urlBadText')); return }
+    await executeCmd(p, cmd, 'git-koppelen')
+    await naAfloop()
+  }))
+
+  doel.querySelectorAll('[data-git-actie]').forEach(el => el.addEventListener('click', async () => {
+    const actie = el.dataset.gitActie
+    const nu = gitStaten[pad] || staat
+    if (actie === 'herstellen')  await herstelKoppeling(p, pad, nu)
+    else if (actie === 'koppelen') await koppelGithub(p)
+    else if (actie === 'commit')   await schrijfGitCmd(p, 'git-commit')
+    else if (actie === 'push')     await schrijfGitCmd(p, 'git-push')
+    else if (actie === 'diff')     await toonDiff(p)
+    else if (actie === 'branch')   await branchOverzicht(p)
+    else if (actie === 'profiel')  await controleerIdentiteit(p, nu)
+    else if (actie === 'remotes')  await meldKort(I18N.t('gitset.remotesTitel'), I18N.t('gitset.remotesTekst'))
+    await naAfloop()
+  }))
+}
+
 function openNewModal() {
   editingId = null; selEmoji = '📱'
   document.getElementById('modal-title').textContent = I18N.t('modal.project.title')
@@ -13167,6 +13321,7 @@ function openNewModal() {
   document.getElementById('modal-proj').hidden = false
   buildEmojiPicker()
   refreshEmojiPicker(); refreshLocList(); renderCmdVisibilitySection(); vulProfielKeuze('')
+  toonGitSectie(null)
   focusField('f-name')
 }
 
@@ -13189,6 +13344,7 @@ function openEditModal(id) {
   document.getElementById('modal-proj').hidden = false
   buildEmojiPicker()
   refreshEmojiPicker(); refreshLocList(); renderCmdVisibilitySection(); vulProfielKeuze(p.gitProfiel || '')
+  toonGitSectie(p)
 
   const footer = document.querySelector('#modal-proj .modal-footer')
   if (!footer.querySelector('.btn-delete')) {
