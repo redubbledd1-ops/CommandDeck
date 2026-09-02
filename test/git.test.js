@@ -1141,8 +1141,8 @@ for (const sleutel of ['git.afsluit.titel', 'git.afsluit.commitPush', 'git.afslu
     /git:afsluitHartslag/.test(main) && /gitAfsluitHartslag/.test(pre)
     && /hartslagAfsluiten/.test(ren))
   t('Windows-afsluiten start dezelfde vragen',
-    /hookWindowMessage\(0x0011/.test(main)
-    && main.slice(main.indexOf("app.on('session-end'")).includes('startAfsluitControle()'))
+    /win\.on\('query-session-end'/.test(main)
+    && main.slice(main.indexOf("app.on('session-end'")).includes("startAfsluitControle('windows')"))
 }
 
 for (const sleutel of ['git.btn.diff', 'git.diff.leegTitel', 'git.diff.nieuweKop',
@@ -1329,6 +1329,94 @@ t('zonder gekoppelde blijft alles staan',
   && G.zonderGekoppelde(uitJson, []).verborgen === 0)
 t('een adres dat nergens op slaat filtert niets weg',
   G.zonderGekoppelde(uitJson, ['zomaar']).lijst.length === 2)
+
+// ── Windows dat afsluit terwijl er werk openstaat ────────────────────────────
+// Windows vraagt eerst toestemming (WM_QUERYENDSESSION) en kapt daarna binnen
+// enkele seconden af. Vroeger was stashen het enige dat nog paste. Sinds
+// Electron 34 kan er 'nee' gezegd worden op die vraag: Windows zet het afsluiten
+// dan stil en toont wie het ophoudt. Dat is de ruimte om te vragen wat er moet
+// gebeuren, in plaats van het te raden.
+const mainAf = fs.readFileSync(path.join(APP, 'main.js'), 'utf8')
+t('de app kan het afsluiten van Windows stilzetten',
+  /win\.on\('query-session-end'/.test(mainAf)
+  && /e\.preventDefault\(\)/.test(mainAf))
+t('maar alleen als er echt werk te redden valt',
+  /if \(!heeftWerkOmTeRedden\(\)\) return[\s\S]{0,40}e\.preventDefault\(\)/.test(mainAf))
+t('en niet meer nadat je zelf "toch afsluiten" koos',
+  /win\.on\('query-session-end'[\s\S]{0,160}if \(afsluitenBevestigd\) return/.test(mainAf))
+t('de vraag komt van de lijst die de renderer bijhoudt, want synchroon moet het',
+  /function heeftWerkOmTeRedden\(\)[\s\S]{0,600}GitTools\.teVragenProjecten\(gitProjectenVoorAfsluiten\.lijst/.test(mainAf))
+t('en nooit over de mappen van een ander account',
+  /function heeftWerkOmTeRedden\(\)[\s\S]{0,500}gitProjectenVoorAfsluiten\.accountId !== accountStand\(\)\.actiefAccount\) return false/.test(mainAf))
+t('het venster komt naar voren, want wij houden het op',
+  /win\.on\('query-session-end'[\s\S]{0,600}win\.focus\(\)/.test(mainAf))
+t('de oude berichtenhaak is vervangen, niet verdubbeld',
+  !/hookWindowMessage\(0x0011/.test(mainAf))
+t('de aanleiding gaat mee naar het venster',
+  /send\('git:controleerVoorAfsluiten', \{ aanleiding: aanleiding \|\| 'venster' \}\)/.test(mainAf))
+
+const rendererAf = fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8')
+t('en het venster zegt achteraf dat Windows is gestopt met afsluiten',
+  /info\.aanleiding === 'windows'[\s\S]{0,200}git\.afsluit\.windowsTekst/.test(rendererAf))
+t('de stash blijft het vangnet als Windows ons tóch afkapt',
+  /teStashenProjecten/.test(mainAf))
+for (const sleutel of ['git.afsluit.windowsTitel', 'git.afsluit.windowsTekst']) {
+  t('afsluit-tekst ' + sleutel + ' bestaat in nl en en', !!nl[sleutel] && !!en[sleutel])
+}
+
+// ── Achterlopen op de andere pc ──────────────────────────────────────────────
+// Het geval waar dit voor bestaat: gisteren op pc 1 gewerkt, vandaag pc 2 aan.
+// Eén knop "ophalen" is dan te weinig — `pull --ff-only` weigert zodra jij ook
+// iets hebt, en niet-vastgelegd werk laat git niet overschrijven. De knoppen
+// horen dus te passen bij wat er aan de hand is.
+const achterStaat = (extra) => G.maakStaat(Object.assign(
+  { beschikbaar: true, isRepo: true, remotes: ['origin'], branch: 'main',
+    commits: true, upstream: 'origin/main' }, extra))
+
+t('niets achter is geen vraag', G.achterstandKeuzes(achterStaat({ behind: 0 })) === null)
+
+const gewoon = G.achterstandKeuzes(achterStaat({ behind: 3 }))
+t('gewoon achter: vooruitspoelen is genoeg',
+  gewoon.behind === 3 && gewoon.wijzen.join() === 'ffonly' && gewoon.stashNodig === false)
+
+const uitEen = G.achterstandKeuzes(achterStaat({ behind: 3, ahead: 2 }))
+t('allebei gewerkt: geen vooruitspoelen meer, wel een keuze',
+  uitEen.uitEenLopend === true && uitEen.wijzen.join() === 'merge,rebase')
+t('en er staat bij hoeveel van jou er nog niet zijn', uitEen.ahead === 2)
+
+const vuil = G.achterstandKeuzes(achterStaat({ behind: 1, vuil: 2 }))
+t('niet-vastgelegd werk gaat eerst opzij', vuil.stashNodig === true)
+const beide = G.achterstandKeuzes(achterStaat({ behind: 1, ahead: 1, vuil: 2 }))
+t('en dat geldt ook als je uit elkaar loopt',
+  beide.stashNodig === true && beide.wijzen.join() === 'merge,rebase')
+
+t('elke wijze heeft zijn eigen commando',
+  G.pullCommando('ffonly') === 'git pull --ff-only'
+  && G.pullCommando('merge') === 'git pull --no-rebase'
+  && G.pullCommando('rebase') === 'git pull --rebase')
+t('en iets onbekends spoelt hoogstens vooruit — nooit ongevraagd samenvoegen',
+  G.pullCommando('zomaar') === 'git pull --ff-only' && G.pullCommando() === 'git pull --ff-only')
+
+for (const sleutel of ['git.achter.tekstVuil', 'git.achter.stashMislukt', 'git.achter.mislukt',
+                       'git.achter.knop.ffonly', 'git.achter.knop.merge', 'git.achter.knop.rebase',
+                       'git.achter.knopWegzetten.ffonly', 'git.achter.knopWegzetten.merge',
+                       'git.achter.knopWegzetten.rebase']) {
+  t('achterstand-tekst ' + sleutel + ' bestaat in nl en en', !!nl[sleutel] && !!en[sleutel])
+}
+
+const rendererAchter = fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8')
+t('de vraag komt nooit over het inlogscherm heen',
+  /async function wachtOpVrijVenster\(/.test(rendererAchter)
+  && /while \(inlogBezig \|\| vraagKlaar\)/.test(rendererAchter)
+  && /if \(!await wachtOpVrijVenster\(\)\) return/.test(rendererAchter))
+t('en kijkt pas ná het inloggen welk project openstaat',
+  /await wachtOpVrijVenster\(\)\) return[\s\S]{0,400}const p = projects\.find\(x => x\.id === activeId\)/.test(rendererAchter))
+t('na het wisselen van account wordt er opnieuw gekeken',
+  /await ververesAlleGitStaten\(true\)[\s\S]{0,220}controleerAchterstand\(\)/.test(rendererAchter))
+t('weggezet werk komt na het ophalen weer terug',
+  /stashPopCommando\(bovenste\.ref\)/.test(rendererAchter))
+t('en bij een mislukte stash wordt er niets opgehaald',
+  /git\.achter\.stashMislukt[\s\S]{0,80}return/.test(rendererAchter))
 
 // ── Een blijven staan index.lock ─────────────────────────────────────────────
 // De aanleiding: een afgebroken git liet zijn slotbestand staan en daarna

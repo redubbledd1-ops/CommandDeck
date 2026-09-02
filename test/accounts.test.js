@@ -301,7 +301,7 @@ t('het inlogscherm biedt een account toevoegen aan',
   /NIEUW_ACCOUNT/.test(rendererJs)
   && /accounts\.toevoegenBijStart/.test(rendererJs))
 t('en gaat daarna terug naar de lijst, zodat je meteen kunt inloggen',
-  /if \(id === NIEUW_ACCOUNT\) \{[\s\S]{0,200}await voegAccountToe\(\)[\s\S]{0,120}kiesAccountBijStart\(\)/.test(rendererJs))
+  /if \(id === NIEUW_ACCOUNT\) \{[\s\S]{0,200}await voegAccountToe\(\)[\s\S]{0,140}kiesAccountVenster\(\)/.test(rendererJs))
 t('de toevoegstroom staat los van de instellingen',
   /async function voegAccountToe\(\)/.test(rendererJs))
 t('de tekst voor die knop bestaat in nl en en',

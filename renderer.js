@@ -912,13 +912,14 @@ window.addEventListener('DOMContentLoaded', async () => {
     const open = projects.find(x => x.id === activeId)
     if (open) await ververesGitStaat(open, true)
     startGitPolling()
-    if (open) controleerAchterstand(open)
+    // Wacht vanzelf tot het inloggen klaar is; zie wachtOpVrijVenster.
+    controleerAchterstand()
   }, 800)
 
   setTimeout(() => { ververesAlleGitStaten(true) }, 3500)
 
   // Het main-proces houdt het sluiten tegen en vraagt ons na te kijken.
-  try { window.api.opAfsluitControle(() => controleerVoorAfsluiten()) } catch {}
+  try { window.api.opAfsluitControle((info) => controleerVoorAfsluiten(info)) } catch {}
 
   // Zijn er meerdere accounts, dan eerst vragen wie er achter de pc zit. Bij
   // één account is er niets te kiezen en vragen we dus ook niets.
@@ -2658,8 +2659,7 @@ function selectProject(id) {
   activeId = id
   // Stil kijken of de remote iets heeft wat jij niet hebt. Hoogstens eens per
   // tien minuten per map, en een mislukking blijft onzichtbaar.
-  const geopend = projects.find(x => x.id === id)
-  if (geopend) setTimeout(() => controleerAchterstand(geopend), 400)
+  if (projects.some(x => x.id === id)) setTimeout(() => controleerAchterstand(), 400)
 
   const naOpenen = () => {
     const p = projects.find(x => x.id === id)
@@ -7491,6 +7491,11 @@ function saveAddBtnModal() {
 let accounts = []
 let actiefAccount = ''
 let accountPinNodig = false
+// Staat er een inlog open? Zolang dat zo is houdt de achterstandvraag zich
+// stil: ze delen één venster, en dooreen vragen kost je je pincode. Een teller
+// en geen ja/nee, want inloggen kan geneste stappen hebben (kiezen, dan de
+// pincode van het account waar je heen wisselt).
+let inlogBezig = 0
 
 // Een pincode vragen. Twee keer bij het instellen, zodat een typefout je niet
 // buitensluit uit je eigen account.
@@ -7943,7 +7948,12 @@ async function wisselAccount(id, pin = null, opties = {}) {
   if (accountPinNodig && pin === null) {
     const doel = accounts.find(a => a.id === id)
     if (!doel) return false
-    pin = await vraagBestaandePin(doel)
+    inlogBezig++
+    try {
+      pin = await vraagBestaandePin(doel)
+    } finally {
+      inlogBezig--
+    }
     if (pin === null) return false
   }
 
@@ -7982,7 +7992,12 @@ async function wisselAccount(id, pin = null, opties = {}) {
   }
   showToast(I18N.t('accounts.gewisseld', { naam: (huidigAccount() || {}).naam || '' }))
   startGitPolling()
-  activeerGitVoorAccount().then(() => ververesAlleGitStaten(true))
+  activeerGitVoorAccount().then(async () => {
+    await ververesAlleGitStaten(true)
+    // Net ingelogd: dit is hét moment om te horen dat er op de andere pc iets
+    // is gebeurd in het project dat nu opengaat.
+    controleerAchterstand()
+  })
   return true
 }
 
@@ -8033,6 +8048,15 @@ async function voegAccountToe() {
 
 async function kiesAccountBijStart() {
   if (accounts.length < 2) return
+  inlogBezig++
+  try {
+    await kiesAccountVenster()
+  } finally {
+    inlogBezig--
+  }
+}
+
+async function kiesAccountVenster() {
 
   const tonen = accounts.slice(0, 8)
   const knoppen = []
@@ -8059,7 +8083,7 @@ async function kiesAccountBijStart() {
   // niet verder dan de accounts die er al waren.
   if (id === NIEUW_ACCOUNT) {
     await voegAccountToe()
-    await kiesAccountBijStart()
+    if (accounts.length >= 2) await kiesAccountVenster()
     return
   }
 
@@ -8069,7 +8093,7 @@ async function kiesAccountBijStart() {
     if (!accountPinNodig) return
     const ik = accounts.find(a => a.id === id)
     const pin = ik ? await vraagBestaandePin(ik) : null
-    if (pin === null) { await kiesAccountBijStart(); return }
+    if (pin === null) { await kiesAccountVenster(); return }
     return
   }
   await wisselAccount(id)
@@ -11946,10 +11970,31 @@ async function regelGitSlot(project, pad) {
 const gitLaatsteFetch = {}     // pad -> tijdstip
 let achterstandBezig = false
 
-async function controleerAchterstand(p) {
+// Wachten tot het scherm vrij is. Inloggen en deze vraag delen één venster en
+// één antwoord; komt de een ertussendoor, dan overschrijft hij het antwoord van
+// de ander en blijft het inloggen hangen. Geeft false als het te lang duurt.
+async function wachtOpVrijVenster(maxMs = 3 * 60 * 1000) {
+  const eind = Date.now() + maxMs
+  while (inlogBezig || vraagKlaar) {
+    if (Date.now() > eind) return false
+    await new Promise(r => setTimeout(r, 200))
+  }
+  return true
+}
+
+// Kijkt of de remote iets heeft wat deze pc niet heeft, en biedt aan het op te
+// halen. Draait bij het openen van een project, en na het inloggen voor het
+// project dat dan openstaat — dat is precies het moment waarop je wil weten dat
+// je gisteren op de andere pc verder bent gegaan.
+async function controleerAchterstand() {
   if (achterstandBezig) return
   if ((settings.git || {}).fetchBijOpenen === false) return
+  if (!await wachtOpVrijVenster()) return
 
+  // Pas ná het wachten kijken welk project openstaat: tijdens het inloggen kan
+  // er van account gewisseld zijn, en dan gaat dit over andermans map.
+  const p = projects.find(x => x.id === activeId)
+  if (!p) return
   const pad = actieveLocPad(p)
   if (!pad) return
 
@@ -11965,35 +12010,85 @@ async function controleerAchterstand(p) {
     if (!r || !r.ok) return
 
     const na = await ververesGitPad(pad, true)
-    const melding = GitTools.achterstandMelding(na)
-    if (!melding) return
+    const plan = GitTools.achterstandKeuzes(na)
+    if (!plan) return
     // Je kunt inmiddels ergens anders zijn; dan niet alsnog een venster
     // openen over een project dat je niet meer voor je hebt.
     if (activeId !== p.id) return
 
-    const regels = []
-    if (melding.uitEenLopend) regels.push(I18N.t('git.achter.uitEenLopend'))
-    if (melding.vuil) regels.push(I18N.t('git.achter.vuil', { aantal: melding.vuil }))
-
-    const keuze = await vraagKeuze({
-      titel: I18N.t('git.achter.titel', { aantal: melding.behind, branch: melding.branch }),
-      tekst: I18N.t(melding.uitEenLopend ? 'git.achter.tekstUitEen' : 'git.achter.tekst'),
-      regels,
-      knoppen: [
-        { label: I18N.t('git.achter.later'), waarde: '' },
-        { label: I18N.t('git.achter.nu'), waarde: 'pull', soort: melding.uitEenLopend || melding.vuil ? 'gevaar' : 'primair' },
-      ],
-    })
-    if (keuze !== 'pull') return
-
-    await executeCmd(p, GitTools.GIT_CMD_MAP['git-pull'], 'git-pull')
-    await ververesGitPad(pad, true)
+    await biedAchterstandAan(p, pad, plan)
   } catch {
     // Netwerk weg, remote onbereikbaar: de indicator blijft staan op wat hij
     // wist. Dat is beter dan een foutmelding over iets waar je niet om vroeg.
   } finally {
     achterstandBezig = false
   }
+}
+
+// De vraag zelf. De knoppen hangen af van wat er aan de hand is: vooruitspoelen
+// kan alleen als jij zelf niets extra's hebt, en niet-vastgelegd werk moet eerst
+// opzij. Eén knop "ophalen" die in de helft van de gevallen een foutmelding
+// geeft is geen keuze, dus staan de echte mogelijkheden er gewoon.
+async function biedAchterstandAan(p, pad, plan) {
+  const regels = []
+  if (plan.uitEenLopend) regels.push(I18N.t('git.achter.uitEenLopend', { aantal: plan.ahead || 0 }))
+  if (plan.vuil) regels.push(I18N.t('git.achter.vuil', { aantal: plan.vuil }))
+
+  // column-reverse in het venster: achterste knop komt bovenaan. Dus de
+  // aanbevolen weg als laatste in de lijst.
+  const knoppen = [{ label: I18N.t('git.achter.later'), waarde: '' }]
+  for (const wijze of [...plan.wijzen].reverse()) {
+    knoppen.push({
+      label: I18N.t((plan.stashNodig ? 'git.achter.knopWegzetten.' : 'git.achter.knop.') + wijze),
+      waarde: wijze,
+      soort: wijze === plan.wijzen[0] ? 'primair' : '',
+    })
+  }
+
+  const wijze = await vraagKeuze({
+    titel: I18N.t('git.achter.titel', { aantal: plan.behind, branch: plan.branch }),
+    tekst: I18N.t(plan.uitEenLopend ? 'git.achter.tekstUitEen'
+                : plan.vuil        ? 'git.achter.tekstVuil'
+                :                    'git.achter.tekst'),
+    regels,
+    knoppen,
+  })
+  if (!wijze) return
+
+  // Eerst het eigen werk opzij. Lukt dat niet, dan stoppen we: doorgaan zou
+  // betekenen dat git over aangepaste bestanden heen wil, en dat weigert hij
+  // toch — of erger, halverwege.
+  let weggezet = false
+  if (plan.stashNodig) {
+    await executeCmd(p, GitTools.stashCommando(), 'git-stash')
+    const naStash = await ververesGitPad(pad, true)
+    if (naStash && naStash.vuil) {
+      await meldKort(I18N.t('git.achter.titel', { aantal: plan.behind, branch: plan.branch }),
+        I18N.t('git.achter.stashMislukt'))
+      return
+    }
+    weggezet = true
+  }
+
+  await executeCmd(p, GitTools.pullCommando(wijze), 'git-pull')
+  const naPull = await ververesGitPad(pad, true)
+
+  // Het werk terughalen dat we net opzij zetten. Ook als de pull mislukte —
+  // anders staat je werk in een stash waar je niet om vroeg.
+  if (weggezet) {
+    const lijst = await window.api.gitStashLijst(pad).catch(() => null)
+    const bovenste = (lijst && lijst[0]) || null
+    if (bovenste) {
+      await executeCmd(p, GitTools.stashPopCommando(bovenste.ref), 'git-stash-lijst')
+      await ververesGitPad(pad, true)
+    }
+  }
+
+  if (naPull && naPull.behind) {
+    await meldKort(I18N.t('git.achter.titel', { aantal: naPull.behind, branch: naPull.branch || plan.branch }),
+      I18N.t('git.achter.mislukt'))
+  }
+  vraagProjectHertekenen()
 }
 
 // ── Onveilig git-werk: afsluiten én accountwisselen ──────────────────────────
@@ -12031,13 +12126,21 @@ async function controleerOnveiligWerk(reden) {
   return 'door'
 }
 
-async function controleerVoorAfsluiten() {
+async function controleerVoorAfsluiten(info = {}) {
   hartslagAfsluiten()
   await wachtOpOnveiligWerk()
   onveiligWerkBezig = true
   try {
     const uitkomst = await controleerOnveiligWerk('afsluiten')
     if (uitkomst === 'blijven') { window.api.gitAfsluitenAf(); return }
+
+    // Windows wilde afsluiten en wij hebben dat stilgezet. Dat betekent dat
+    // Windows er zelf mee is gestopt — dus zeg dat, anders sta je te wachten op
+    // een pc die niet meer uitgaat.
+    if (info && info.aanleiding === 'windows') {
+      hartslagAfsluiten(180 * 1000)
+      await meldKort(I18N.t('git.afsluit.windowsTitel'), I18N.t('git.afsluit.windowsTekst'))
+    }
     window.api.gitAfsluitenMag()
   } catch (e) {
     // Nooit door onze eigen fout het venster onsluitbaar maken.

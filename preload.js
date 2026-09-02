@@ -82,7 +82,7 @@ contextBridge.exposeInMainWorld('api', {
   gitStashLijst: (p)     => ipcRenderer.invoke('git:stashLijst', p),
   gitStashInhoud:(p, r)  => ipcRenderer.invoke('git:stashInhoud', p, r),
   gitAccountInfo:(p)     => ipcRenderer.invoke('git:accountInfo', p),
-  opAfsluitControle: (f) => ipcRenderer.on('git:controleerVoorAfsluiten', () => f()),
+  opAfsluitControle: (f) => ipcRenderer.on('git:controleerVoorAfsluiten', (_, info) => f(info || {})),
   gitAfsluitenMag:  ()   => ipcRenderer.send('git:afsluitenMag'),
   gitAfsluitenAf:   ()   => ipcRenderer.send('git:afsluitenAfgebroken'),
   gitAfsluitHartslag: (o) => ipcRenderer.send('git:afsluitHartslag', o || {}),

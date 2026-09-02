@@ -421,6 +421,7 @@
     if (!i || !i.behind) return null
     return {
       behind: i.behind,
+      ahead: i.ahead || 0,
       branch: i.branch,
       // Vooruit én achter: `pull --ff-only` gaat weigeren. Beter dat je dat
       // vooraf weet dan dat je op een knop drukt die een foutmelding geeft.
@@ -429,6 +430,34 @@
       // overschrijven die je hebt aangepast.
       vuil: i.vuil,
     }
+  }
+
+  // Wat kún je doen met die achterstand? Dat hangt af van twee dingen: loop je
+  // zelf ook vooruit (dan is `--ff-only` kansloos), en staat er niet-vastgelegd
+  // werk in de weg (dan weigert git bestanden te overschrijven). Dit rekent dat
+  // uit, zodat het venster de juiste knoppen krijgt in plaats van één knop die
+  // in de helft van de gevallen een foutmelding oplevert.
+  //
+  //   ffonly  vooruitspoelen; kan alleen als jij zelf niets extra's hebt
+  //   merge   allebei behouden, met een samenvoeg-commit erbij
+  //   rebase  jouw commits opnieuw bovenop die van de ander
+  function achterstandKeuzes(staat) {
+    const melding = achterstandMelding(staat)
+    if (!melding) return null
+    return {
+      ...melding,
+      // Uit elkaar gelopen: dan is vooruitspoelen geen optie meer en moet je
+      // kiezen hoe de twee kanten samenkomen.
+      wijzen: melding.uitEenLopend ? ['merge', 'rebase'] : ['ffonly'],
+      // Niet-vastgelegd werk gaat eerst opzij en komt er daarna weer bij.
+      stashNodig: melding.vuil > 0,
+    }
+  }
+
+  function pullCommando(wijze) {
+    if (wijze === 'merge')  return 'git pull --no-rebase'
+    if (wijze === 'rebase') return 'git pull --rebase'
+    return 'git pull --ff-only'
   }
 
   // ── Zien wat er verandert ───────────────────────────────────────────────────
@@ -1672,6 +1701,7 @@
     identiteitCommando, profielCommando, ghSwitchCommando, vraagtOmInloggen,
     INLOG_ONTHOUDEN, INLOG_VRAGEN, INLOG_KEUZES,
     indicator, onveiligeRedenen, magFetchen, achterstandMelding, FETCH_INTERVAL_MS,
+    achterstandKeuzes, pullCommando,
     globaalIdentiteitCommando, globaalGhGebruikerCommando, accountActiveerStappen,
     ghLoginCommando, ghInstallCommando, parseGhAccounts, parseGhLoginCode, parseGhLoginUrl, nieuwGhAccount,
     parseGhUser, parseGhEmails, noreplyEmail, ghIdentiteit,

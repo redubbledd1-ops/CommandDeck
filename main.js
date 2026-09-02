@@ -100,14 +100,45 @@ function createWindow() {
     startAfsluitControle()
   })
 
-  // Windows-afsluiten/uitloggen stuurt eerst QUERYENDSESSION, soms nog vóór
-  // het close-event. Zelfde ronde: per project een melding, tot Windows zelf
-  // het proces afkapt. Stash (hieronder) is het vangnet als er geen tijd is.
-  if (process.platform === 'win32' && typeof win.hookWindowMessage === 'function') {
+  // Windows afsluiten of uitloggen. Windows vraagt eerst toestemming
+  // (WM_QUERYENDSESSION) en geeft daarna nog een paar seconden. Sinds Electron
+  // 34 kun je op die vraag 'nee' zeggen: dan zet Windows het afsluiten stil en
+  // toont het scherm "deze app verhindert het afsluiten", met CommandDeck erbij
+  // en een knop om het tóch te doen. Dat is precies de ruimte die we nodig
+  // hebben — vragen wat er met niet-weggezet werk moet gebeuren, in plaats van
+  // vijf seconden en een stash.
+  //
+  // Alleen tegenhouden als er écht iets te redden valt. Iemand ophouden bij het
+  // afsluiten terwijl alles al gepusht is, is precies het soort app waar mensen
+  // een hekel aan krijgen.
+  win.on('query-session-end', (e) => {
+    if (afsluitenBevestigd) return          // je koos zelf al 'toch afsluiten'
+    if (!heeftWerkOmTeRedden()) return
+    e.preventDefault()
+    // Wij zijn nu degene die het ophoudt, dus moeten we ook in beeld staan.
     try {
-      win.hookWindowMessage(0x0011, () => { startAfsluitControle() })
-    } catch { /* oudere Electron zonder deze hook */ }
-  }
+      if (win && !win.isDestroyed()) {
+        if (win.isMinimized()) win.restore()
+        win.show()
+        win.focus()
+      }
+    } catch {}
+    startAfsluitControle('windows')
+  })
+}
+
+// Is er werk dat alleen op deze pc staat? Dit moet synchroon kunnen: op het
+// moment dat Windows het vraagt is er geen tijd om de renderer iets te vragen.
+// Vandaar de lijst die de renderer bijhoudt (zie git:projecten).
+function heeftWerkOmTeRedden() {
+  try {
+    const instelling = actieveInstellingen().git.afsluiten
+    if (instelling === 'uit') return false
+    // Hoort die lijst nog bij wie er nu ingelogd is? Zo niet, dan weten we het
+    // niet en houden we niemand op.
+    if (gitProjectenVoorAfsluiten.accountId !== accountStand().actiefAccount) return false
+    return GitTools.teVragenProjecten(gitProjectenVoorAfsluiten.lijst, instelling).length > 0
+  } catch { return false }
 }
 
 let afsluitenBevestigd = false
@@ -124,7 +155,7 @@ function startAfsluitNoodrem(ms) {
   }, wacht)
 }
 
-function startAfsluitControle() {
+function startAfsluitControle(aanleiding) {
   if (afsluitenBevestigd) return
   if (actieveInstellingen().git.afsluiten === 'uit') return
   if (!win || !win.webContents || win.webContents.isDestroyed()) return
@@ -136,7 +167,9 @@ function startAfsluitControle() {
     return
   }
   afsluitenGevraagd = true
-  win.webContents.send('git:controleerVoorAfsluiten')
+  // De aanleiding gaat mee: bij een Windows-afsluiten dat wij hebben stilgezet
+  // hoort er achteraf iets anders te gebeuren dan bij het kruisje.
+  win.webContents.send('git:controleerVoorAfsluiten', { aanleiding: aanleiding || 'venster' })
   startAfsluitNoodrem(AFSLUIT_NOODREM_MS)
 }
 
@@ -1498,14 +1531,15 @@ ipcMain.handle('git:stashInhoud', (_, dir, ref) => {
 })
 
 // ── Windows afsluiten of uitloggen ───────────────────────────────────────────
-// QUERYENDSESSION (hierboven) en het close-event starten dezelfde vragen als
-// bij het kruisje. Windows geeft daarna ongeveer vijf seconden extra; kapt het
-// proces af, dan is stash het vangnet. Geen renderer, geen dialoog, geen
-// await — alles wat hier gebeurt moet synchroon zijn en meteen af.
+// Het echte pauzeren gebeurt bij query-session-end (zie createWindow): daar
+// zeggen we 'nee' tegen WM_QUERYENDSESSION en zet Windows het afsluiten stil,
+// met een scherm waarop staat dat CommandDeck het ophoudt. Dat vroeg vroeger om
+// een native module; sinds Electron 34 zit het in de doos.
 //
-// Écht pauzeren zou de Windows-API ShutdownBlockReasonCreate vereisen, via een
-// native module of FFI. Dat is een extra build-stap die bij elke Electron-
-// upgrade kan breken, en zelfs dán kan de gebruiker "toch afsluiten" kiezen.
+// Dit stuk is het vangnet daaronder. Kiest iemand op dat scherm voor "toch
+// afsluiten", of houden we het niet tegen omdat er niets te redden leek, dan
+// krijgt het proces nog ongeveer vijf seconden. Geen renderer, geen dialoog,
+// geen await — alles wat hier gebeurt moet synchroon zijn en meteen af.
 
 // De renderer houdt bij welke projecten een git-map hebben en hoe ze ervoor
 // staan. Die lijst zetten we hier klaar, want op het moment zelf kunnen we hem
@@ -1557,9 +1591,10 @@ app.on('session-end', () => {
       }
     }
 
-    // Zelfde meldingen als bij het kruisje: niet-gepushte commits (stash pakt
-    // die niet) en, zonder stash-instelling, ook niet-vastgelegd werk.
-    try { startAfsluitControle() } catch {}
+    // Zelfde vragen als bij het kruisje: niet-gepushte commits (stash pakt die
+    // niet) en, zonder stash-instelling, ook niet-vastgelegd werk. Meestal is
+    // die ronde al gestart bij query-session-end; dan doet dit niets.
+    try { startAfsluitControle('windows') } catch {}
   } catch { /* nooit het afsluiten van Windows ophouden met een fout van ons */ }
 })
 
