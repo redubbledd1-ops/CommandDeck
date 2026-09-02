@@ -49,12 +49,16 @@ contextBridge.exposeInMainWorld('api', {
   gitRemoteVergeet:(p)   => ipcRenderer.invoke('git:remoteVergeet', p),
   gitIgnoreVoorstel:(p)  => ipcRenderer.invoke('git:gitignoreVoorstel', p),
   gitIgnoreSchrijf: (o)  => ipcRenderer.invoke('git:gitignoreSchrijf', o),
-  gitGhLogin:    ()      => ipcRenderer.invoke('git:ghLogin'),
+  gitGhLogin:    (o)     => ipcRenderer.invoke('git:ghLogin', o || {}),
   // Vroeger kwam hier alleen de code binnen. Nu een object met code én adres,
-  // zodat het venster een "link kopiëren"-knop kan tonen. Een oude vorm (kale
-  // tekst) blijft werken.
-  opGhCode:      (f)     => ipcRenderer.on('git:ghCode', (_, d) =>
-                              f(typeof d === 'string' ? { code: d, url: 'https://github.com/login/device' } : d)),
+  // zodat het venster een "Kopieer link"-knop kan tonen. Een oude vorm (kale
+  // tekst) blijft werken. Geeft een functie terug om de luisteraar weer weg
+  // te halen — anders stapelen ze bij elke inlog.
+  opGhCode:      (f)     => {
+    const h = (_, d) => f(typeof d === 'string' ? { code: d, url: 'https://github.com/login/device' } : d)
+    ipcRenderer.on('git:ghCode', h)
+    return () => ipcRenderer.removeListener('git:ghCode', h)
+  },
   gitGhAccounts: ()      => ipcRenderer.invoke('git:ghAccounts'),
   gitGhIdentiteit: (u)   => ipcRenderer.invoke('git:ghIdentiteit', u),
   gitAccountActiveren: (p) => ipcRenderer.invoke('git:accountActiveren', p),

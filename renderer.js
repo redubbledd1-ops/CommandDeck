@@ -6,6 +6,10 @@ let activeId    = null
 let view        = 'project'   // 'project' | 'cmd' | 'ps' | 'dict' | 'settings'
 let lastShellView = 'cmd'     // laatste cmd/powershell-paneel, voor 'beide'-commando's
 let activeTermId = null       // van wie de terminal-uitvoer nu getoond wordt
+let getekendProjectId = ''    // welk project nu in #main staat; voorkomt opnieuw opbouwen
+let projectWeergaveAchterhaald = false
+let sidebarGetekend = false
+let lastViewBewaarTimer = null
 let editingId   = null
 let deleteId    = null
 let pendingLocs = []
@@ -446,7 +450,7 @@ async function keurProjectenNa() {
   for (const p of projects) {
     if (await bepaalToolsVoorProject(p)) veranderd = true
   }
-  if (veranderd && view === 'project') renderMain()
+  if (veranderd) vraagProjectHertekenen()
 }
 
 // ── Git-toestand per locatie ─────────────────────────────────────────────────
@@ -485,9 +489,9 @@ async function ververesGitPad(pad, forceer = false) {
     if (!staat) return null
     const oud = gitStaten[pad]
     gitStaten[pad] = staat
-    if (JSON.stringify(oud) !== JSON.stringify(staat)) {
+    if (!GitTools.zelfdeGitWeergave(oud, staat)) {
       meldGitProjectenAanMain()
-      if (view === 'project') renderMain()
+      vraagProjectHertekenen()
     }
     return staat
   } catch {
@@ -898,20 +902,19 @@ window.addEventListener('DOMContentLoaded', async () => {
   // een update waarin deze controle erbij kwam) alsnog beoordelen.
   setTimeout(() => keurProjectenNa(), 1200)
 
-  // Git-toestand van álle projecten ophalen en daarna blijven bijhouden. Ook
-  // van projecten die niet open staan: de afsluitcontrole moet straks over
-  // allemaal iets kunnen zeggen, niet alleen over het laatst bekeken project.
+  // Git-toestand: eerst het open project, zodat het venster reageert. De rest
+  // en de netwerkcontrole komen daarna, anders staan zes git-processen per
+  // project in de weg van de eerste klik.
   setTimeout(async () => {
     meldGitPadenAanMain()
-    await activeerGitVoorAccount()
-    await ververesAlleGitStaten(true)
-    startGitPolling()
-    // Ook bij het opstarten kijken of de remote vóórloopt. restoreLastView()
-    // zet activeId rechtstreeks en gaat niet langs selectProject(), dus zonder
-    // dit zou een project dat al open stond nooit gecontroleerd worden.
+    activeerGitVoorAccount()
     const open = projects.find(x => x.id === activeId)
+    if (open) await ververesGitStaat(open, true)
+    startGitPolling()
     if (open) controleerAchterstand(open)
-  }, 1500)
+  }, 800)
+
+  setTimeout(() => { ververesAlleGitStaten(true) }, 3500)
 
   // Het main-proces houdt het sluiten tegen en vraagt ons na te kijken.
   try { window.api.opAfsluitControle(() => controleerVoorAfsluiten()) } catch {}
@@ -2031,8 +2034,9 @@ function setupNavigatie() {
 // ── View router ───────────────────────────────────────────────────────────────
 const PANELS = { project: 'main', cmd: 'cmd-panel', ps: 'ps-panel', dict: 'dict-panel', bat: 'bat-panel', settings: 'settings-panel' }
 
-// Alle panelen delen element-ID's (o.a. de terminal), dus alleen het zichtbare
-// paneel mag inhoud hebben. Bij elke wissel legen we de rest.
+// Panelen delen element-ID's (terminal, verkenner). Verborgen panelen houden
+// hun DOM, maar hun id's gaan naar data-bewaard-id zodat getElementById alleen
+// het zichtbare paneel treft. Opnieuw opbouwen bij elke wissel was de lag.
 function setView(v) {
   // Meldingen horen bij het scherm waar ze ontstonden. Een waarschuwing over
   // een bat-bestand of de afloop van een commando moet niet blijven hangen als
@@ -2045,7 +2049,7 @@ function setView(v) {
   if (v === 'settings') {
     view = v
     toonSettingsVolledig()
-    renderSidebar()
+    zetSidebarVoorView()
     renderSettingsPanel()
     rememberView()
     navPush()
@@ -2069,10 +2073,9 @@ function setView(v) {
   view = v
   if (v === 'cmd' || v === 'ps') lastShellView = v
   toonPanelenVolledig(v)
-  renderSidebar()
+  zetSidebarVoorView()
   tekenView(v)
   pasWerkSplitKnoppenAan()
-  planSplitPlusVervers()
   rememberView()
   navPush()
   keurStatusNa()
@@ -2085,7 +2088,8 @@ function rememberView() {
   const cur  = settings.lastView || {}
   if (cur.view === next.view && cur.projectId === next.projectId) return
   settings.lastView = next
-  window.api.saveSettings(settings)
+  clearTimeout(lastViewBewaarTimer)
+  lastViewBewaarTimer = setTimeout(() => window.api.saveSettings(settings), 400)
 }
 
 // Bij het opstarten terug naar de laatste weergave. Bestaat het project niet
@@ -2458,7 +2462,35 @@ function ontwapenAlleSecties() {
   })
 }
 
+function zetSidebarVoorView() {
+  if (sidebarGetekend) updateSidebarActief()
+  else renderSidebar()
+}
+
+function updateSidebarActief() {
+  document.querySelectorAll('#proj-list .proj-item').forEach((el, i) => {
+    const p = projects[i]
+    if (!p) return
+    const inAnderVlak = splitAan() && werkSlots.some(s => s.view === 'project' && s.projectId === p.id)
+      && !(view === 'project' && p.id === activeId)
+    el.classList.toggle('active', view === 'project' && p.id === activeId)
+    el.classList.toggle('in-split', !!inAnderVlak)
+  })
+  for (const def of NAV_KNOPPEN) {
+    const knop = document.getElementById(def.id)
+    if (!knop) continue
+    knop.classList.toggle('active', view === def.sleutel)
+    knop.classList.toggle('in-split', splitAan() && werkSlots.some((s, i) => i !== werkSlotFocus && s.view === def.sleutel))
+  }
+  const settingsBtn = document.getElementById('btn-settings')
+  if (settingsBtn) settingsBtn.classList.toggle('active', view === 'settings')
+  const count = (history.entries || []).length
+  const dictCount = document.getElementById('nav-dict-count')
+  if (dictCount) dictCount.textContent = count ? String(count) : ''
+}
+
 function renderSidebar() {
+  sidebarGetekend = true
   const list = document.getElementById('proj-list')
   const sorteerProj = sorteerModus === 'proj'
   list.innerHTML = ''
@@ -2583,26 +2615,36 @@ function selectProject(id) {
   // tien minuten per map, en een mislukking blijft onzichtbaar.
   const geopend = projects.find(x => x.id === id)
   if (geopend) setTimeout(() => controleerAchterstand(geopend), 400)
-  if (splitAan()) {
-    plaatsInSplit('project')
+
+  const naOpenen = () => {
     const p = projects.find(x => x.id === id)
     bepaalToolsVoorProject(p).then(verborgen => {
       if (!verborgen) return
-      if (activeId === id) renderMain()
+      if (activeId === id) vraagProjectHertekenen()
       showToast(I18N.t('project.notFlutterToast'))
     })
+  }
+
+  if (splitAan()) {
+    plaatsInSplit('project')
+    naOpenen()
     return
   }
+  // Al op het projectscherm: niet de andere panelen en de zijbalkboom slopen.
+  if (view === 'project') {
+    renderMain()
+    updateSidebarActief()
+    rememberView()
+    navPush()
+    keurStatusNa()
+    naOpenen()
+    return
+  }
+  // Vanuit cmd/ps/dict: panelen blijven staan, maar de projectknoppen moeten
+  // wel kloppen (nieuwe editors, eigen knoppen, git).
+  projectWeergaveAchterhaald = true
   setView('project')
-
-  // Nog niet eerder gekeken wat voor project dit is? Doe dat nu, en pas de
-  // tools-sectie daarop aan. Gebeurt maar één keer per project.
-  const p = projects.find(x => x.id === id)
-  bepaalToolsVoorProject(p).then(verborgen => {
-    if (!verborgen) return
-    if (activeId === id) renderMain()
-    showToast(I18N.t('project.notFlutterToast'))
-  })
+  naOpenen()
 }
 
 let prevView = 'project'
@@ -2918,10 +2960,13 @@ function renderMain() {
   const p    = projects.find(x => x.id === activeId)
   const main = document.getElementById('main')
   if (!p) {
+    getekendProjectId = ''
     main.innerHTML = `<div class="empty-state"><i class="ti ti-layout-sidebar-left-expand"></i><p>${esc(I18N.t('main.emptyState'))}</p></div>`
     keurStatusNa()
     return
   }
+
+  const zelfdeProject = getekendProjectId === p.id
 
   const activeLoc  = p.locations[p.activeLocation] || p.locations[0]
 
@@ -3002,7 +3047,7 @@ function renderMain() {
     </div>` : ''}
   `
 
-  const wrapBestaat = document.querySelector('#main .terminal-wrap.splitbaar')
+  const wrapBestaat = levend('#main .terminal-wrap.splitbaar')
   const houdWerkvlak = wrapBestaat && (
     splitTweeProjecten()
     || (splitGemengd() && werkSlots.some(s => s.view === 'project' && s.projectId === activeId))
@@ -3024,6 +3069,9 @@ function renderMain() {
     ${terminalMarkup({ splitbaar: true })}
   `
   }
+
+  getekendProjectId = p.id
+  projectWeergaveAchterhaald = false
 
   document.getElementById('loc-select').onchange = (e) => {
     p.activeLocation = parseInt(e.target.value)
@@ -3127,7 +3175,7 @@ function renderMain() {
     keurStatusNa()
     return
   }
-  wireTerminal(p)
+  wireTerminal(p, { volgBoom: !zelfdeProject })
   keurStatusNa()
 }
 
@@ -3397,11 +3445,12 @@ function brSuffix(pid = verkennerPid()) {
 
 function brEl(name, pid) {
   const id = pid || verkennerPid()
-  if (id === CMD_CTX_ID) return document.querySelector('#cmd-panel #' + name) || document.getElementById(name)
-  if (id === PS_CTX_ID) return document.querySelector('#ps-panel #' + name) || document.getElementById(name)
+  const inPaneel = (root, n) => root && (root.querySelector('#' + n) || root.querySelector(`[data-bewaard-id="${n}"]`))
+  if (id === CMD_CTX_ID) return inPaneel(document.getElementById('cmd-panel'), name) || document.getElementById(name)
+  if (id === PS_CTX_ID) return inPaneel(document.getElementById('ps-panel'), name) || document.getElementById(name)
   const s = brSuffix(pid)
   if (s) return document.getElementById(name + s) || document.getElementById(name)
-  return document.querySelector('#main #' + name) || document.getElementById(name)
+  return inPaneel(document.getElementById('main'), name) || document.getElementById(name)
 }
 
 function paneelVoorCtx(id) {
@@ -3413,7 +3462,7 @@ function paneelVoorCtx(id) {
 function termEl(base, id = activeTermId) {
   const root = paneelVoorCtx(id)
   if (root) {
-    const el = root.querySelector('#' + base)
+    const el = root.querySelector('#' + base) || root.querySelector(`[data-bewaard-id="${base}"]`)
     if (el) return el
   }
   return document.getElementById(base)
@@ -3684,8 +3733,86 @@ function paneelHeeftInhoud(v) {
   return !!el.innerHTML.trim()
 }
 
+// Verborgen panelen mogen hun knoppen en terminal houden, maar niet hun id's:
+// anders vindt getElementById het verkeerde #terminal / #term-input.
+function bevriesPaneelIds(el) {
+  if (!el) return
+  el.classList.add('paneel-bevroren')
+  el.querySelectorAll('[id]').forEach(n => {
+    if (!n.id) return
+    n.setAttribute('data-bewaard-id', n.id)
+    n.removeAttribute('id')
+  })
+}
+
+function ontdooiPaneelIds(el) {
+  if (!el) return
+  el.classList.remove('paneel-bevroren')
+  el.querySelectorAll('[data-bewaard-id]').forEach(n => {
+    n.id = n.getAttribute('data-bewaard-id')
+    n.removeAttribute('data-bewaard-id')
+  })
+}
+
+function inBevrorenPaneel(el) {
+  const host = el && el.closest && el.closest('.paneel-bevroren')
+  return !!(host && host !== el)
+}
+
+function levend(sel, root = document) {
+  return [...root.querySelectorAll(sel)].find(el => !inBevrorenPaneel(el)) || null
+}
+
+function levenden(sel, root = document) {
+  return [...root.querySelectorAll(sel)].filter(el => !inBevrorenPaneel(el))
+}
+
+function vraagProjectHertekenen() {
+  if (view === 'project') renderMain()
+  else projectWeergaveAchterhaald = true
+}
+
+function wisBewaardePanelen() {
+  getekendProjectId = ''
+  projectWeergaveAchterhaald = false
+  Object.entries(PANELS).forEach(([name, id]) => {
+    if (name === 'settings') return
+    const el = document.getElementById(id)
+    if (el) el.innerHTML = ''
+  })
+}
+
+function herstelBewaardPaneel(v) {
+  if (v === 'cmd') activeTermId = CMD_CTX_ID
+  else if (v === 'ps') activeTermId = PS_CTX_ID
+  else if (v === 'project') activeTermId = activeId
+  toonPtySessie()
+  if (v === 'cmd' || v === 'ps' || v === 'project') {
+    if (v === 'project') {
+      const p = projects.find(x => x.id === activeId)
+      const loc = p?.locations[p.activeLocation] || p?.locations[0]
+      if (loc?.path) updateTermPlaceholder(loc.path)
+      const gewenst = (settings.termTabs || {})[activeTermId] === 'browser' ? 'browser' : 'output'
+      if (!termSplitAan()) termTab = gewenst
+    }
+    pasTermSchermAan()
+    focusTerminalInput()
+  }
+  if (v === 'dict') {
+    const search = document.getElementById('dict-search')
+    if (search) requestAnimationFrame(() => { search.focus(); search.selectionStart = search.selectionEnd = search.value.length })
+  }
+}
+
 function tekenView(v, { alsLeeg = false } = {}) {
-  if (v === 'project') { renderMain(); return }
+  if (v === 'project') {
+    const zelfde = getekendProjectId === activeId && paneelHeeftInhoud('project') && !projectWeergaveAchterhaald
+    // Tijdens een splitsing moet renderMain de tabs/vlakken bijwerken; overslaan
+    // zou de focus van de verkenner kwijtraken.
+    if (zelfde && !splitAan()) { herstelBewaardPaneel('project'); return }
+    renderMain()
+    return
+  }
   if (alsLeeg && paneelHeeftInhoud(v)) return
   if (v === 'cmd')  renderCmdPanel()
   if (v === 'ps')   renderPsPanel()
@@ -3700,12 +3827,10 @@ function toonPanelenVolledig(v) {
     if (!el) return
     const on = name === v
     el.style.display = on ? 'flex' : 'none'
-    if (!on && name !== 'project') el.innerHTML = ''
+    if (!on) bevriesPaneelIds(el)
   })
-  if (v !== 'project') {
-    const m = document.getElementById('main')
-    if (m) m.innerHTML = ''
-  }
+  const zichtbaar = paneelEl(v)
+  if (zichtbaar) ontdooiPaneelIds(zichtbaar)
 }
 
 function toonSettingsVolledig() {
@@ -3716,10 +3841,8 @@ function toonSettingsVolledig() {
     if (!el) return
     const on = name === 'settings'
     el.style.display = on ? 'flex' : 'none'
-    if (!on && name !== 'project') el.innerHTML = ''
+    if (!on) bevriesPaneelIds(el)
   })
-  const m = document.getElementById('main')
-  if (m) m.innerHTML = ''
 }
 
 function verzamelPanelenInVlak0() {
@@ -3736,11 +3859,21 @@ function plaatsPanelenInVlakken() {
   const vlak0 = document.getElementById('werk-vlak-0')
   const vlak1 = document.getElementById('werk-vlak-1')
   if (!vlak0 || !vlak1 || !werkSlots) return
+
+  Object.entries(PANELS).forEach(([name, id]) => {
+    if (name === 'settings') return
+    const el = document.getElementById(id)
+    if (el) bevriesPaneelIds(el)
+  })
+
   werkSlots.forEach((s, i) => {
     const el = paneelEl(s.view)
     const dest = i === 0 ? vlak0 : vlak1
     if (el && dest && el.parentElement !== dest) dest.appendChild(el)
-    if (el) el.style.display = 'flex'
+    if (el) {
+      el.style.display = 'flex'
+      ontdooiPaneelIds(el)
+    }
   })
   Object.entries(PANELS).forEach(([name, id]) => {
     if (name === 'settings') return
@@ -3749,7 +3882,6 @@ function plaatsPanelenInVlakken() {
     if (!el) return
     if (el.parentElement !== vlak0) vlak0.appendChild(el)
     el.style.display = 'none'
-    if (name !== 'project') el.innerHTML = ''
   })
 }
 
@@ -3779,7 +3911,7 @@ function pasWerkVlakNamenAan() {
 function werkPlusNodig() {
   if (view === 'settings') return false
   if (splitGemengd()) return true
-  if (document.querySelector('.terminal-wrap.splitbaar')) return false
+  if (levend('.terminal-wrap.splitbaar')) return false
   return view === 'cmd' || view === 'ps' || view === 'dict' || view === 'bat'
 }
 
@@ -3819,7 +3951,7 @@ function zetSplitPlusZicht(btn, host, split, kant) {
 }
 
 function verversSplitPlusZicht() {
-  const wrap = document.querySelector('.terminal-wrap.splitbaar')
+  const wrap = levend('.terminal-wrap.splitbaar')
   const stage = wrap?.querySelector('.term-stage')
   if (stage && !splitGemengd()) {
     ;['right', 'bottom', 'left', 'top'].forEach(kant => {
@@ -3924,7 +4056,7 @@ function pasWerkSchermAan() {
   pasWerkVlakNamenAan()
   pasWerkSplitKnoppenAan()
 
-  if (splitGemengd() || document.querySelector('.terminal-wrap.splitbaar')) pasTermSchermAan()
+  if (splitGemengd() || levend('.terminal-wrap.splitbaar')) pasTermSchermAan()
 }
 
 function focusWerkSlot(slot) {
@@ -4146,8 +4278,8 @@ function kiesProjectInSplit(id) {
 
 function zetLiveInSlot(slot) {
   if (!splitTweeProjecten()) return
-  const pane0 = document.querySelector('.term-pane[data-pane="output"]')
-  const pane1 = document.querySelector('.term-pane[data-pane="browser"]')
+  const pane0 = levend('.term-pane[data-pane="output"]')
+  const pane1 = levend('.term-pane[data-pane="browser"]')
   if (!pane0 || !pane1) return
   const live = slot === 0 ? pane0 : pane1
   const idle = slot === 0 ? pane1 : pane0
@@ -4172,7 +4304,7 @@ function zetLiveInSlot(slot) {
 
 function pasPaneNamenAan() {
   const twee = splitTweeProjecten()
-  document.querySelectorAll('.term-pane').forEach(pane => {
+  levenden('.term-pane').forEach(pane => {
     const naam = pane.querySelector('.term-pane-naam')
     if (!naam) return
     if (!twee || !werkSlots) { naam.textContent = ''; return }
@@ -4258,7 +4390,7 @@ function vulIdleVerkenner() {
 
 function termSplitAan() {
   if (splitGemengd()) return false
-  return !!(termSplit && document.querySelector('.terminal-wrap.splitbaar'))
+  return !!(termSplit && levend('.terminal-wrap.splitbaar'))
 }
 
 function springNaarOutput() {
@@ -4302,7 +4434,7 @@ function herstelTermSplit(ctx) {
       if (slots[werkSlotFocus].view === 'project') termTab = slots[werkSlotFocus].tab
       return
     }
-    if (ok && !gemengd && document.querySelector('.terminal-wrap.splitbaar')) {
+    if (ok && !gemengd && levend('.terminal-wrap.splitbaar')) {
       werkSlots = slots
       const i = slots.findIndex(s => s.projectId === ctx?.id)
       werkSlotFocus = i >= 0 ? i : (raw.focus === 1 ? 1 : 0)
@@ -4310,7 +4442,7 @@ function herstelTermSplit(ctx) {
       return
     }
   }
-  if (!document.querySelector('.terminal-wrap.splitbaar') && !splitGemengd()) {
+  if (!levend('.terminal-wrap.splitbaar') && !splitGemengd()) {
     termSplit = null
     termSplitFirst = 'output'
     werkSlots = null
@@ -4435,6 +4567,7 @@ function pasSplitSluitRandAan(btn, aan, titel) {
 function pasTermSchermAan() {
   if (splitGemengd() && werkSlots) {
     document.querySelectorAll('#werk .terminal-wrap').forEach(w => {
+      if (inBevrorenPaneel(w)) return
       w.classList.remove('gesplitst', 'naast', 'onder', 'twee-projecten')
       w.querySelectorAll('.term-split-plus').forEach(b => {
         b.hidden = true
@@ -4461,8 +4594,8 @@ function pasTermSchermAan() {
     return
   }
 
-  const wrap = document.querySelector('#main .terminal-wrap.splitbaar')
-    || document.querySelector('.terminal-wrap')
+  const wrap = levend('#main .terminal-wrap.splitbaar')
+    || levend('.terminal-wrap')
   const term = wrap?.querySelector('#terminal') || document.getElementById('terminal')
   const br   = wrap?.querySelector('#browser') || document.getElementById('browser')
   const pty  = wrap?.querySelector('#pty-host') || document.getElementById('pty-host')
@@ -4512,7 +4645,7 @@ function pasTermSchermAan() {
   vulSplitPanelen()
   vulIdleVerkenner()
 
-  const invoer = document.querySelector('.term-input-wrap')
+  const invoer = levend('.term-input-wrap')
   if (invoer) {
     invoer.hidden = sessieLeeft
     if (sessieLeeft) {
@@ -4522,8 +4655,8 @@ function pasTermSchermAan() {
   }
   const sluit = document.getElementById('btn-pty-sluit')
   if (sluit) sluit.hidden = !sessieAanZet
-  document.querySelectorAll('.alleen-verkenner').forEach(b => { b.hidden = tab !== 'browser' })
-  document.querySelectorAll('.term-tab').forEach(b => {
+  levenden('.alleen-verkenner').forEach(b => { b.hidden = tab !== 'browser' })
+  levenden('.term-tab').forEach(b => {
     b.classList.toggle('active', b.dataset.tab === tab)
   })
   pasSplitKnopAan(wrap?.querySelector('.term-split-plus[data-split="right"]'),
@@ -4545,7 +4678,7 @@ function pasTermSchermAan() {
 }
 
 function wireTermSplit() {
-  const wrap = document.querySelector('.terminal-wrap.splitbaar')
+  const wrap = levend('.terminal-wrap.splitbaar')
   if (!wrap) return
   const stage = wrap.querySelector('.term-stage')
   const plusR = wrap.querySelector('.term-split-plus[data-split="right"]')
@@ -4768,7 +4901,14 @@ function renderBrowser() {
     return
   }
 
-  const kader = lijst.querySelector('.br-kader')
+  let kader = lijst.querySelector('.br-kader')
+  if (!kader) {
+    kader = document.createElement('div')
+    kader.className = 'br-kader'
+    kader.hidden = true
+    const suffix = String(lijst.id || '').replace(/^br-list/, '')
+    kader.id = 'br-kader' + suffix
+  }
   lijst.innerHTML = tonen.slice(0, 800).map((i, n) => `
     <div class="br-item ${i.dir ? 'map' : ''} ${(i.archief || (!i.inArchief && ARCHIEF_EXT.test(i.name))) ? 'archief' : ''} ${browserSelectie.has(i.path) ? 'gekozen' : ''} ${n === browserFocus ? 'focus' : ''}" data-i="${n}" title="${esc(i.path)}">
       <i class="ti ${i.schijf ? 'ti-device-desktop' : i.dir ? 'ti-folder' : (i.archief || ARCHIEF_EXT.test(i.name)) ? 'ti-file-zip' : 'ti-file'}"></i>
@@ -4829,7 +4969,7 @@ async function openBrowserItem(item) {
   showToast(I18N.t('browser.openedToast', { name: item.name }))
 }
 
-async function wireBrowser(ctx) {
+async function wireBrowser(ctx, opts = {}) {
   haalVerkennerOp(ctx.id)
   if (!browserPath) {
     const bewaard = (settings.verkennerPaden || {})[ctx.id]
@@ -4841,7 +4981,7 @@ async function wireBrowser(ctx) {
 
   // De boom hoort mee te gaan naar het project dat je net koos, ook als je op
   // de output blijft staan — anders wijst hij nog naar waar je hiervoor was.
-  if (browserPath) volgBoomNaar(browserPath)
+  if (browserPath && opts.volgBoom !== false) volgBoomNaar(browserPath)
   const bewaardeScroll = verkennerStaat(ctx.id).scroll || 0
   if (browserItems.length) {
     renderBrowser()
@@ -4852,7 +4992,8 @@ async function wireBrowser(ctx) {
     }
   }
 
-  document.querySelectorAll('.term-tab').forEach(b => b.onclick = () => setTermTab(b.dataset.tab))
+  const tabRoot = paneelVoorCtx(ctx.id) || document
+  tabRoot.querySelectorAll('.term-tab').forEach(b => b.onclick = () => setTermTab(b.dataset.tab))
 
   const weergave = document.getElementById('br-weergave')
   if (weergave) weergave.onclick = (e) => {
@@ -4976,7 +5117,7 @@ async function bedraadVerkennerHost(suffix) {
   drives.onchange = () => navigeerNaar(drives.value)
 }
 
-function wireTerminal(ctx) {
+function wireTerminal(ctx, opts = {}) {
   activeTermId = ctx.id
   herstelTermSplit(ctx)
   const $id = (id) => termEl(id, ctx.id)
@@ -5040,7 +5181,7 @@ function wireTerminal(ctx) {
 
   setupTerminalInput(ctx)
   aiVerversBalk()
-  wireBrowser(ctx)
+  wireBrowser(ctx, opts)
 
   if (termOutput[ctx.id]) {
     const term = $id('terminal')
@@ -7295,7 +7436,7 @@ function saveAddBtnModal() {
   saveProjects()
   closeAddBtnModal()
   showToast(I18N.t('addBtn.addedToProjectToast', { section: I18N.t(section === 'run' ? 'project.runSectionLabel' : 'project.toolsSectionLabel'), project: p.name }))
-  if (view === 'project' && activeId === p.id) renderMain()
+  vraagProjectHertekenen()
 }
 
 // ── Settings panel ────────────────────────────────────────────────────────────
@@ -7400,6 +7541,7 @@ async function vraagGitIdentiteit(accountNaam, huidig) {
 // hem niet kunt selecteren. Met een knop die hem op je klembord zet en de
 // juiste pagina opent.
 let ghCodeVenster = null
+let ghKopieerLink = false
 
 // Zorgt dat er een bruikbaar GitHub-account klaarstaat, of geeft eerlijk terug
 // dat het er niet is. Drie situaties, elk met een uitweg:
@@ -7446,21 +7588,28 @@ async function zorgVoorGithub() {
   return ingelogd ? true : false
 }
 
-async function startGhLogin() {
+async function startGhLogin(opties = {}) {
   ghCodeVenster = null
+  ghKopieerLink = !!opties.kopieerLink
+  let stopLuisteren = null
   try {
-    window.api.opGhCode((code) => {
-      // Zodra gh de code prijsgeeft: laten zien. Het inloggen loopt ondertussen
-      // door; dit venster is alleen om mee te kijken en te kopiëren.
-      toonGhCode(code)
+    stopLuisteren = window.api.opGhCode((info) => {
+      // Zodra gh code of adres prijsgeeft: laten zien. Het inloggen loopt
+      // ondertussen door; dit venster is om te kopiëren, niet om te wachten.
+      if (ghCodeVenster) return
+      if (ghKopieerLink && info && info.url) kopieer(info.url, I18N.t('git.inlog.linkAutoGekopieerd'))
+      toonGhCode(info)
     })
   } catch {}
 
-  const r = await window.api.gitGhLogin()
+  const r = await window.api.gitGhLogin({ geenBrowser: ghKopieerLink })
+
+  try { if (typeof stopLuisteren === 'function') stopLuisteren() } catch {}
 
   // Het codevenster mag weg zodra het gelukt is.
   if (ghCodeVenster && vraagKlaar) sluitVraag('klaar')
   ghCodeVenster = null
+  ghKopieerLink = false
 
   try { await window.api.gitGhVergeet() } catch {}
   return r
@@ -7475,18 +7624,20 @@ async function startGhLogin() {
 async function toonGhCode(info) {
   const code = typeof info === 'string' ? info : (info && info.code) || ''
   const url = (info && info.url) || 'https://github.com/login/device'
-  ghCodeVenster = code
+  ghCodeVenster = code || url
+
+  const knoppen = [
+    { label: I18N.t('git.inlog.codeSluit'), waarde: 'sluit' },
+  ]
+  if (code) knoppen.push({ label: I18N.t('git.inlog.codeKopieer'), waarde: 'code' })
+  knoppen.push({ label: I18N.t('git.inlog.linkKopieer'), waarde: 'link', soort: ghKopieerLink ? 'primair' : '' })
+  knoppen.push({ label: I18N.t('git.inlog.codeOpen'), waarde: 'open', soort: ghKopieerLink ? '' : 'primair' })
 
   const keuze = await vraagKeuze({
     titel: I18N.t('git.inlog.codeTitel'),
     tekst: I18N.t('git.inlog.codeTekst') + '\n\n' + I18N.t('git.inlog.codeWaarschuwing'),
-    regels: [code, url],
-    knoppen: [
-      { label: I18N.t('git.inlog.codeSluit'), waarde: 'sluit' },
-      { label: I18N.t('git.inlog.codeKopieer'), waarde: 'code' },
-      { label: I18N.t('git.inlog.linkKopieer'), waarde: 'link' },
-      { label: I18N.t('git.inlog.codeOpen'), waarde: 'open', soort: 'primair' },
-    ],
+    regels: [code, url].filter(Boolean),
+    knoppen,
   })
 
   // Elke keuze behalve sluiten laat het venster terugkomen: je hebt de code
@@ -7497,7 +7648,7 @@ async function toonGhCode(info) {
   if (keuze === 'link') { await kopieer(url, I18N.t('git.inlog.linkGekopieerd')); opnieuw(); return }
   if (keuze === 'open') {
     // Kopiëren én de pagina openen: plakken is dan het enige wat overblijft.
-    await kopieer(code, '')
+    if (code) await kopieer(code, '')
     await window.api.openUrl(url)
     opnieuw()
   }
@@ -7560,12 +7711,12 @@ async function haalGitIdentiteitOp(accountNaam) {
   // Geïnstalleerd en ingelogd zijn twee dingen. Alleen op het eerste kijken is
   // precies waarom dit doodliep bij iemand die gh wél had maar nooit had
   // ingelogd: dan sloegen we het inloggen over en liepen we tegen de API aan.
-  let st = { geinstalleerd: false, ingelogd: false }
+  let st = { geinstalleerd: false, ingelogd: false, accounts: [] }
   try { st = await window.api.gitGhStatus() } catch {}
 
   const tekst = !st.geinstalleerd ? 'accounts.gitHaalTekstGeenGh'
     : !st.ingelogd ? 'accounts.gitHaalTekstNietIngelogd'
-    : 'accounts.gitHaalTekst'
+    : 'accounts.gitHaalTekstExtra'
   const knopLabel = st.ingelogd ? 'accounts.gitOphalen' : 'accounts.gitInloggenEnOphalen'
 
   const keuze = await vraagKeuze({
@@ -7574,6 +7725,7 @@ async function haalGitIdentiteitOp(accountNaam) {
     knoppen: [
       { label: I18N.t('common.cancel'), waarde: '' },
       { label: I18N.t('accounts.gitZelfInvullen'), waarde: 'zelf' },
+      { label: I18N.t('accounts.gitKopieerLink'), waarde: 'link' },
       { label: I18N.t(knopLabel), waarde: 'github', soort: 'primair' },
     ],
   })
@@ -7585,19 +7737,26 @@ async function haalGitIdentiteitOp(accountNaam) {
     if (!gelukt) return null
   }
 
-  // Nog niet ingelogd? Dan eerst de browser in. Dit was de ontbrekende stap.
-  if (!st.ingelogd) {
-    const gelukt = await githubInloggen({ stil: true })
+  // 'Kopieer link' start altijd een verse inlog — ook als er al een account
+  // klaarstaat. Anders kun je geen tweede GitHub-account koppelen: ophalen
+  // pakt dan stilletjes het eerste. En de standaardbrowser gaat niet open,
+  // zodat je de link in een privévenster kunt plakken.
+  const accountsVoor = (st.accounts || []).slice()
+  if (keuze === 'link' || !st.ingelogd) {
+    const gelukt = await githubInloggen({ stil: true, kopieerLink: keuze === 'link' })
     if (!gelukt) return null
   }
 
   // Meerdere GitHub-accounts op deze pc? Dan is "het actieve account" een gok,
-  // en die gok kwam er eerder naast te zitten. Dus vragen welke het moet zijn.
+  // en die gok kwam er eerder naast te zitten. Een account dat er net bij is
+  // gekomen wint: dát is wie je zojuist hebt ingelogd.
   let gekozenGh = ''
   try {
     const na = await window.api.gitGhStatus()
     const lijst = (na && na.accounts) || []
-    if (lijst.length > 1) {
+    const nieuw = GitTools.nieuwGhAccount(accountsVoor, lijst)
+    if (nieuw.length === 1) gekozenGh = nieuw[0]
+    else if (lijst.length > 1) {
       gekozenGh = await vraagKeuze({
         titel: I18N.t('accounts.gitWelkAccountTitel'),
         tekst: I18N.t('accounts.gitWelkAccountTekst'),
@@ -7650,7 +7809,7 @@ async function githubInloggen(opties = {}) {
   // De app voert de dialoog met gh. Jij krijgt alleen de code te zien, in een
   // venster waar je hem kunt kopiëren — in de terminal kan dat niet, en dáár
   // liep het op vast.
-  const r = await startGhLogin()
+  const r = await startGhLogin({ kopieerLink: !!opties.kopieerLink })
   if (!r || !r.ok) {
     if (!opties.stil) {
       await vraagKeuze({
@@ -7702,6 +7861,15 @@ async function laadAccounts() {
 
 const huidigAccount = () => accounts.find(a => a.id === actiefAccount) || null
 
+async function bewaarAccountGit(a, git) {
+  if (!a || !git) return false
+  const r = await window.api.accountSetGit({ id: a.id, ...git })
+  if (!r || !r.ok) return false
+  await laadAccounts()
+  if (a.id === actiefAccount) await activeerGitVoorAccount()
+  return true
+}
+
 // Wisselen betekent: andere projecten, andere git-instellingen. Alles wat aan
 // het vorige account hing moet dus weg, anders zie je even de projectenlijst
 // van iemand anders of blijft een git-toestand van een ander pad hangen.
@@ -7723,6 +7891,8 @@ async function wisselAccount(id, pin = null) {
     return
   }
 
+  const inInstellingen = view === 'settings'
+
   // Eerst de deur dicht: main mag vanaf nu niets meer met de mappen van het
   // vorige account, ook niet als er nog een verversing onderweg is.
   try { window.api.gitPaden({ accountId: id, paden: [] }) } catch {}
@@ -7735,14 +7905,22 @@ async function wisselAccount(id, pin = null) {
   gitRemoteGedaan.clear()
   for (const k of Object.keys(gitLaatsteFetch)) delete gitLaatsteFetch[k]
   meldGitPadenAanMain()
-  await activeerGitVoorAccount()
   activeId = projects[0] ? projects[0].id : ''
-  setView(projects.length ? 'project' : 'cmd')
-  renderSidebar()
-  renderMain()
-  await ververesAlleGitStaten(true)
-  startGitPolling()
+  wisBewaardePanelen()
+
+  // Vanuit instellingen blijf je daar: de wisselknop is een accountrij, geen
+  // deur naar een ander scherm. Anders lijkt hij niks te doen.
+  if (inInstellingen) {
+    renderSidebar()
+    renderSettingsPanel()
+  } else {
+    setView(projects.length ? 'project' : 'cmd')
+    renderSidebar()
+    renderMain()
+  }
   showToast(I18N.t('accounts.gewisseld', { naam: (huidigAccount() || {}).naam || '' }))
+  startGitPolling()
+  activeerGitVoorAccount().then(() => ververesAlleGitStaten(true))
 }
 
 // Bij het opstarten vragen wie er achter de pc zit. Alleen als er iets te
@@ -7788,18 +7966,21 @@ function accountGitRegel(a) {
 
 function accountRijenHtml() {
   return accounts.map(a => `
-    <div class="instel-rij account-rij ${a.id === actiefAccount ? 'actief' : ''}" data-account="${esc(a.id)}">
+    <div class="instel-rij account-rij ${a.id === actiefAccount ? 'actief' : ''}" data-account="${esc(a.id)}"
+      ${a.id === actiefAccount ? '' : `title="${esc(I18N.t('accounts.wisselen'))}"`}>
       <div class="editor-row-name">${esc(a.icoon || '👤')} ${esc(a.naam)}</div>
       ${accountGitRegel(a)}
-      <button class="term-btn ${a.gitCompleet ? '' : 'btn-danger'}" data-account-git="${esc(a.id)}"
-        title="${esc(I18N.t('accounts.gitBewerken'))}"><i class="ti ti-git-commit" style="font-size:13px"></i></button>
-      ${a.id === actiefAccount
-        ? `<span class="instel-uitleg">${esc(I18N.t('accounts.ditBenJij'))}</span>`
-        : `<button class="term-btn" data-account-kies="${esc(a.id)}">${esc(I18N.t('accounts.wisselen'))}</button>`}
-      <button class="term-btn" data-account-hernoem="${esc(a.id)}" title="${esc(I18N.t('accounts.hernoemen'))}"><i class="ti ti-pencil" style="font-size:13px"></i></button>
-      <button class="term-btn ${a.heeftPin ? '' : 'btn-danger'}" data-account-pin="${esc(a.id)}"
-        title="${esc(I18N.t(a.heeftPin ? 'accounts.pinWijzigen' : 'accounts.pinZetten'))}"><i class="ti ti-lock" style="font-size:13px"></i></button>
-      ${accounts.length > 1 ? `<button class="term-btn" data-account-weg="${esc(a.id)}" title="${esc(I18N.t('accounts.verwijderen'))}"><i class="ti ti-trash" style="font-size:13px"></i></button>` : ''}
+      <div class="account-acties">
+        <button class="term-btn ${a.gitCompleet ? '' : 'btn-danger'}" data-account-git="${esc(a.id)}"
+          title="${esc(I18N.t('accounts.gitBewerken'))}"><i class="ti ti-git-commit" style="font-size:13px"></i></button>
+        ${a.id === actiefAccount
+          ? `<span class="instel-uitleg">${esc(I18N.t('accounts.ditBenJij'))}</span>`
+          : `<button class="term-btn" data-account-kies="${esc(a.id)}">${esc(I18N.t('accounts.wisselen'))}</button>`}
+        <button class="term-btn" data-account-hernoem="${esc(a.id)}" title="${esc(I18N.t('accounts.hernoemen'))}"><i class="ti ti-pencil" style="font-size:13px"></i></button>
+        <button class="term-btn ${a.heeftPin ? '' : 'btn-danger'}" data-account-pin="${esc(a.id)}"
+          title="${esc(I18N.t(a.heeftPin ? 'accounts.pinWijzigen' : 'accounts.pinZetten'))}"><i class="ti ti-lock" style="font-size:13px"></i></button>
+        ${accounts.length > 1 ? `<button class="term-btn" data-account-weg="${esc(a.id)}" title="${esc(I18N.t('accounts.verwijderen'))}"><i class="ti ti-trash" style="font-size:13px"></i></button>` : ''}
+      </div>
     </div>`).join('')
 }
 
@@ -8024,7 +8205,13 @@ function renderSettingsPanel() {
   }
 
   panel.querySelectorAll('[data-account-kies]').forEach(btn => {
-    btn.onclick = () => wisselAccount(btn.dataset.accountKies)
+    btn.onclick = (e) => { e.stopPropagation(); wisselAccount(btn.dataset.accountKies) }
+  })
+  panel.querySelectorAll('.account-rij:not(.actief)').forEach(rij => {
+    rij.onclick = (e) => {
+      if (e.target.closest('button')) return
+      wisselAccount(rij.dataset.account)
+    }
   })
   panel.querySelectorAll('[data-account-hernoem]').forEach(btn => {
     btn.onclick = async () => {
@@ -8102,10 +8289,7 @@ function renderSettingsPanel() {
       if (!a) return
       const git = await vraagGitIdentiteit(a.naam, a)
       if (!git) return
-      const r = await window.api.accountSetGit({ id: a.id, ...git })
-      if (!r || !r.ok) return
-      await laadAccounts()
-      if (a.id === actiefAccount) await activeerGitVoorAccount()
+      if (!await bewaarAccountGit(a, git)) return
       renderSettingsPanel()
     }
   })
@@ -8195,8 +8379,7 @@ function renderSettingsPanel() {
       .map(e => ({ ...e, label: (e.label || '').trim() || I18N.t('settings.customEditors.defaultLabel'), path: e.path.trim() }))
     window.api.saveSettings(settings)
     showToast(I18N.t('settings.savedToast'))
-    // Re-render main if a project is active so editor buttons update
-    if (activeId) { /* will refresh when user goes back */ }
+    vraagProjectHertekenen()
   }
 }
 
@@ -8681,7 +8864,7 @@ function voegGevondenEditorsAutomatischToe() {
   settings.editorsGezocht = true
   window.api.saveSettings(settings)
   gevondenEditors = []
-  if (view === 'project') renderMain()
+  vraagProjectHertekenen()
 }
 
 function toonGevondenEditors(stil) {
@@ -8731,7 +8914,7 @@ function voegGevondenEditorsToe() {
 
   showToast(gekozen.length === 1 ? I18N.t('modal.foundEditors.addedOneToast', { name: gekozen[0].label }) : I18N.t('modal.foundEditors.addedManyToast', { count: gekozen.length }))
   sluitGevondenEditors()
-  if (view === 'project') renderMain()
+  vraagProjectHertekenen()
   if (view === 'settings') renderSettingsPanel()
 }
 
@@ -8949,9 +9132,9 @@ function plaatsStatus() {
   const el = document.getElementById('cmd-status')
   if (!el) return
   // Zelfde lijn als het knipperende balkje in de uitvoer; anders de invoerregel.
-  const cursor = document.querySelector('#terminal .t-cursor')
-  const invoer = document.querySelector('.term-input-wrap:not([hidden]) .term-input')
-    || document.querySelector('.term-input-wrap:not([hidden])')
+  const cursor = levend('#terminal .t-cursor')
+  const invoer = levend('.term-input-wrap:not([hidden]) .term-input')
+    || levend('.term-input-wrap:not([hidden])')
   const doel = cursor || invoer
   if (!doel) { el.style.bottom = ''; return }
   const r = doel.getBoundingClientRect()
@@ -9071,7 +9254,7 @@ function psScriptIncomplete(script) {
 }
 
 function updateTermPrompt() {
-  const prompt = document.querySelector('.term-input-prompt')
+  const prompt = levend('.term-input-prompt')
   if (!prompt) return
   if (aiAan(activeTermId)) {
     prompt.textContent = '✦'
@@ -10773,7 +10956,7 @@ function aiFoutUitleg(id, r) {
 // ── Balk ──────────────────────────────────────────────────────────────────────
 function aiVerversBalk() {
   const aan = aiAan(activeTermId)
-  const wrap = document.querySelector('.term-input-wrap')
+  const wrap = levend('.term-input-wrap')
   if (wrap) wrap.classList.toggle('ai-modus', aan)
   updateTermPrompt()
   updateTermPlaceholder()
@@ -10900,15 +11083,17 @@ function aiShellKnop(ctxId) {
 function aiVerversKnoppen(ctxId) {
   const s = aiSessies[ctxId]
   const actief = (s && s.aan) ? s.providerId : ''
-  document.querySelectorAll('[data-ai-dienst]').forEach(b => {
+  const root = paneelVoorCtx(ctxId) || document
+  levenden('[data-ai-dienst]', root).forEach(b => {
     b.classList.toggle('ai-actief', b.dataset.aiDienst === actief)
   })
-  const uit = document.querySelector('[data-ai-uit]')
+  const uit = levend('[data-ai-uit]', root)
   if (uit) uit.hidden = !actief
 }
 
 function bedraadAiKnoppen(ctx) {
-  document.querySelectorAll('[data-ai-dienst]').forEach(btn => {
+  const root = paneelVoorCtx(ctx.id) || document
+  root.querySelectorAll('[data-ai-dienst]').forEach(btn => {
     btn.onclick = async () => {
       if (cmdSorteerModus || cmdSnelSorteerModus || psSnelSorteerModus) return
       const keuze = btn.dataset.aiDienst
@@ -10928,7 +11113,7 @@ function bedraadAiKnoppen(ctx) {
       aiVerversKnoppen(ctx.id)
     }
   })
-  const uit = document.querySelector('[data-ai-uit]')
+  const uit = root.querySelector('[data-ai-uit]')
   if (uit) uit.onclick = () => {
     if (cmdSorteerModus || cmdSnelSorteerModus || psSnelSorteerModus) return
     aiZetShell(ctx.id)
@@ -13338,10 +13523,23 @@ function tekenGitSectie() {
     : staat.koppeling === 'stuk'     ? I18N.t('gitset.koppelStuk')
     :                                  I18N.t('gitset.koppelOnbekend')
 
+  const acc = huidigAccount()
+  const identTekst = acc && acc.gitCompleet
+    ? I18N.t('gitset.identiteit', {
+        naam: acc.gitNaam, email: acc.gitEmail,
+        gh: acc.ghGebruiker ? ' · ' + acc.ghGebruiker : '',
+      })
+    : I18N.t('gitset.identiteitOnaf')
+
   const delen = [`<div class="git-set-kop ${ernst ? 'e-' + ernst : ''}">
       <i class="ti ti-git-branch"></i>
       <span>${esc(kop)}</span>
       ${koppelTekst ? `<span class="git-set-status s-${esc(staat.koppeling)}">${esc(koppelTekst)}</span>` : ''}
+    </div>`,
+    `<div class="git-set-ident ${acc && acc.gitCompleet ? '' : 'onaf'}">
+      <i class="ti ti-brand-github"></i>
+      <span>${esc(identTekst)}</span>
+      <button class="btn-ghost btn-mini" id="git-set-identiteit">${esc(I18N.t('gitset.identiteitKnop'))}</button>
     </div>`]
 
   // 2. Elk adres apart, met een knop om het te wijzigen of weg te halen. Bij
@@ -13403,6 +13601,14 @@ function bindGitSectie(p, pad, staat) {
   })
   doel.querySelector('#git-set-koppel')?.addEventListener('click', async () => {
     await koppelGithub(p)
+    await naAfloop()
+  })
+  doel.querySelector('#git-set-identiteit')?.addEventListener('click', async () => {
+    const a = huidigAccount()
+    if (!a) return
+    const git = await vraagGitIdentiteit(a.naam, a)
+    if (!git) return
+    await bewaarAccountGit(a, git)
     await naAfloop()
   })
 
@@ -13566,12 +13772,12 @@ function saveProjectModal() {
     const vers = projects[projects.length - 1]
     bepaalToolsVoorProject(vers).then(verborgen => {
       if (verborgen) showToast(I18N.t('project.notFlutterToast'))
-      if (activeId === vers.id) renderMain()
+      if (activeId === vers.id) vraagProjectHertekenen()
       renderSidebar()
     })
   }
 
-  if (editingId === activeId) renderMain()
+  if (editingId === activeId) vraagProjectHertekenen()
   if (view === 'settings') renderSettingsPanel()
   closeProjectModal()
 
@@ -13804,8 +14010,8 @@ function setupGlobalTypeCapture() {
       return
     }
 
-    // De view-router leegt de verborgen panelen, dus als dit veld in de DOM
-    // staat, hoort het bij het paneel dat nu zichtbaar is.
+    // Verborgen panelen hebben hun id bevroren, dus #term-input is het
+    // zichtbare commandoveld.
     const input = document.getElementById('term-input')
     if (!input || input.closest('[hidden]')) return
 

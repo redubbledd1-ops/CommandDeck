@@ -33,6 +33,13 @@ t('zonder origin pakt hij de eerste remote',
 t('remotes mag ook rauwe tekst zijn',
   G.maakStaat({ isRepo: true, remotes: 'origin\n' }).gekoppeld === true)
 
+t('dezelfde weergave is gelijk', G.zelfdeGitWeergave(gekoppeld, G.maakStaat({ isRepo: true, remotes: ['origin'], branch: 'main' })))
+t('een andere branch is dat niet', !G.zelfdeGitWeergave(gekoppeld, G.maakStaat({ isRepo: true, remotes: ['origin'], branch: 'dev' })))
+t('een langere bestandslijst verandert de knoppen niet',
+  G.zelfdeGitWeergave(gekoppeld, G.maakStaat({ isRepo: true, remotes: ['origin'], branch: 'main', bestanden: ['a', 'b', 'c'] })))
+t('null is nooit gelijk aan een staat', !G.zelfdeGitWeergave(gekoppeld, null) && !G.zelfdeGitWeergave(null, gekoppeld))
+t('twee keer dezelfde verwijzing is gelijk', G.zelfdeGitWeergave(gekoppeld, gekoppeld))
+
 // ── welke knoppen zie je ─────────────────────────────────────────────────────
 gelijk('geen repo -> alleen koppelen', G.zichtbareGitIds(geenRepo), ['git-koppelen'])
 gelijk('losse repo -> koppelen plus wat lokaal werkt',
@@ -757,7 +764,8 @@ const loginBlok = (mainBron5.match(/ipcMain\.handle\('git:ghLogin'[\s\S]*?\n\}\)
 
 t('inloggen draait als los proces met stdin, niet als kaal commando',
   /spawn\('gh', \['auth', 'login'/.test(loginBlok) && /proc\.stdin\.write/.test(loginBlok))
-t('de code wordt uit de uitvoer gevist', /\[A-Z0-9\]\{4\}-\[A-Z0-9\]\{4\}/.test(loginBlok))
+t('de code wordt uit de uitvoer gevist', /parseGhLoginCode/.test(loginBlok))
+t('en het adres ook', /parseGhLoginUrl/.test(loginBlok))
 t('en naar het venster gestuurd zodat je hem kunt kopiëren',
   /webContents\.send\('git:ghCode'/.test(loginBlok))
 t('de app drukt zelf op Enter bij "press enter"', /press enter/i.test(loginBlok))
@@ -768,10 +776,19 @@ t('en het blijft niet eeuwig hangen', /setTimeout\([\s\S]{0,80}proc\.kill/.test(
 
 // De code is van de vorm ABCD-1234; die vorm moet de regex herkennen.
 for (const code of ['1A2B-3C4D', 'ABCD-1234', '0000-FFFF']) {
-  t('code herkend: ' + code, /\b([A-Z0-9]{4}-[A-Z0-9]{4})\b/.test(code))
+  t('code herkend: ' + code, G.parseGhLoginCode(code) === code)
 }
 t('een gewone zin levert geen code op',
-  !/\b([A-Z0-9]{4}-[A-Z0-9]{4})\b/.test('Press Enter to open github.com in your browser'))
+  G.parseGhLoginCode('Press Enter to open github.com in your browser') === '')
+t('device-adres uit de uitvoer',
+  G.parseGhLoginUrl('Open this URL: https://github.com/login/device') === 'https://github.com/login/device')
+t('oauth-adres uit de uitvoer',
+  G.parseGhLoginUrl('Press Enter to open https://github.com/login/oauth/authorize?client_id=abc in your browser')
+  === 'https://github.com/login/oauth/authorize?client_id=abc')
+t('zonder adres niets', G.parseGhLoginUrl('Press Enter to open github.com in your browser') === '')
+gelijk('een nieuw account erbij', G.nieuwGhAccount(['jan'], ['jan', 'piet']), ['piet'])
+gelijk('niets nieuws als het dezelfde is', G.nieuwGhAccount(['jan'], ['jan']), [])
+gelijk('de eerste inlog is ook nieuw', G.nieuwGhAccount([], ['jan']), ['jan'])
 
 // ── geïnstalleerd is niet hetzelfde als ingelogd ─────────────────────────────
 // Hier ging het mis: gh stond er wél, maar was nooit ingelogd. De app sloeg het
@@ -792,8 +809,10 @@ t('ingelogd hangt aan een gevonden account, niet aan het bestaan van gh',
 
 const rendererBron = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer.js'), 'utf8')
 t('de renderer logt eerst in en haalt daarna pas op',
-  rendererBron.indexOf('if (!st.ingelogd) {') > 0
-  && rendererBron.indexOf('if (!st.ingelogd) {') < rendererBron.indexOf('await window.api.gitGhIdentiteit('))
+  rendererBron.indexOf('githubInloggen') > 0
+  && rendererBron.indexOf('githubInloggen') < rendererBron.indexOf('await window.api.gitGhIdentiteit('))
+t('een extra account logt in ook als er al één klaarstaat',
+  /keuze === 'link' \|\| !st\.ingelogd/.test(rendererBron))
 
 // ── terugval als de API niet lukt ────────────────────────────────────────────
 // `gh api user` kan mislukken terwijl je wél ingelogd bent: geen netwerk, een
@@ -1384,6 +1403,9 @@ t('de kapotte-koppeling-indicator heeft opmaak in style.css',
   t('git:info bestaat nog', infoBody.length > 200)
   t('git:info doet zelf geen netwerkaanroep', !infoBody.includes('controleerRemote'))
   t('git:info leest wel wat er al bekend is', infoBody.includes('remoteUitCache'))
+  t('git:info blokkeert de hoofdthread niet', infoBody.includes('gitUitAsync') && infoBody.includes('Promise.all'))
+  t('een poll tekent niet opnieuw als er niets zichtbaars veranderde',
+    fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8').includes('zelfdeGitWeergave'))
 
   const pre = fs.readFileSync(path.join(APP, 'preload.js'), 'utf8')
   t('de renderer kan erbij', pre.includes('gitRemoteCheck') && pre.includes('gitRemoteVergeet'))
@@ -1521,7 +1543,7 @@ for (const sleutel of ['modal.project.gitLabel', 'gitset.kopRepo', 'gitset.kopGe
 {
   const css = fs.readFileSync(path.join(APP, 'style.css'), 'utf8')
   for (const klasse of ['#git-sectie', '.git-set-kop', '.git-set-status', '.git-set-remote',
-                        '.git-set-probleem', '.git-set-acties', '.btn-mini']) {
+                        '.git-set-probleem', '.git-set-acties', '.git-set-ident', '.btn-mini']) {
     t('opmaak voor ' + klasse, css.includes(klasse))
   }
   // Zonder deze regels is een fout niet van een waarschuwing te onderscheiden.
@@ -1649,10 +1671,14 @@ for (const sleutel of ['gitignore.titel', 'gitignore.tekst', 'gitignore.schrijve
 // al ingelogd — GitHub keurt de code dan goed voor dát account. Daarom moet de
 // link te kopiëren zijn, zodat je zelf een privévenster kunt kiezen.
 for (const sleutel of ['git.inlog.codeKopieer', 'git.inlog.linkKopieer', 'git.inlog.codeGekopieerd',
-                       'git.inlog.linkGekopieerd', 'git.inlog.kopieMislukt', 'git.inlog.codeWaarschuwing',
-                       'accounts.gitWelkAccountTitel', 'accounts.gitWelkAccountTekst']) {
+                       'git.inlog.linkGekopieerd', 'git.inlog.linkAutoGekopieerd', 'git.inlog.kopieMislukt',
+                       'git.inlog.codeWaarschuwing',
+                       'accounts.gitWelkAccountTitel', 'accounts.gitWelkAccountTekst',
+                       'accounts.gitKopieerLink', 'accounts.gitHaalTekstExtra',
+                       'gitset.identiteit', 'gitset.identiteitKnop', 'gitset.identiteitOnaf']) {
   t('tekst ' + sleutel + ' staat in nl en en', !!nl[sleutel] && !!en[sleutel])
 }
+t('de knop heet Kopieer link', nl['accounts.gitKopieerLink'] === 'Kopieer link')
 {
   const ren = fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8')
   const main = fs.readFileSync(path.join(APP, 'main.js'), 'utf8')
@@ -1661,9 +1687,13 @@ for (const sleutel of ['git.inlog.codeKopieer', 'git.inlog.linkKopieer', 'git.in
   t('het codevenster kan de link kopiëren', /waarde: 'link'/.test(ren))
   t('en de code apart', /waarde: 'code'/.test(ren))
   t('met een waarschuwing over de standaardbrowser', ren.includes('git.inlog.codeWaarschuwing'))
+  t('het identiteitsscherm heeft Kopieer link', ren.includes('accounts.gitKopieerLink'))
+  t('en start dan een inlog zonder standaardbrowser', /kopieerLink: keuze === 'link'/.test(ren))
+  t('een net-gekoppeld account wordt vanzelf gekozen', /nieuwGhAccount/.test(ren))
   // Het adres komt uit gh zelf, zodat een gewijzigde pagina vanzelf meekomt.
-  t('main leest het adres uit de uitvoer van gh', main.includes('github.com/login/device') && main.includes('alles.match'))
+  t('main leest het adres uit de uitvoer van gh', /parseGhLoginUrl/.test(main) && main.includes('github.com/login/device'))
   t('en stuurt code en adres samen door', /send\('git:ghCode', \{ code/.test(main))
+  t('zonder de standaardbrowser als je de link kopieert', /geenBrowser/.test(main) && /GH_BROWSER/.test(main))
   t('de oude vorm blijft werken', pre.includes("typeof d === 'string'"))
 
   // De tweede oorzaak: `gh api user` haalt het áctieve account op. Met meerdere
@@ -1672,6 +1702,7 @@ for (const sleutel of ['git.inlog.codeKopieer', 'git.inlog.linkKopieer', 'git.in
   t('en die keuze gaat mee naar main', /gitGhIdentiteit\(gekozenGh\)/.test(ren))
   t('main wisselt dan eerst van account', /auth', 'switch'/.test(main))
   t('preload geeft de naam door', /gitGhIdentiteit: \(u\)/.test(pre))
+  t('de git-sectie toont de identiteit', /git-set-identiteit/.test(ren) && css.includes('.git-set-ident'))
 
   t('main kan een .gitignore voorstellen', main.includes("ipcMain.handle('git:gitignoreVoorstel'"))
   t('en schrijven', main.includes("ipcMain.handle('git:gitignoreSchrijf'"))

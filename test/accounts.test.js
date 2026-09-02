@@ -248,6 +248,12 @@ t('bij het wisselen gaat de deur eerst dicht',
   /gitPaden\(\{ accountId: id, paden: \[\] \}\)/.test(rendererJs))
 t('en de fetch-teller wordt geleegd',
   /delete gitLaatsteFetch\[k\]/.test(rendererJs))
+t('wisselen vanuit instellingen blijft daar',
+  /const inInstellingen = view === 'settings'/.test(rendererJs)
+  && /if \(inInstellingen\)/.test(rendererJs)
+  && /renderSettingsPanel\(\)/.test(rendererJs))
+t('een inactieve accountrij is zelf de wisselknop',
+  /account-rij:not\(\.actief\)/.test(rendererJs))
 
 t('de waarschuwing dat dit niets beveiligt staat er, in beide talen',
   /Windows/.test(nl['accounts.eerlijk'] || '') && /Windows/.test(en['accounts.eerlijk'] || ''))

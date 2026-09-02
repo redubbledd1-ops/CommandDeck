@@ -1092,6 +1092,21 @@ function gitUit(dir, args) {
   }
 }
 
+// Zelfde als gitUit, maar zonder de hoofdthread te blokkeren. git:info draait
+// tijdens het tekenen; execFileSync daar laat het hele venster stilstaan.
+function gitUitAsync(dir, args, env) {
+  return new Promise((resolve) => {
+    execFile('git', args, {
+      cwd: dir, encoding: 'utf8', timeout: 4000, windowsHide: true,
+      env: env || childEnv(),
+    }, (err, stdout) => {
+      if (err && err.code === 'ENOENT') resolve(null)
+      else if (err) resolve('')
+      else resolve(stdout)
+    })
+  })
+}
+
 let gitAanwezig = null
 function heeftGit() {
   if (gitAanwezig === null) gitAanwezig = gitUit(os.homedir(), ['--version']) !== null
@@ -1129,25 +1144,23 @@ function remoteUitCache(dir, url) {
 //  2. Hij mag niet lang duren. 15 seconden is ruim voor een handshake en kort
 //     genoeg om niet als vastloper te voelen.
 function controleerRemote(dir, remote) {
-  const env = childEnv({ GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' })
-  // Leegmaken is niet genoeg: een lege GIT_ASKPASS laat git alsnog iets
-  // proberen te starten. Ze moeten wég, anders opent er een inlogvenster dat
-  // niemand verwacht bij een achtergrondcontrole.
-  delete env.GIT_ASKPASS
-  delete env.SSH_ASKPASS
-  try {
-    execFileSync('git', GitTools.lsRemoteArgs(remote), {
+  return new Promise((resolve) => {
+    const env = childEnv({ GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' })
+    // Leegmaken is niet genoeg: een lege GIT_ASKPASS laat git alsnog iets
+    // proberen te starten. Ze moeten wég, anders opent er een inlogvenster dat
+    // niemand verwacht bij een achtergrondcontrole.
+    delete env.GIT_ASKPASS
+    delete env.SSH_ASKPASS
+    execFile('git', GitTools.lsRemoteArgs(remote), {
       cwd: dir, encoding: 'utf8', timeout: 15000, windowsHide: true, env,
-      stdio: ['ignore', 'pipe', 'pipe'],
+    }, (e, _stdout, stderr) => {
+      if (e && e.code === 'ENOENT') { resolve({ ok: null, reden: 'onbekend' }); return }
+      if (e && (e.signal === 'SIGTERM' || e.killed)) { resolve({ ok: null, reden: 'netwerk' }); return }
+      if (!e) { resolve(GitTools.remoteUitslag(0, '')); return }
+      const tekst = String(stderr || '') + ' ' + String((e && e.message) || '')
+      resolve(GitTools.remoteUitslag(e && typeof e.status === 'number' ? e.status : 1, tekst))
     })
-    return GitTools.remoteUitslag(0, '')
-  } catch (e) {
-    if (e && e.code === 'ENOENT') return { ok: null, reden: 'onbekend' }
-    // Een timeout zegt niets over de koppeling — dat is deze pc op dit moment.
-    if (e && (e.signal === 'SIGTERM' || e.killed)) return { ok: null, reden: 'netwerk' }
-    const tekst = String((e && e.stderr) || '') + ' ' + String((e && e.message) || '')
-    return GitTools.remoteUitslag(e && typeof e.status === 'number' ? e.status : 1, tekst)
-  }
+  })
 }
 
 // De renderer vraagt dit los aan, per project, op een rustig moment — niet in
@@ -1167,7 +1180,7 @@ ipcMain.handle('git:remoteCheck', async (_, dir) => {
   const bekend = remoteUitCache(dir, url)
   if (bekend) return { ok: bekend.ok, reden: bekend.reden, remote, url, uitCache: true }
 
-  const uitslag = controleerRemote(dir, remote)
+  const uitslag = await controleerRemote(dir, remote)
   remoteCache.set(remoteSleutel(dir, url), { ok: uitslag.ok, reden: uitslag.reden, tijd: Date.now() })
   return { ok: uitslag.ok, reden: uitslag.reden, remote, url }
 })
@@ -1242,42 +1255,32 @@ function padToegestaan(dir) {
   return Accounts.padHoortBij(gitToegang.paden, dir)
 }
 
-ipcMain.handle('git:info', (_, dir) => {
+ipcMain.handle('git:info', async (_, dir) => {
   if (!padToegestaan(dir)) return GitTools.maakStaat({ beschikbaar: heeftGit(), isRepo: false })
   if (!dir || !fs.existsSync(dir)) return GitTools.maakStaat({ beschikbaar: heeftGit(), isRepo: false })
   if (!heeftGit()) return GitTools.maakStaat({ beschikbaar: false })
 
-  const binnen = String(gitUit(dir, ['rev-parse', '--is-inside-work-tree']) || '').trim()
+  const binnen = String(await gitUitAsync(dir, ['rev-parse', '--is-inside-work-tree']) || '').trim()
   if (binnen !== 'true') return GitTools.maakStaat({ beschikbaar: true, isRepo: false })
 
-  // Eén status-aanroep levert branch, vooruit/achter, of er al commits zijn en
-  // welke bestanden vuil zijn. `git remote` blijft apart nodig: een repo kan
-  // een remote hebben zonder dat de branch er al naartoe wijst — precies de
-  // situatie vlak na `gh repo create`, waar push -u voor bedoeld is.
-  // `git remote -v` in plaats van `git remote`: dezelfde aanroep, maar met de
-  // adressen erbij. Daarmee vervalt de losse `git remote get-url` hieronder.
-  const remoteLijst = GitTools.parseRemoteRegels(gitUit(dir, ['remote', '-v']))
-  const st = GitTools.parseStatusV2(gitUit(dir, ['status', '--porcelain=v2', '--branch']))
+  // Los van elkaar: vijf korte git-aanroepen naast elkaar in plaats van zes
+  // keer achter elkaar de hoofdthread vastzetten.
+  const env = childEnv()
+  const [remoteUit, statusUit, stashUit, identUit, langeUit] = await Promise.all([
+    gitUitAsync(dir, ['remote', '-v'], env),
+    gitUitAsync(dir, ['status', '--porcelain=v2', '--branch'], env),
+    gitUitAsync(dir, ['stash', 'list'], env),
+    gitUitAsync(dir, ['config', '--get-regexp', '^user\\.(name|email)$'], env),
+    gitUitAsync(dir, ['config', '--get', 'core.longpaths'], env),
+  ])
 
-  // Vierde aanroep, en de goedkoopste van de vier: `git stash list` leest één
-  // reflog-bestand. We hebben alleen het aantal nodig — daarmee weet de app of
-  // de terughaalknop erbij hoort. De inhoud vragen we pas als je erop klikt.
-  const stashes = GitTools.parseStashAantal(gitUit(dir, ['stash', 'list']))
-
-  // Onder wiens naam komt een commit hier terecht? In één aanroep, en bewust
-  // zonder --local: we willen weten wat git straks écht gebruikt, dus inclusief
-  // wat er globaal staat. Ontbreekt er iets, dan weigert `git commit` — dat wil
-  // je vóór het typen van een bericht weten en niet erna.
-  const ident = GitTools.parseIdentiteit(gitUit(dir, ['config', '--get-regexp', '^user\\.(name|email)$']))
-
-  // Twee dingen die pas pijn doen bij de eerste commit, en die je dus vóór die
-  // commit wilt weten. Allebei goedkoop: één bestandscheck en één configregel.
+  const remoteLijst = GitTools.parseRemoteRegels(remoteUit)
+  const st = GitTools.parseStatusV2(statusUit)
+  const stashes = GitTools.parseStashAantal(stashUit)
+  const ident = GitTools.parseIdentiteit(identUit)
   const gitignore = fs.existsSync(path.join(dir, '.gitignore'))
-  const langePaden = String(gitUit(dir, ['config', '--get', 'core.longpaths']) || '').trim() === 'true'
+  const langePaden = String(langeUit || '').trim() === 'true'
 
-  // Werkt dat adres ook? Dat weet alleen git:remoteCheck, en die kost netwerk.
-  // Hier lezen we alleen wat daar al uit kwam. Nog niets gecontroleerd betekent
-  // remoteOk: null, en dan blijft de koppeling gewoon bruikbaar.
   let remoteOk = null, remoteReden = ''
   if (remoteLijst.length) {
     const kies = GitTools.maakStaat({ beschikbaar: true, isRepo: true, remoteLijst, upstream: st.upstream })
@@ -1583,34 +1586,47 @@ ipcMain.handle('git:ghIdentiteit', (_, gebruiker) => {
 // wacht daarna op Enter voordat het je browser opent. In de gewone terminal van
 // de app kun je niets intypen en de uitvoer niet selecteren, dus daar blijft
 // het staan wachten op iets wat niemand kan geven. Daarom voeren we die
-// dialoog hier: we vangen de code op, sturen hem naar het venster zodat je hem
-// kunt kopiëren, en drukken zelf op Enter.
-ipcMain.handle('git:ghLogin', () => new Promise((resolve) => {
+// dialoog hier: we vangen code én adres op, sturen ze naar het venster zodat
+// je ze kunt kopiëren, en drukken zelf op Enter.
+//
+// `geenBrowser`: gh mag de standaardbrowser níét openen. Die is vaak al
+// ingelogd met het eerste account; een tweede koppeling keurt GitHub dan goed
+// voor dát account. De gebruiker plakt de link zelf in een privévenster.
+function ghBrowserNoop() {
+  if (process.platform === 'win32') {
+    return path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'where.exe')
+  }
+  return 'true'
+}
+
+ipcMain.handle('git:ghLogin', (_, opties = {}) => new Promise((resolve) => {
   if (!ghBeschikbaar()) { resolve({ ok: false, reden: 'geen-gh' }); return }
 
+  const extra = {}
+  if (opties && opties.geenBrowser) extra.GH_BROWSER = ghBrowserNoop()
+
   const proc = spawn('gh', ['auth', 'login', '--hostname', 'github.com', '--git-protocol', 'https', '--web'], {
-    env: childEnv(), windowsHide: true, shell: false,
+    env: childEnv(extra), windowsHide: true, shell: false,
   })
 
   let alles = ''
-  let codeGestuurd = false
+  let laatsteInfo = ''
   let enterGestuurd = false
 
   const bekijk = (brok) => {
     alles += brok
     if (alles.length > 20000) alles = alles.slice(-20000)
 
-    // De code is van de vorm ABCD-1234. Zodra hij voorbijkomt gaat hij naar het
-    // venster: daar kun je hem kopiëren, hier niet.
-    if (!codeGestuurd) {
-      const m = alles.match(/\b([A-Z0-9]{4}-[A-Z0-9]{4})\b/)
-      if (m) {
-        codeGestuurd = true
-        // Het adres komt uit de uitvoer van gh zelf, niet uit een vaste regel
-        // hier: verandert gh de pagina, dan volgen wij vanzelf mee.
-        const u = alles.match(/https:\/\/\S*github\.com\/login\/device\S*/)
-        const url = u ? u[0].replace(/[.,)]+$/, '') : 'https://github.com/login/device'
-        try { if (win && !win.isDestroyed()) win.webContents.send('git:ghCode', { code: m[1], url }) } catch {}
+    // Code én adres, ook als gh de oauth-pagina gebruikt in plaats van de
+    // device-code. Zonder adres is "Kopieer link" niks waard; zonder code mag
+    // het venster de link nog steeds tonen.
+    const code = GitTools.parseGhLoginCode(alles)
+    const url = GitTools.parseGhLoginUrl(alles) || (code ? 'https://github.com/login/device' : '')
+    if (code || url) {
+      const key = code + '|' + url
+      if (key !== laatsteInfo) {
+        laatsteInfo = key
+        try { if (win && !win.isDestroyed()) win.webContents.send('git:ghCode', { code, url }) } catch {}
       }
     }
 
@@ -1703,7 +1719,7 @@ ipcMain.handle('git:winget', () => {
 
 // Na een inlog is de uitkomst veranderd; anders blijft de app zeggen dat gh
 // er niet is omdat hij dat één keer heeft gemeten.
-ipcMain.handle('git:ghVergeet', () => { ghAanwezig = null; return true })
+ipcMain.handle('git:ghVergeet', () => { ghAanwezig = null; windowsPathCache = { at: 0, value: '' }; return true })
 
 // ── Mapgroottes ───────────────────────────────────────────────────────────────
 // Windows houdt nergens bij hoe groot een map is; dat moet je uitrekenen door de
@@ -2778,7 +2794,7 @@ function expandWinEnv(s) {
 function windowsMergedPath() {
   if (process.platform !== 'win32') return process.env.PATH || ''
   const now = Date.now()
-  if (windowsPathCache.value && now - windowsPathCache.at < 5000) return windowsPathCache.value
+  if (windowsPathCache.value && now - windowsPathCache.at < 120000) return windowsPathCache.value
   const machine = expandWinEnv(readRegPath('HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment'))
   const user = expandWinEnv(readRegPath('HKCU\\Environment'))
   const merged = [machine, user].filter(Boolean).join(';')

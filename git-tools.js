@@ -295,6 +295,22 @@
     }
   }
 
+  // Wat de knoppen en de indicator nodig hebben. Bestandslijsten en adressen
+  // laten we links liggen: die veranderen de tekening niet, en ze vergelijken
+  // via JSON.stringify bij élke poll is precies hoe het venster blijft hangen.
+  function zelfdeGitWeergave(a, b) {
+    if (a === b) return true
+    if (!a || !b) return false
+    return a.beschikbaar === b.beschikbaar && a.isRepo === b.isRepo
+      && a.gekoppeld === b.gekoppeld && a.koppeling === b.koppeling
+      && a.heeftRemote === b.heeftRemote && a.branch === b.branch
+      && a.ahead === b.ahead && a.behind === b.behind
+      && a.vuil === b.vuil && a.nieuw === b.nieuw && a.conflicten === b.conflicten
+      && a.stashes === b.stashes && a.commits === b.commits
+      && a.naam === b.naam && a.email === b.email
+      && a.gitignore === b.gitignore && a.langePaden === b.langePaden
+  }
+
   // ── Welke knoppen zie je? ───────────────────────────────────────────────────
   // Niet gekoppeld: alleen de koppelknop, anders sta je naar een push-knop te
   // kijken die nergens heen kan. Gekoppeld: de koppelknop valt weg en de
@@ -1427,6 +1443,28 @@
     return namen
   }
 
+  // De eenmalige code die gh toont: ABCD-1234. Zonder die vorm is er niets
+  // om te kopiëren — een gewone zin als "Press Enter" mag dus geen code zijn.
+  function parseGhLoginCode(tekst) {
+    const m = String(tekst || '').match(/\b([A-Z0-9]{4}-[A-Z0-9]{4})\b/)
+    return m ? m[1] : ''
+  }
+
+  // Het adres dat je in een privévenster of andere browser plakt. gh zet het
+  // in twee vormen neer: "Open this URL: …" zonder TTY, of "Press Enter to
+  // open …" mét. Device-flow en oauth-authorize allebei, want gh kiest zelf.
+  function parseGhLoginUrl(tekst) {
+    const m = String(tekst || '').match(/https:\/\/(?:www\.)?github\.com\/login\/(?:device|oauth\/authorize)[^\s"'<>]*/i)
+    return m ? m[0].replace(/[.,);]+$/, '') : ''
+  }
+
+  // Welke GitHub-accounts zijn erbíj gekomen? Na een tweede inlog is dát de
+  // persoon die je zojuist hebt gekoppeld — niet het account dat er al stond.
+  function nieuwGhAccount(voor, na) {
+    const oud = new Set(voor || [])
+    return (na || []).filter(n => !oud.has(n))
+  }
+
   function ghSwitchCommando(ghGebruiker) {
     const naam = String(ghGebruiker || '').trim()
     if (!geldigeGhGebruiker(naam)) return null
@@ -1492,6 +1530,7 @@
   return {
     GIT_CMD_DEFS, GIT_CMD_MAP, GIT_IDS, isGitId, isSchrijfKnop, STANDAARD_UIT_IDS,
     parseRemotes, parseBranch, parseStatusV2, maakStaat, zichtbareGitIds,
+    zelfdeGitWeergave,
     koppelStap, koppelCommando, veiligeRepoNaam, normaliseerRepoUrl,
     KOPPELING_GEEN, KOPPELING_ONBEKEND, KOPPELING_OK, KOPPELING_STUK,
     remoteFoutReden, remoteUitslag, lsRemoteArgs, koppelingProbleem,
@@ -1509,7 +1548,8 @@
     INLOG_ONTHOUDEN, INLOG_VRAGEN, INLOG_KEUZES,
     indicator, onveiligeRedenen, magFetchen, achterstandMelding, FETCH_INTERVAL_MS,
     globaalIdentiteitCommando, globaalGhGebruikerCommando, accountActiveerStappen,
-    ghLoginCommando, ghInstallCommando, parseGhAccounts, parseGhUser, parseGhEmails, noreplyEmail, ghIdentiteit,
+    ghLoginCommando, ghInstallCommando, parseGhAccounts, parseGhLoginCode, parseGhLoginUrl, nieuwGhAccount,
+    parseGhUser, parseGhEmails, noreplyEmail, ghIdentiteit,
     diffCommando, isHoofdtak, parseTrack, branchOmschrijving, branchHeeftEigenWerk,
     resetZachtCommando, amendCommando, weggooiBestandCommando, alGepusht, terugdraaiBlokkade,
     parseBranches, lokaleBranches, huidigeBranch, nieuweRemoteBranches,

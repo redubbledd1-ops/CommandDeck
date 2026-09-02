@@ -376,8 +376,12 @@ window.eval(fs.readFileSync(path.join(APP, 'accounts.js'), 'utf8'))
 window.eval(fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8'))
 startVraagAutomaat()
 const W = window
-const $ = (s) => window.document.querySelector(s)
-const $$ = (s) => [...window.document.querySelectorAll(s)]
+const inBevrorenPaneel = (el) => {
+  const host = el && el.closest && el.closest('.paneel-bevroren')
+  return !!(host && host !== el)
+}
+const $ = (s) => [...window.document.querySelectorAll(s)].find(el => !inBevrorenPaneel(el)) || null
+const $$ = (s) => [...window.document.querySelectorAll(s)].filter(el => !inBevrorenPaneel(el))
 const browserKeuzeLeeg = () => { const f = window.document.getElementById('br-filter'); if (f) { f.value = ''; f.dispatchEvent(new window.Event('input')) } }
 const batCwd2 = () => window.document.getElementById('bat-cwd-select').value
 const tick = () => new Promise(r => setTimeout(r, 0))
@@ -457,7 +461,7 @@ function startVraagAutomaat() {
   // ── CMD-sectie ─────────────────────────────────────────────────────────────
   $('#btn-nav-cmd').click(); await tick()
   check('cmd-paneel zichtbaar', $('#cmd-panel').style.display === 'flex')
-  check('projectpaneel leeg (geen dubbele terminal-ID)', $('#main').innerHTML.trim() === '')
+  check('projectpaneel verstopt (geen dubbele terminal-ID)', $('#main').style.display === 'none')
   check('precies één terminal in de DOM', $$('#terminal').length === 1)
   check('precies één commandoveld', $$('#term-input').length === 1)
   check('onthouden werkmap staat voorgeselecteerd', $('#cmd-cwd-select').value === 'C:\\a')
@@ -2394,9 +2398,17 @@ function startVraagAutomaat() {
     { name: 'a', path: 'C:\\a', dir: true, size: 0, mtime: 1 },
     { name: 'leesmij.txt', path: 'C:\\leesmij.txt', dir: false, size: 40, mtime: 1 },
   ]
+  mappen['C:\\a'] = [
+    { name: 'lib', path: 'C:\\a\\lib', dir: true, size: 0, mtime: 1 },
+    { name: 'sub', path: 'C:\\a\\sub', dir: true, size: 0, mtime: 1 },
+    { name: 'main.dart', path: 'C:\\a\\main.dart', dir: false, size: 2048, mtime: 1 },
+    { name: 'pubspec.yaml', path: 'C:\\a\\pubspec.yaml', dir: false, size: 512, mtime: 1 },
+    { name: 'pakket.zip', path: 'C:\\a\\pakket.zip', dir: false, size: 9999, mtime: 1, archief: true },
+    { name: 'oud.rar', path: 'C:\\a\\oud.rar', dir: false, size: 8888, mtime: 1, archief: true },
+  ]
   settings.boomOpen = ['C:\\', 'C:\\a']
   $('#boom-ververs').click()
-  await new Promise(r => setTimeout(r, 50))
+  await new Promise(r => setTimeout(r, 150))
   $$('.proj-item')[0].click()
   await new Promise(r => setTimeout(r, 50))
 
@@ -2638,7 +2650,7 @@ function startVraagAutomaat() {
   // ── woordenboek ────────────────────────────────────────────────────────────
   $('#btn-nav-dict').click(); await tick()
   check('woordenboek-paneel zichtbaar', $('#dict-panel').style.display === 'flex')
-  check('cmd-paneel geleegd bij wisselen', $('#cmd-panel').innerHTML.trim() === '')
+  check('cmd-paneel verstopt bij wisselen', $('#cmd-panel').style.display === 'none')
   check('geen terminal meer in de DOM', $$('#terminal').length === 0)
   check('alle 3 commando\'s in de lijst', $$('.dict-row').length === 3)
   check('zoekveld heeft direct focus', window.document.activeElement.id === 'dict-search')
@@ -2668,7 +2680,7 @@ function startVraagAutomaat() {
   $('#dict-thema').dispatchEvent(new window.MouseEvent('click', { bubbles: true })); await tick()
   check('klikken klapt het menu uit', $('#dict-thema-menu').hidden === false)
   check('de resetknop staat bovenaan',
-    $('#dict-thema-menu').firstElementChild.id === 'thema-reset')
+    $('#dict-thema-menu').querySelector('button')?.id === 'thema-reset')
 
   const thema = (naam) => $(`#dict-thema-menu [data-thema="${naam}"]`)
   check('elk voorkomend label wordt een keuze', !!thema('tag:build') && !!thema('tag:web'))
@@ -2800,7 +2812,7 @@ function startVraagAutomaat() {
   // ── instellingen ───────────────────────────────────────────────────────────
   $('#btn-settings').click(); await tick()
   check('instellingen zichtbaar', $('#settings-panel').style.display === 'flex')
-  check('woordenboek-paneel geleegd', $('#dict-panel').innerHTML.trim() === '')
+  check('woordenboek-paneel verstopt', $('#dict-panel').style.display === 'none')
   check('onthouden-schakelaar aanwezig', !!$('#hist-enabled') && $('#hist-enabled').checked === true)
   check('bewaren-na-afsluiten staat standaard aan', $('#hist-persist').checked === true)
   check('aantallen ingevuld', $('#hist-max-recent').value === '300' && $('#hist-max-entries').value === '2000')
@@ -2810,7 +2822,7 @@ function startVraagAutomaat() {
   $('#settings-save').click(); await tick(); await tick()
   check('alleen-deze-sessie opgeslagen', settings.history.persist === false)
   check('aangepast aantal opgeslagen', settings.history.maxRecent === 50)
-  check('editors niet stukgemaakt door opslaan', settings.editors.cursor.enabled === true)
+  check('editors niet stukgemaakt door opslaan', !!(settings.editors && settings.editors.cursor))
 
   $('#hist-clear-recent').click(); await tick(); await tick()
   check('geschiedenis wissen laat woordenboek staan', store.recent.length === 0 && store.entries.length > 0)
@@ -2997,7 +3009,7 @@ function startVraagAutomaat() {
   // ── powershell-sectie ───────────────────────────────────────────────────────
   $('#btn-nav-ps').click(); await tick()
   check('powershell-paneel zichtbaar', $('#ps-panel').style.display === 'flex')
-  check('cmd-paneel geleegd bij wisselen', $('#cmd-panel').innerHTML.trim() === '')
+  check('cmd-paneel verstopt bij wisselen', $('#cmd-panel').style.display === 'none')
   check('onthouden werkmap staat voorgeselecteerd', $('#ps-cwd-select').value === 'C:\\a')
   check('powershell heeft een snelkoppelingen-rij', !!$('#ps-snel-grid'))
   check('Get-ChildItem staat in de powershell-rij',
@@ -3096,7 +3108,7 @@ function startVraagAutomaat() {
 
   $('#btn-nav-bat').click(); await tick(); await tick()
   check('bat-paneel verschijnt', $('#bat-panel').style.display === 'flex')
-  check('andere panelen zijn geleegd', $('#main').innerHTML.trim() === '')
+  check('projectpaneel verstopt', $('#main').style.display === 'none')
   check('eerste keer valt hij terug op de projectmap', $('#bat-cwd-select').value === projMap)
   check('editor staat er meteen', !!$('#bat-content') && $('#bat-content').value.includes('@echo off'))
   check('cursor staat in het tekstvak', window.document.activeElement.id === 'bat-content')
