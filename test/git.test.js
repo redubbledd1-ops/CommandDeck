@@ -54,7 +54,10 @@ t('repo zonder gh -> url vragen',  G.koppelStap(losseRepo, false) === G.KOPPEL_U
 t('al gekoppeld -> niets te doen', G.koppelStap(gekoppeld, true) === G.KOPPEL_AL_GEDAAN)
 t('git ontbreekt -> geen stap',    G.koppelStap(geenGit, true)   === null)
 
-t('init-commando', G.koppelCommando(G.KOPPEL_INIT) === 'git init -b main')
+// core.longpaths hoort erbij: zonder dat valt de eerste commit van een
+// Android- of node-project op Windows om met "Filename too long", en dat zegt
+// niets over de oorzaak.
+t('init-commando', G.koppelCommando(G.KOPPEL_INIT) === 'git init -b main && git config core.longpaths true')
 t('gh privé', G.koppelCommando(G.KOPPEL_GH, { naam: 'CommandDeck', prive: true })
   === 'gh repo create CommandDeck --private --source=. --push')
 t('gh publiek', G.koppelCommando(G.KOPPEL_GH, { naam: 'CommandDeck', prive: false })
@@ -790,7 +793,7 @@ t('ingelogd hangt aan een gevonden account, niet aan het bestaan van gh',
 const rendererBron = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer.js'), 'utf8')
 t('de renderer logt eerst in en haalt daarna pas op',
   rendererBron.indexOf('if (!st.ingelogd) {') > 0
-  && rendererBron.indexOf('if (!st.ingelogd) {') < rendererBron.indexOf('await window.api.gitGhIdentiteit()'))
+  && rendererBron.indexOf('if (!st.ingelogd) {') < rendererBron.indexOf('await window.api.gitGhIdentiteit('))
 
 // ── terugval als de API niet lukt ────────────────────────────────────────────
 // `gh api user` kan mislukken terwijl je wél ingelogd bent: geen netwerk, een
@@ -1541,6 +1544,145 @@ for (const sleutel of ['modal.project.gitLabel', 'gitset.kopRepo', 'gitset.kopGe
   // kunnen laten kijken, ook als de app niets mis ziet.
   t('controleren kan altijd met de hand', ren.includes("id=\"git-set-check\""))
   t('herstellen ook', ren.includes("id=\"git-set-herstel\""))
+}
+
+
+// ── .gitignore en lange paden ────────────────────────────────────────────────
+// De aanleiding: `git init -b main` in een Android-map, daarna `git add -A`.
+// Dat probeerde app/build/ mee te nemen, liep vast op een pad langer dan
+// Windows aankan ("Filename too long"), en liet een repo zonder één commit
+// achter. Alle drie de schakels — geen .gitignore, bouwmappen die meegaan,
+// lange paden uit — zijn hier apart afgedekt.
+
+t('gradle wordt herkend', G.projectSoorten(['build.gradle.kts', 'app']).join() === 'gradle')
+t('flutter ook', G.projectSoorten(['pubspec.yaml', 'lib']).join() === 'flutter')
+t('node ook', G.projectSoorten(['package.json']).join() === 'node')
+t('python ook', G.projectSoorten(['pyproject.toml']).join() === 'python')
+t('een sln-bestand telt op achtervoegsel',
+  G.projectSoorten(['MijnApp.sln']).join() === 'dotnet')
+// Flutter brengt zijn eigen android/-map met gradle mee. Twee blokken die
+// allebei build/ negeren is alleen maar ruis.
+t('flutter overschrijft gradle',
+  G.projectSoorten(['pubspec.yaml', 'build.gradle']).join() === 'flutter')
+t('meerdere soorten mogen naast elkaar',
+  G.projectSoorten(['package.json', 'Cargo.toml']).join() === 'node,rust')
+t('een lege map levert niets op', G.projectSoorten([]).length === 0)
+t('en onzin ook niet', G.projectSoorten(['leesmij.txt']).length === 0)
+
+{
+  const g = G.gitignoreVoor(['gradle'])
+  // Precies de mappen waar het op stukliep.
+  t('gradle negeert de bouwmap', g.includes('\nbuild/\n') && g.includes('*/build/'))
+  t('en .gradle', g.includes('.gradle/'))
+  t('en local.properties, want daar staat een pad van deze pc in', g.includes('local.properties'))
+  t('en de keystore, want daarmee onderteken je je app', g.includes('*.jks') && g.includes('*.keystore'))
+
+  t('node negeert node_modules', G.gitignoreVoor(['node']).includes('node_modules/'))
+  t('flutter negeert .dart_tool', G.gitignoreVoor(['flutter']).includes('.dart_tool/'))
+
+  // Deze twee staan er altijd in, ongeacht het soort project.
+  const kaal = G.gitignoreVoor([])
+  t('geheimen worden altijd genegeerd', kaal.includes('\n.env\n'))
+  t('maar een voorbeeldbestand niet', kaal.includes('!.env.example'))
+  t('en systeemrommel ook altijd', kaal.includes('.DS_Store') && kaal.includes('Thumbs.db'))
+  t('een onbekend soort levert nog steeds iets bruikbaars op', kaal.trim().length > 40)
+  t('een onbekend soort verzint geen bouwmappen', !kaal.includes('node_modules'))
+  t('elk blok legt zichzelf uit', G.gitignoreVoor(['node']).split('\n\n').every(b => b.trim().startsWith('#')))
+}
+
+t('app/build wordt als bouwrommel herkend', G.bouwrommel(['app/build/']).length === 1)
+t('node_modules ook', G.bouwrommel(['node_modules/']).length === 1)
+t('ook diep in de boom', G.bouwrommel(['pakket/sub/target/x.o']).length === 1)
+t('backslashes tellen ook mee', G.bouwrommel(['app\\build\\x']).length === 1)
+t('gewone broncode niet', G.bouwrommel(['lib/main.dart', 'app/src/Main.kt']).length === 0)
+// "building.md" is geen bouwmap. Alleen hele padstukken tellen.
+t('een naam die er alleen op lijkt telt niet', G.bouwrommel(['docs/building.md']).length === 0)
+t('elke map maar één keer', G.bouwrommel(['build/', 'build/']).length === 1)
+
+{
+  const basis = { beschikbaar: true, isRepo: true, branch: 'main', commits: true,
+                  upstream: 'origin/main', naam: 'a', email: 'b@c', remoteOk: true,
+                  remotes: ['origin'] }
+  const ids = (s) => G.gitProblemen(G.maakStaat(s)).map(p => p.id)
+
+  t('geen .gitignore wordt gemeld', ids({ ...basis, gitignore: false }).includes('geen-gitignore'))
+  t('en is een fout zodra er ook echt rommel klaarstaat',
+    G.gitProblemen(G.maakStaat({ ...basis, gitignore: false, nieuw: 1, nieuweBestanden: ['app/build/'] }))
+      .find(p => p.id === 'geen-gitignore').ernst === 'fout')
+  t('zonder rommel is het een let-op',
+    G.gitProblemen(G.maakStaat({ ...basis, gitignore: false }))
+      .find(p => p.id === 'geen-gitignore').ernst === 'let-op')
+  t('mét .gitignore blijft het stil', !ids({ ...basis, gitignore: true }).includes('geen-gitignore'))
+  // Niet gemeten mag nooit een melding worden: in de tests en vóór de eerste
+  // ronde weten we het simpelweg niet.
+  t('niet gemeten is geen probleem', !ids(basis).includes('geen-gitignore'))
+  t('en staat als null in de staat', G.maakStaat(basis).gitignore === null)
+
+  t('bouwrommel ondanks een .gitignore wordt apart gemeld',
+    ids({ ...basis, gitignore: true, nieuw: 1, nieuweBestanden: ['node_modules/'] }).includes('bouwmap-in-git'))
+  t('maar niet dubbel met "geen .gitignore"',
+    !ids({ ...basis, gitignore: false, nieuw: 1, nieuweBestanden: ['app/build/'] }).includes('bouwmap-in-git'))
+
+  t('lange paden uit wordt gemeld op windows',
+    ids({ ...basis, windows: true, langePaden: false }).includes('lange-paden'))
+  t('maar niet als het aan staat',
+    !ids({ ...basis, windows: true, langePaden: true }).includes('lange-paden'))
+  // Buiten Windows bestaat het probleem niet; erover beginnen is dan onzin.
+  t('en niet buiten windows',
+    !ids({ ...basis, windows: false, langePaden: false }).includes('lange-paden'))
+  t('lange paden zetten is één configregel', G.langePadenCommando() === 'git config core.longpaths true')
+}
+
+for (const sleutel of ['gitignore.titel', 'gitignore.tekst', 'gitignore.schrijven', 'gitignore.klaar',
+                       'gitignore.aanvullenTitel', 'gitignore.aanvullenTekst', 'gitignore.aanvullen',
+                       'gitignore.mislukt', 'gitignore.geenSoort',
+                       'gitignore.rommelTitel', 'gitignore.rommelTekst', 'gitignore.negeren',
+                       'gitignore.tochMeenemen', 'gitset.langePadenTekst',
+                       'gitset.prob.geen-gitignore', 'gitset.prob.bouwmap-in-git', 'gitset.prob.lange-paden',
+                       'gitset.actie.gitignore', 'gitset.actie.langepaden']) {
+  t('tekst ' + sleutel + ' staat in nl en en', !!nl[sleutel] && !!en[sleutel])
+}
+
+// ── inloggen bij het juiste GitHub-account ───────────────────────────────────
+// De klacht: er werd een ander account gekoppeld dan bedoeld. Twee oorzaken.
+// De eerste: "openen in browser" gebruikt de standaardbrowser, en die is vaak
+// al ingelogd — GitHub keurt de code dan goed voor dát account. Daarom moet de
+// link te kopiëren zijn, zodat je zelf een privévenster kunt kiezen.
+for (const sleutel of ['git.inlog.codeKopieer', 'git.inlog.linkKopieer', 'git.inlog.codeGekopieerd',
+                       'git.inlog.linkGekopieerd', 'git.inlog.kopieMislukt', 'git.inlog.codeWaarschuwing',
+                       'accounts.gitWelkAccountTitel', 'accounts.gitWelkAccountTekst']) {
+  t('tekst ' + sleutel + ' staat in nl en en', !!nl[sleutel] && !!en[sleutel])
+}
+{
+  const ren = fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8')
+  const main = fs.readFileSync(path.join(APP, 'main.js'), 'utf8')
+  const pre = fs.readFileSync(path.join(APP, 'preload.js'), 'utf8')
+
+  t('het codevenster kan de link kopiëren', /waarde: 'link'/.test(ren))
+  t('en de code apart', /waarde: 'code'/.test(ren))
+  t('met een waarschuwing over de standaardbrowser', ren.includes('git.inlog.codeWaarschuwing'))
+  // Het adres komt uit gh zelf, zodat een gewijzigde pagina vanzelf meekomt.
+  t('main leest het adres uit de uitvoer van gh', main.includes('github.com/login/device') && main.includes('alles.match'))
+  t('en stuurt code en adres samen door', /send\('git:ghCode', \{ code/.test(main))
+  t('de oude vorm blijft werken', pre.includes("typeof d === 'string'"))
+
+  // De tweede oorzaak: `gh api user` haalt het áctieve account op. Met meerdere
+  // accounts op één pc is dat een gok.
+  t('bij meerdere accounts wordt gevraagd welke', ren.includes('accounts.gitWelkAccountTitel'))
+  t('en die keuze gaat mee naar main', /gitGhIdentiteit\(gekozenGh\)/.test(ren))
+  t('main wisselt dan eerst van account', /auth', 'switch'/.test(main))
+  t('preload geeft de naam door', /gitGhIdentiteit: \(u\)/.test(pre))
+
+  t('main kan een .gitignore voorstellen', main.includes("ipcMain.handle('git:gitignoreVoorstel'"))
+  t('en schrijven', main.includes("ipcMain.handle('git:gitignoreSchrijf'"))
+  // Overschrijven van een bestaande .gitignore zou werk van de gebruiker
+  // weggooien; aanvullen mag wel.
+  t('een bestaande wordt aangevuld, niet overschreven', main.includes('appendFileSync'))
+  t('de renderer biedt het aan', ren.includes('async function regelGitignore'))
+  t('meteen na git init', /KOPPEL_INIT[\s\S]{0,400}regelGitignore/.test(ren))
+  // Dit is de plek waar het misging: de commit zelf.
+  t('en vóór een commit met bouwrommel erin', /GitTools\.bouwrommel[\s\S]{0,900}regelGitignore/.test(ren))
+  t('lange paden zijn met één knop aan te zetten', ren.includes('async function zetLangePaden'))
 }
 
 console.log(ok ? '\nALLE GIT-TESTS OK' : '\nER ZIJN GIT-TESTS GEZAKT')

@@ -230,6 +230,7 @@
                        vuil = 0, conflicten = 0, nieuw = 0, stashes = 0,
                        bestanden = [], nieuweBestanden = [],
                        remoteOk = null, remoteReden = '', remoteUrl = '', remoteLijst = [],
+                       gitignore = null, langePaden = null, windows = false,
                        naam = '', email = '' } = {}) {
     // Twee vormen die hetzelfde beschrijven: alleen namen (zoals `git remote`
     // geeft) of namen mét adres (`git remote -v`). Beide mogen, want de tests
@@ -284,6 +285,11 @@
       nieuweBestanden: Array.isArray(nieuweBestanden) ? nieuweBestanden : [],
       stashes: stashes || 0,
       bestanden: Array.isArray(bestanden) ? bestanden : [],
+      // null = niet gemeten (bijvoorbeeld in een test of vóór de eerste ronde);
+      // dan zegt de app er niets over in plaats van iets te verzinnen.
+      gitignore: gitignore === null ? null : !!gitignore,
+      langePaden: langePaden === null ? null : !!langePaden,
+      windows: !!windows,
       naam: String(naam || '').trim(),
       email: String(email || '').trim(),
     }
@@ -708,6 +714,96 @@
     return { naam: (project && project.naam) || '', pad: (project && project.pad) || '', redenen }
   }
 
+
+  // ── .gitignore ──────────────────────────────────────────────────────────────
+  // Waarom dit bestaat: `git init` gevolgd door `git add -A` in een Android-map
+  // probeert app/build/ mee te nemen. Duizenden gegenereerde bestanden, en één
+  // ervan heeft een pad langer dan Windows aankan — dan valt de hele commit om
+  // met "Filename too long" en heb je een repo zonder enkele commit. Datzelfde
+  // geldt voor node_modules, .gradle, build en target.
+  //
+  // Dus: vóór de eerste commit een .gitignore die past bij wat er in de map
+  // staat. Niet één grote lijst voor alles — dan staat er van alles in wat
+  // niets met dit project te maken heeft en leest niemand hem meer.
+
+  // Wat ligt er in de map, en wat zegt dat over het soort project? Alleen de
+  // bovenste laag: dieper zoeken kost tijd en zegt niets extra's.
+  const SOORT_MARKERS = [
+    { soort: 'flutter', bestanden: ['pubspec.yaml'] },
+    { soort: 'gradle',  bestanden: ['build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts', 'gradlew'] },
+    { soort: 'node',    bestanden: ['package.json'] },
+    { soort: 'python',  bestanden: ['requirements.txt', 'pyproject.toml', 'setup.py', 'Pipfile'] },
+    { soort: 'rust',    bestanden: ['Cargo.toml'] },
+    { soort: 'go',      bestanden: ['go.mod'] },
+    { soort: 'dotnet',  bestanden: ['.sln', '.csproj'] },   // achtervoegsels
+    { soort: 'php',     bestanden: ['composer.json'] },
+    { soort: 'ruby',    bestanden: ['Gemfile'] },
+  ]
+
+  function projectSoorten(namen) {
+    const lijst = (Array.isArray(namen) ? namen : []).map(n => String(n || ''))
+    const uit = []
+    for (const m of SOORT_MARKERS) {
+      const raak = lijst.some(n => m.bestanden.some(b =>
+        b.startsWith('.') ? n.toLowerCase().endsWith(b) : n === b))
+      if (raak) uit.push(m.soort)
+    }
+    // Flutter brengt zijn eigen android/-map mee met gradle erin. Dan is
+    // "flutter" het antwoord en zou "gradle" erbij alleen maar dubbele regels
+    // opleveren voor een build/-map die de flutter-regels al dekken.
+    return uit.includes('flutter') ? uit.filter(s => s !== 'gradle') : uit
+  }
+
+  // De blokken zelf. Elk blok begint met een regel die zegt waaróm het er
+  // staat: een .gitignore die je over een jaar terugleest moet zichzelf
+  // uitleggen, anders durft niemand er iets uit te halen.
+  const NEGEER_BLOKKEN = {
+    algemeen: ['# rommel van het systeem en de editor',
+               '.DS_Store', 'Thumbs.db', 'desktop.ini', '*.log',
+               '.idea/', '.vscode/', '*.iml', '*.swp', '*~'],
+    geheim:   ['# sleutels en wachtwoorden horen niet in de geschiedenis',
+               '.env', '.env.*', '!.env.example', '*.pem', '*.key'],
+    flutter:  ['# flutter/dart', '.dart_tool/', '.packages', '.flutter-plugins',
+               '.flutter-plugins-dependencies', 'build/', '.pub-cache/', '.pub/',
+               'ios/Pods/', 'ios/.symlinks/', 'android/.gradle/', 'android/local.properties'],
+    gradle:   ['# gradle/android — dit is gegenereerd, het hoort niet in git',
+               '.gradle/', 'build/', '*/build/', '.kotlin/', '.cxx/', 'captures/',
+               'local.properties', '*.apk', '*.aab', '*.keystore', '*.jks'],
+    node:     ['# node', 'node_modules/', 'dist/', 'build/', '.next/', 'coverage/',
+               'npm-debug.log*', 'yarn-error.log*'],
+    python:   ['# python', '__pycache__/', '*.py[cod]', '.venv/', 'venv/',
+               '*.egg-info/', '.pytest_cache/', '.mypy_cache/'],
+    rust:     ['# rust', 'target/'],
+    go:       ['# go', 'vendor/'],
+    dotnet:   ['# .net', 'bin/', 'obj/', '*.user'],
+    php:      ['# php', 'vendor/'],
+    ruby:     ['# ruby', '.bundle/', 'vendor/bundle/'],
+  }
+
+  function gitignoreVoor(soorten) {
+    const lijst = (Array.isArray(soorten) ? soorten : []).filter(s => NEGEER_BLOKKEN[s])
+    const delen = [NEGEER_BLOKKEN.algemeen.join('\n'), NEGEER_BLOKKEN.geheim.join('\n')]
+    for (const s of lijst) delen.push(NEGEER_BLOKKEN[s].join('\n'))
+    return delen.join('\n\n') + '\n'
+  }
+
+  // Mappen die er nooit in horen, waar ze ook staan. Hiermee herkennen we in de
+  // lijst met nog-niet-vastgelegde bestanden of er bouwrommel klaarstaat om
+  // meegenomen te worden — dát is het moment om het te zeggen, niet nadat de
+  // commit is omgevallen.
+  const BOUWMAPPEN = ['node_modules', 'build', '.gradle', 'target', '.dart_tool',
+                      'dist', '__pycache__', '.next', 'bin', 'obj', 'vendor', '.kotlin']
+
+  function bouwrommel(bestanden) {
+    const uit = []
+    for (const b of (Array.isArray(bestanden) ? bestanden : [])) {
+      const delen = String(b || '').split(/[\\/]/).filter(Boolean)
+      const raak = delen.find(d => BOUWMAPPEN.includes(d))
+      if (raak && !uit.includes(b)) uit.push(b)
+    }
+    return uit
+  }
+
   // ── Koppelen ────────────────────────────────────────────────────────────────
   // Twee stappen, bewust niet in één klik. Een map zonder repo krijgt eerst
   // alleen `git init`; wat er gecommit wordt bepaal je zelf, want zonder
@@ -771,6 +867,10 @@
     return remoteWegCommando(staat && staat.remote)
   }
 
+  function langePadenCommando() {
+    return 'git config core.longpaths true'
+  }
+
   // Dezelfde twee handelingen, maar dan op een remote die je zelf aanwijst.
   // Nodig zodra er meer dan één is: dan is "de" remote niet genoeg.
   function remoteWegCommando(naam) {
@@ -816,6 +916,21 @@
       uit.push({ id: 'upstream-weg', ernst: 'fout', actie: 'push', remote: volgt })
     }
 
+    // Dit is de volgorde waarin het misgaat: eerst staat er geen .gitignore,
+    // dan pakt `git add -A` de bouwmappen mee, en dan valt de commit om op een
+    // pad dat Windows niet aankan. Alle drie apart melden, want ze zijn apart
+    // op te lossen — en de eerste voorkomt de andere twee.
+    const rommel = bouwrommel(staat.nieuweBestanden)
+    if (staat.gitignore === false) {
+      uit.push({ id: 'geen-gitignore', ernst: rommel.length ? 'fout' : 'let-op', actie: 'gitignore' })
+    } else if (rommel.length) {
+      uit.push({ id: 'bouwmap-in-git', ernst: 'fout', actie: 'gitignore',
+                 aantal: rommel.length, mappen: rommel.slice(0, 6) })
+    }
+    if (staat.windows && staat.langePaden === false) {
+      uit.push({ id: 'lange-paden', ernst: 'let-op', actie: 'langepaden' })
+    }
+
     if (!staat.commits) uit.push({ id: 'geen-commits', ernst: 'info', actie: 'commit' })
     else if (!staat.heeftRemote) uit.push({ id: 'geen-remote', ernst: 'info', actie: 'koppelen' })
     else if (!staat.koppelingStuk && !staat.upstream) uit.push({ id: 'geen-upstream', ernst: 'let-op', actie: 'push' })
@@ -842,7 +957,12 @@
   // terminal van de app zichtbaar draait en je de uitvoer gewoon ziet.
   function koppelCommando(stap, opties = {}) {
     const { naam = '', url = '', branch = 'main', prive = true } = opties
-    if (stap === KOPPEL_INIT) return 'git init -b main'
+    // core.longpaths erbij: zonder dat loopt Windows vast op een pad langer
+    // dan 260 tekens, en dat is precies wat een Android- of node-project met
+    // gegenereerde bestanden oplevert. De fout die je dan krijgt ("Filename too
+    // long") zegt niets over de oorzaak en laat je met een repo zonder commits
+    // achter. Op Linux en macOS doet de instelling niets.
+    if (stap === KOPPEL_INIT) return 'git init -b main && git config core.longpaths true'
     if (stap === KOPPEL_GH) {
       if (!naam) return null
       return `gh repo create ${naam} ${prive ? '--private' : '--public'} --source=. --push`
@@ -1377,6 +1497,7 @@
     remoteFoutReden, remoteUitslag, lsRemoteArgs, koppelingProbleem,
     herstelCommando, ontkoppelCommando, KOPPEL_HERSTEL,
     parseRemoteRegels, remoteWegCommando, remoteUrlCommando,
+    projectSoorten, gitignoreVoor, bouwrommel, NEGEER_BLOKKEN, langePadenCommando,
     gitProblemen, ergsteErnst,
     veiligCommitBericht, automatischCommitBericht, commitCommando, pushCommando, stashCommando, blokkade,
     parseStashAantal, parseStashLijst, parseStashOnderwerp, stashRefGeldig,

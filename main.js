@@ -1172,6 +1172,42 @@ ipcMain.handle('git:remoteCheck', async (_, dir) => {
   return { ok: uitslag.ok, reden: uitslag.reden, remote, url }
 })
 
+// ── .gitignore ───────────────────────────────────────────────────────────────
+// Wat er in deze map ligt bepaalt wat erin moet. We kijken alleen naar de
+// bovenste laag: dieper zoeken kost tijd en zegt niets extra's.
+ipcMain.handle('git:gitignoreVoorstel', (_, dir) => {
+  if (!padToegestaan(dir) || !dir || !fs.existsSync(dir)) return { ok: false }
+  let namen = []
+  try { namen = fs.readdirSync(dir).slice(0, 400) } catch { return { ok: false } }
+  const soorten = GitTools.projectSoorten(namen)
+  return {
+    ok: true,
+    bestaat: fs.existsSync(path.join(dir, '.gitignore')),
+    soorten,
+    inhoud: GitTools.gitignoreVoor(soorten),
+  }
+})
+
+// Schrijven doet main, niet een commando in de terminal: tientallen regels door
+// cmd.exe jagen gaat stuk op het eerste rare teken, en dit is een bestand dat
+// gewoon goed moet staan.
+ipcMain.handle('git:gitignoreSchrijf', (_, { dir, inhoud, erbij } = {}) => {
+  if (!padToegestaan(dir) || !dir || !fs.existsSync(dir)) return { ok: false, reden: 'geen-map' }
+  const doel = path.join(dir, '.gitignore')
+  try {
+    if (erbij && fs.existsSync(doel)) {
+      // Aanvullen, niet overschrijven: wat er staat is van de gebruiker.
+      const oud = fs.readFileSync(doel, 'utf8')
+      fs.appendFileSync(doel, (oud.endsWith('\n') ? '' : '\n') + '\n' + String(inhoud || ''), 'utf8')
+    } else {
+      fs.writeFileSync(doel, String(inhoud || ''), 'utf8')
+    }
+    return { ok: true, pad: doel }
+  } catch (e) {
+    return { ok: false, reden: String((e && e.message) || 'onbekend') }
+  }
+})
+
 // Na koppelen, herstellen of een mislukte push wil je niet nog een half uur
 // naar het oude oordeel kijken.
 ipcMain.handle('git:remoteVergeet', (_, dir) => {
@@ -1234,6 +1270,11 @@ ipcMain.handle('git:info', (_, dir) => {
   // je vóór het typen van een bericht weten en niet erna.
   const ident = GitTools.parseIdentiteit(gitUit(dir, ['config', '--get-regexp', '^user\\.(name|email)$']))
 
+  // Twee dingen die pas pijn doen bij de eerste commit, en die je dus vóór die
+  // commit wilt weten. Allebei goedkoop: één bestandscheck en één configregel.
+  const gitignore = fs.existsSync(path.join(dir, '.gitignore'))
+  const langePaden = String(gitUit(dir, ['config', '--get', 'core.longpaths']) || '').trim() === 'true'
+
   // Werkt dat adres ook? Dat weet alleen git:remoteCheck, en die kost netwerk.
   // Hier lezen we alleen wat daar al uit kwam. Nog niets gecontroleerd betekent
   // remoteOk: null, en dan blijft de koppeling gewoon bruikbaar.
@@ -1251,6 +1292,7 @@ ipcMain.handle('git:info', (_, dir) => {
     ahead: st.ahead, behind: st.behind, vuil: st.vuil,
     conflicten: st.conflicten, stashes, bestanden: st.bestanden,
     remoteOk, remoteReden,
+    gitignore, langePaden, windows: process.platform === 'win32',
     naam: ident.naam, email: ident.email,
   })
 })
@@ -1470,7 +1512,20 @@ ipcMain.handle('git:accountActiveren', (_, profiel) => {
 
 // Wie ben je volgens GitHub? Na het inloggen weet gh dat, dus hoeft niemand
 // zijn naam en adres over te typen.
-ipcMain.handle('git:ghIdentiteit', () => {
+ipcMain.handle('git:ghIdentiteit', (_, gebruiker) => {
+  // Staan er meerdere GitHub-accounts op deze pc, dan haalt `gh api user` die
+  // van de áctieve op — en dat is niet per se degene die je bedoelde. Vandaar
+  // dat de renderer hier een naam mee kan geven: eerst wisselen, dan ophalen.
+  // Dit is de fout waarbij het verkeerde account aan een profiel kwam te hangen.
+  const gewenst = String(gebruiker || '').trim()
+  if (gewenst && ghBeschikbaar()) {
+    try {
+      execFileSync('gh', ['auth', 'switch', '--hostname', 'github.com', '--user', gewenst], {
+        encoding: 'utf8', timeout: 8000, windowsHide: true, env: childEnv(),
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+    } catch { /* lukt het niet, dan valt hij terug op het actieve account */ }
+  }
   // Mislukken mag, maar dan moet er wél staan waaróm. "Kon je gegevens niet
   // ophalen" laat iemand met lege handen achter; met de reden erbij weet je of
   // je moet inloggen, installeren, of gewoon zelf invullen.
@@ -1551,7 +1606,11 @@ ipcMain.handle('git:ghLogin', () => new Promise((resolve) => {
       const m = alles.match(/\b([A-Z0-9]{4}-[A-Z0-9]{4})\b/)
       if (m) {
         codeGestuurd = true
-        try { if (win && !win.isDestroyed()) win.webContents.send('git:ghCode', m[1]) } catch {}
+        // Het adres komt uit de uitvoer van gh zelf, niet uit een vaste regel
+        // hier: verandert gh de pagina, dan volgen wij vanzelf mee.
+        const u = alles.match(/https:\/\/\S*github\.com\/login\/device\S*/)
+        const url = u ? u[0].replace(/[.,)]+$/, '') : 'https://github.com/login/device'
+        try { if (win && !win.isDestroyed()) win.webContents.send('git:ghCode', { code: m[1], url }) } catch {}
       }
     }
 

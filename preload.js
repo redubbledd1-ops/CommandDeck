@@ -47,10 +47,16 @@ contextBridge.exposeInMainWorld('api', {
   gitGhStatus:   ()      => ipcRenderer.invoke('git:ghStatus'),
   gitRemoteCheck:  (p)   => ipcRenderer.invoke('git:remoteCheck', p),
   gitRemoteVergeet:(p)   => ipcRenderer.invoke('git:remoteVergeet', p),
+  gitIgnoreVoorstel:(p)  => ipcRenderer.invoke('git:gitignoreVoorstel', p),
+  gitIgnoreSchrijf: (o)  => ipcRenderer.invoke('git:gitignoreSchrijf', o),
   gitGhLogin:    ()      => ipcRenderer.invoke('git:ghLogin'),
-  opGhCode:      (f)     => ipcRenderer.on('git:ghCode', (_, code) => f(code)),
+  // Vroeger kwam hier alleen de code binnen. Nu een object met code én adres,
+  // zodat het venster een "link kopiëren"-knop kan tonen. Een oude vorm (kale
+  // tekst) blijft werken.
+  opGhCode:      (f)     => ipcRenderer.on('git:ghCode', (_, d) =>
+                              f(typeof d === 'string' ? { code: d, url: 'https://github.com/login/device' } : d)),
   gitGhAccounts: ()      => ipcRenderer.invoke('git:ghAccounts'),
-  gitGhIdentiteit: ()    => ipcRenderer.invoke('git:ghIdentiteit'),
+  gitGhIdentiteit: (u)   => ipcRenderer.invoke('git:ghIdentiteit', u),
   gitAccountActiveren: (p) => ipcRenderer.invoke('git:accountActiveren', p),
   gitFetch:      (p)     => ipcRenderer.invoke('git:fetch', p),
   gitProjecten:  (l)     => ipcRenderer.send('git:projecten', l),

@@ -7466,24 +7466,61 @@ async function startGhLogin() {
   return r
 }
 
-async function toonGhCode(code) {
+// Het venster met de inlogcode. "Openen in browser" gebruikt de standaard-
+// browser van Windows, en dáár zit het probleem waar dit venster op is
+// aangepast: is die browser al ingelogd met een ánder GitHub-account, dan keurt
+// GitHub de code voor dát account goed en heb je de verkeerde koppeling.
+// Vandaar de knop om de link te kopiëren: dan kies je zelf in welke browser —
+// of welk privévenster — je hem opent.
+async function toonGhCode(info) {
+  const code = typeof info === 'string' ? info : (info && info.code) || ''
+  const url = (info && info.url) || 'https://github.com/login/device'
   ghCodeVenster = code
+
   const keuze = await vraagKeuze({
     titel: I18N.t('git.inlog.codeTitel'),
-    tekst: I18N.t('git.inlog.codeTekst'),
-    regels: [code],
+    tekst: I18N.t('git.inlog.codeTekst') + '\n\n' + I18N.t('git.inlog.codeWaarschuwing'),
+    regels: [code, url],
     knoppen: [
       { label: I18N.t('git.inlog.codeSluit'), waarde: 'sluit' },
+      { label: I18N.t('git.inlog.codeKopieer'), waarde: 'code' },
+      { label: I18N.t('git.inlog.linkKopieer'), waarde: 'link' },
       { label: I18N.t('git.inlog.codeOpen'), waarde: 'open', soort: 'primair' },
     ],
   })
+
+  // Elke keuze behalve sluiten laat het venster terugkomen: je hebt de code
+  // straks nog nodig, en na één klik weg zijn is precies waar het op vastliep.
+  const opnieuw = () => { if (ghCodeVenster) setTimeout(() => { if (ghCodeVenster) toonGhCode({ code, url }) }, 400) }
+
+  if (keuze === 'code') { await kopieer(code, I18N.t('git.inlog.codeGekopieerd')); opnieuw(); return }
+  if (keuze === 'link') { await kopieer(url, I18N.t('git.inlog.linkGekopieerd')); opnieuw(); return }
   if (keuze === 'open') {
     // Kopiëren én de pagina openen: plakken is dan het enige wat overblijft.
-    try { await navigator.clipboard.writeText(code) } catch {}
-    await window.api.openUrl('https://github.com/login/device')
-    // Opnieuw tonen, want je hebt hem straks nog nodig om te plakken.
-    if (ghCodeVenster) setTimeout(() => { if (ghCodeVenster) toonGhCode(code) }, 400)
+    await kopieer(code, '')
+    await window.api.openUrl(url)
+    opnieuw()
   }
+}
+
+// navigator.clipboard werkt niet overal in Electron zonder https-context; de
+// tekstvak-omweg wel. Stil mislukken mag niet — dan sta je te plakken wat er
+// nog van gisteren stond.
+async function kopieer(tekst, melding) {
+  let gelukt = false
+  try { await navigator.clipboard.writeText(tekst); gelukt = true } catch {}
+  if (!gelukt) {
+    try {
+      const vak = document.createElement('textarea')
+      vak.value = tekst
+      vak.style.position = 'fixed'; vak.style.opacity = '0'
+      document.body.appendChild(vak); vak.select()
+      gelukt = document.execCommand('copy')
+      vak.remove()
+    } catch {}
+  }
+  if (melding) showToast(gelukt ? melding : I18N.t('git.inlog.kopieMislukt'))
+  return gelukt
 }
 
 async function installeerGh() {
@@ -7554,7 +7591,26 @@ async function haalGitIdentiteitOp(accountNaam) {
     if (!gelukt) return null
   }
 
-  const r = await window.api.gitGhIdentiteit()
+  // Meerdere GitHub-accounts op deze pc? Dan is "het actieve account" een gok,
+  // en die gok kwam er eerder naast te zitten. Dus vragen welke het moet zijn.
+  let gekozenGh = ''
+  try {
+    const na = await window.api.gitGhStatus()
+    const lijst = (na && na.accounts) || []
+    if (lijst.length > 1) {
+      gekozenGh = await vraagKeuze({
+        titel: I18N.t('accounts.gitWelkAccountTitel'),
+        tekst: I18N.t('accounts.gitWelkAccountTekst'),
+        knoppen: [
+          { label: I18N.t('common.cancel'), waarde: '' },
+          ...lijst.map((n, i) => ({ label: n, waarde: n, soort: i === 0 ? 'primair' : '' })),
+        ],
+      })
+      if (!gekozenGh) return null
+    }
+  } catch {}
+
+  const r = await window.api.gitGhIdentiteit(gekozenGh)
   if (!r || !r.ok) {
     // Zeggen wát er misging, met de foutregel van gh erbij. Anders sta je met
     // een melding die niets oplost.
@@ -11924,6 +11980,31 @@ async function schrijfGitCmd(project, cmdKey) {
     // Gaan er nieuwe bestanden mee, dan eerst vragen of je die wilt zien. Dat
     // is de categorie waar een .env of een sleutel in zit, en `add -A` pakt ze
     // gewoon mee.
+    // Staat er bouwrommel klaar (app/build/, node_modules/, .gradle/)? Dan is
+    // dít het moment, niet nadat `git add -A` erop is stukgelopen. Eén map met
+    // gegenereerde bestanden kan duizenden paden opleveren waarvan er één te
+    // lang is voor Windows — en dan valt de hele commit om.
+    const rommel = GitTools.bouwrommel(staat.nieuweBestanden)
+    if (rommel.length) {
+      const wat = await vraagKeuze({
+        titel: I18N.t('gitignore.rommelTitel'),
+        tekst: I18N.t('gitignore.rommelTekst', { aantal: rommel.length }),
+        regels: rommel,
+        knoppen: [
+          { label: I18N.t('common.cancel'), waarde: '' },
+          { label: I18N.t('gitignore.tochMeenemen'), waarde: 'door' },
+          { label: I18N.t('gitignore.negeren'), waarde: 'negeer', soort: 'primair' },
+        ],
+      })
+      if (!wat) return
+      if (wat === 'negeer') {
+        await regelGitignore(project, { stil: true })
+        // De lijst is nu anders; opnieuw beginnen met verse cijfers.
+        await schrijfGitCmd(project, cmdKey)
+        return
+      }
+    }
+
     if (staat.nieuw > 0) {
       const kijk = await vraagKeuze({
         titel: I18N.t('git.commit.nieuwTitel'),
@@ -12464,6 +12545,57 @@ async function stashOverzicht(project) {
 // kunt. `gh repo create` zou hier stuklopen op "remote origin already exists",
 // dus dit is een eigen weg — en de gebruiker kiest wat er gebeurt, want alleen
 // die weet wat er met die repo is.
+// ── .gitignore ───────────────────────────────────────────────────────────────
+// De aanleiding: `git init` en dan committen in een Android-map. `git add -A`
+// pakt app/build/ mee — duizenden gegenereerde bestanden — en valt om op een
+// pad dat Windows niet aankan. Je houdt een repo zonder enkele commit over en
+// een foutmelding die niets zegt over de oorzaak.
+//
+// Dus wordt dit aangeboden vóór de eerste commit, met de inhoud erbij: je ziet
+// wat er genegeerd gaat worden voordat je ja zegt.
+async function regelGitignore(project, { stil = false } = {}) {
+  const pad = actieveLocPad(project)
+  if (!pad) return false
+
+  let v = null
+  try { v = await window.api.gitIgnoreVoorstel(pad) } catch {}
+  if (!v || !v.ok) return false
+
+  const regels = String(v.inhoud || '').split('\n').filter(r => r.trim())
+  const keuze = await vraagKeuze({
+    titel: I18N.t(v.bestaat ? 'gitignore.aanvullenTitel' : 'gitignore.titel'),
+    tekst: I18N.t(v.bestaat ? 'gitignore.aanvullenTekst' : 'gitignore.tekst',
+      { soorten: v.soorten.length ? v.soorten.join(', ') : I18N.t('gitignore.geenSoort') }),
+    regels,
+    knoppen: [
+      { label: I18N.t('common.cancel'), waarde: '' },
+      { label: I18N.t(v.bestaat ? 'gitignore.aanvullen' : 'gitignore.schrijven'), waarde: 'ja', soort: 'primair' },
+    ],
+  })
+  if (!keuze) return false
+
+  const r = await window.api.gitIgnoreSchrijf({ dir: pad, inhoud: v.inhoud, erbij: v.bestaat })
+  if (!r || !r.ok) {
+    await meldKort(I18N.t('gitignore.titel'), I18N.t('gitignore.mislukt', { reden: (r && r.reden) || '' }))
+    return false
+  }
+  // Al vastgelegde bouwmappen blijven in de index staan ondanks .gitignore.
+  // Daar zeggen we hier niets over: bij een verse repo speelt het niet, en bij
+  // een bestaande is `git rm -r --cached` een ingreep die je zelf moet willen.
+  if (!stil) showToast(I18N.t('gitignore.klaar'))
+  await ververesGitStaat(project, true)
+  return true
+}
+
+async function zetLangePaden(project) {
+  const ja = await vraagJaNee(I18N.t('gitset.prob.lange-paden'), I18N.t('gitset.langePadenTekst'),
+    I18N.t('common.ok'), 'primair')
+  if (!ja) return false
+  await executeCmd(project, GitTools.langePadenCommando(), 'git-koppelen')
+  await ververesGitStaat(project, true)
+  return true
+}
+
 async function herstelKoppeling(project, pad, staat) {
   const probleem = GitTools.koppelingProbleem(staat)
   if (!probleem) return
@@ -12593,10 +12725,16 @@ async function koppelGithub(project) {
     if (!ja) return
     await executeCmd(project, GitTools.koppelCommando(GitTools.KOPPEL_INIT), 'git-koppelen')
     await ververesGitStaat(project, true)
+    // Meteen erachteraan, want de eerstvolgende knop die je indrukt is
+    // "vastleggen" — en dán is het te laat.
+    await regelGitignore(project)
     return
   }
 
   if (stap === GitTools.KOPPEL_COMMIT) {
+    // Zonder .gitignore loopt die eerste commit stuk op de bouwmappen. Dus
+    // eerst dat, dan pas "leg iets vast".
+    if (staat.gitignore === false) await regelGitignore(project)
     await meldKort(I18N.t('git.link.commitTitle'), I18N.t('git.link.commitText'))
     return
   }
@@ -13302,6 +13440,8 @@ function bindGitSectie(p, pad, staat) {
     else if (actie === 'diff')     await toonDiff(p)
     else if (actie === 'branch')   await branchOverzicht(p)
     else if (actie === 'profiel')  await controleerIdentiteit(p, nu)
+    else if (actie === 'gitignore') await regelGitignore(p)
+    else if (actie === 'langepaden') await zetLangePaden(p)
     else if (actie === 'remotes')  await meldKort(I18N.t('gitset.remotesTitel'), I18N.t('gitset.remotesTekst'))
     await naAfloop()
   }))

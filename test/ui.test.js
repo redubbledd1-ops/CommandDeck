@@ -134,11 +134,15 @@ let exeFail = false
 let gitStaatNu = null
 let gitChecks = []
 let gitVergeten = []
+let gitignoreGeschreven = []
 
 const api = {
   gitInfo: async () => gitStaatNu ? JSON.parse(JSON.stringify(gitStaatNu)) : null,
   gitRemoteCheck: async (p) => { gitChecks.push(p); return { ok: null, reden: '' } },
   gitRemoteVergeet: async (p) => { gitVergeten.push(p); return true },
+  gitIgnoreVoorstel: async () => ({ ok: true, bestaat: false, soorten: ['gradle'],
+                                    inhoud: '# gradle\n.gradle/\nbuild/\nlocal.properties\n' }),
+  gitIgnoreSchrijf: async (o) => { gitignoreGeschreven.push(o); return { ok: true, pad: 'C:\\a\\.gitignore' } },
   gitPaden: async () => true,
   gitProjecten: async () => true,
   loadProjects: async () => JSON.parse(JSON.stringify(projects)),
@@ -3701,6 +3705,38 @@ function startVraagAutomaat() {
     check('een map zonder repo toont geen adressen', $$('.git-set-remote').length === 0)
     check('en wijst naar koppelen', !!$('[data-git-actie="koppelen"]'))
     check('zonder herstelknop, want er is niets te herstellen', !$('#git-set-herstel'))
+    $('#modal-proj-save').click(); await tick(); await tick()
+
+    // ── .gitignore ───────────────────────────────────────────────────────────
+    // Waar dit vandaan komt: `git init` in een Android-map, dan committen.
+    // `git add -A` pakte app/build/ mee en viel om op een pad dat Windows niet
+    // aankan -- repo zonder één commit, en een foutmelding die de oorzaak niet
+    // noemt. De sectie moet dit zién voordat je op vastleggen drukt.
+    gitStaatNu = maakStaat({ beschikbaar: true, isRepo: true, branch: 'main', commits: false,
+      naam: 'a', email: 'b@c', windows: true, gitignore: false, langePaden: false,
+      nieuw: 2, vuil: 2, nieuweBestanden: ['app/build/', '.gradle/'] })
+    $$('.proj-edit')[0].click(); await tick(); await tick()
+    const gp = $$('.git-set-probleem').map(e => e.textContent)
+    check('ontbrekende .gitignore wordt gemeld', gp.some(x => x.includes('.gitignore')))
+    check('en lange paden ook', gp.some(x => x.includes('260')))
+    check('met bouwrommel erbij is het een fout, geen waarschuwing',
+      !!$('.git-set-probleem.e-fout [data-git-actie="gitignore"]'))
+
+    gitignoreGeschreven.length = 0
+    kiesKnop('')
+    $('[data-git-actie="gitignore"]').click(); await tick(); await tick()
+    check('de app laat eerst zien wat er genegeerd gaat worden',
+      !!laatsteVraag && laatsteVraag.regels.includes('build/'))
+    check('en schrijft het bestand pas na akkoord', gitignoreGeschreven.length === 1)
+    check('zonder een bestaande te overschrijven', gitignoreGeschreven[0].erbij === false)
+    check('in de map van het project', gitignoreGeschreven[0].dir === 'C:\\a')
+    $('#modal-proj-save').click(); await tick(); await tick()
+
+    // Staat hij er wel, dan hoort de app erover te zwijgen.
+    gitStaatNu = maakStaat({ ...gezond, gitignore: true, langePaden: true, windows: true })
+    $$('.proj-edit')[0].click(); await tick(); await tick()
+    check('met een .gitignore blijft het stil', !$('[data-git-actie="gitignore"]'))
+    check('en met lange paden aan ook', !$('[data-git-actie="langepaden"]'))
     $('#modal-proj-save').click(); await tick(); await tick()
 
     // Bij een nieuw project is er nog geen map om iets over te zeggen.
