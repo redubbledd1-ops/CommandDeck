@@ -7918,34 +7918,39 @@ async function bewaarAccountGit(a, git) {
 // Wisselen betekent: andere projecten, andere git-instellingen. Alles wat aan
 // het vorige account hing moet dus weg, anders zie je even de projectenlijst
 // van iemand anders of blijft een git-toestand van een ander pad hangen.
-async function wisselAccount(id, pin = null) {
-  if (!id || id === actiefAccount) return
+// Geeft true als er echt gewisseld is. `geenWerkcontrole` is voor het geval
+// waarin het account waar je vandaan komt niet meer bestaat: dan valt er niets
+// meer weg te zetten en zou de vraag alleen in de weg staan.
+async function wisselAccount(id, pin = null, opties = {}) {
+  if (!id || id === actiefAccount) return false
 
   // Eerst het werk van dit account wegzetten. Daarna pas pincode en wissel,
   // anders belandt onopgeslagen werk bij niemand.
-  await wachtOpOnveiligWerk()
-  onveiligWerkBezig = true
-  try {
-    if (await controleerOnveiligWerk('wisselen') === 'blijven') return
-  } catch {
-    // Liever wisselen dan vastzitten in een mislukte git-check.
-  } finally {
-    onveiligWerkBezig = false
+  if (!opties.geenWerkcontrole) {
+    await wachtOpOnveiligWerk()
+    onveiligWerkBezig = true
+    try {
+      if (await controleerOnveiligWerk('wisselen') === 'blijven') return false
+    } catch {
+      // Liever wisselen dan vastzitten in een mislukte git-check.
+    } finally {
+      onveiligWerkBezig = false
+    }
   }
 
   // Vanaf twee accounts is inloggen altijd nodig — juist bij het wisselen, want
   // dat is het moment waarop je in het verkeerde account belandt.
   if (accountPinNodig && pin === null) {
     const doel = accounts.find(a => a.id === id)
-    if (!doel) return
+    if (!doel) return false
     pin = await vraagBestaandePin(doel)
-    if (pin === null) return
+    if (pin === null) return false
   }
 
   const r = await window.api.accountSwitch({ id, pin: pin || '' })
   if (!r || !r.ok) {
     if (r && r.reden === 'pin-fout') await meldKort(I18N.t('accounts.wisselen'), I18N.t('accounts.pinOp'))
-    return
+    return false
   }
 
   const inInstellingen = view === 'settings'
@@ -7978,6 +7983,7 @@ async function wisselAccount(id, pin = null) {
   showToast(I18N.t('accounts.gewisseld', { naam: (huidigAccount() || {}).naam || '' }))
   startGitPolling()
   activeerGitVoorAccount().then(() => ververesAlleGitStaten(true))
+  return true
 }
 
 // Bij het opstarten vragen wie er achter de pc zit. Alleen als er iets te
@@ -8090,7 +8096,9 @@ function accountRijenHtml() {
         <button class="term-btn" data-account-hernoem="${esc(a.id)}" title="${esc(I18N.t('accounts.hernoemen'))}"><i class="ti ti-pencil" style="font-size:13px"></i></button>
         <button class="term-btn ${a.heeftPin ? '' : 'btn-danger'}" data-account-pin="${esc(a.id)}"
           title="${esc(I18N.t(a.heeftPin ? 'accounts.pinWijzigen' : 'accounts.pinZetten'))}"><i class="ti ti-lock" style="font-size:13px"></i></button>
-        ${accounts.length > 1 ? `<button class="term-btn" data-account-weg="${esc(a.id)}" title="${esc(I18N.t('accounts.verwijderen'))}"><i class="ti ti-trash" style="font-size:13px"></i></button>` : ''}
+        ${accounts.length > 1 && a.id === actiefAccount
+          ? `<button class="term-btn" data-account-weg="${esc(a.id)}" title="${esc(I18N.t('accounts.verwijderen'))}"><i class="ti ti-trash" style="font-size:13px"></i></button>`
+          : ''}
       </div>
     </div>`).join('')
 }
@@ -8342,17 +8350,53 @@ function renderSettingsPanel() {
     btn.onclick = async () => {
       const a = accounts.find(x => x.id === btn.dataset.accountWeg)
       if (!a) return
+      // Alleen je eigen account, en dan nog met je pincode erbij. Weggeklikt
+      // is weggeklikt: hierna log je uit naar een ander account.
+      if (a.id !== actiefAccount) {
+        await meldKort(I18N.t('accounts.verwijderen'), I18N.t('accounts.verwijderAnderTekst'))
+        return
+      }
       const ja = await vraagJaNee(I18N.t('accounts.verwijderen'),
         I18N.t('accounts.verwijderTekst', { naam: a.naam }),
         I18N.t('accounts.verwijderen'), 'gevaar')
       if (!ja) return
-      const r = await window.api.accountRemove(a.id)
-      if (!r || !r.ok) { await meldKort(I18N.t('accounts.verwijderen'), I18N.t('accounts.laatsteAccount')); return }
+
+      let pin = ''
+      if (a.heeftPin) {
+        pin = await vraagPin(I18N.t('accounts.verwijderen'),
+          I18N.t('accounts.verwijderPinTekst', { naam: a.naam }),
+          I18N.t('accounts.verwijderen'))
+        if (pin === null) return
+      }
+
+      const r = await window.api.accountRemove({ id: a.id, pin })
+      if (!r || !r.ok) {
+        const reden = (r && r.reden) || 'laatste'
+        await meldKort(I18N.t('accounts.verwijderen'), I18N.t(
+          reden === 'pin-fout'    ? 'accounts.verwijderPinFout'
+          : reden === 'niet-jezelf' ? 'accounts.verwijderAnderTekst'
+          :                           'accounts.laatsteAccount'))
+        return
+      }
       // Het projectbestand blijft staan; dat zeggen we er ook bij.
       await meldKort(I18N.t('accounts.verwijderd'), I18N.t('accounts.bestandBlijft', { bestand: r.bestand || '' }))
-      const wasActief = a.id === actiefAccount
+
+      // Het account waar je in zat bestaat niet meer. Eerst hier alles leeg —
+      // anders staan de projecten en git-mappen van een verdwenen account nog
+      // in beeld — en daarna inloggen op wat er nog over is.
+      try { window.api.gitPaden({ accountId: r.actief, paden: [] }) } catch {}
+      try { window.api.gitProjecten({ accountId: r.actief, lijst: [] }) } catch {}
+      projects = []; activeId = ''; gitStaten = {}
+      gitRemoteGedaan.clear()
+      for (const k of Object.keys(gitLaatsteFetch)) delete gitLaatsteFetch[k]
+      wisBewaardePanelen()
+      renderSidebar()
+
       await laadAccounts()
-      if (wasActief) await wisselAccount(r.actief)
+      // laadAccounts zet actiefAccount alvast op het volgende account; leegmaken
+      // zodat de wissel écht langs de pincode gaat en niet stilletjes overslaat.
+      actiefAccount = ''
+      await wisselAccount(r.actief, null, { geenWerkcontrole: true })
       renderSettingsPanel()
     }
   })

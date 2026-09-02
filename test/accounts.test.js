@@ -259,6 +259,40 @@ t('wisselen vraagt eerst of git-werk weggezet moet worden',
   && rendererJs.indexOf("controleerOnveiligWerk('wisselen')")
      < rendererJs.indexOf('accountSwitch({ id, pin'))
 
+// ── Een verwijderd account bleef terugkomen ──────────────────────────────────
+// De accountlijst staat in settings.json, en het venster kreeg daar een kopie
+// van via settings:load. Bij settings:save ging die kopie ongewijzigd terug —
+// inclusief het account dat main net had verwijderd. Omdat `lastView` bij elke
+// schermwissel bewaard wordt, was dat altijd binnen een paar klikken gebeurd en
+// stond het account er na een herstart weer.
+t('settings:save schrijft de accountlijst uit het venster niet terug',
+  /const ALLEEN_VAN_MAIN = \['accounts', 'actiefAccount', 'perAccount'\]/.test(mainJs)
+  && /for \(const sleutel of ALLEEN_VAN_MAIN\) delete binnen\[sleutel\]/.test(mainJs))
+t('en gebruikt de lijst van main zelf',
+  /accounts: st\.accounts,[\s\S]{0,120}actiefAccount: st\.actiefAccount/.test(mainJs))
+t('de persoonlijke instellingen komen van schijf, niet uit die kopie',
+  /perAccount: opSchijf\.perAccount/.test(mainJs))
+
+// ── Verwijderen mag alleen jezelf, met je pincode ────────────────────────────
+t('main weigert het account van een ander',
+  /ipcMain\.handle\('accounts:remove'[\s\S]{0,700}if \(id !== st\.actiefAccount\) return \{ ok: false, reden: 'niet-jezelf' \}/.test(mainJs))
+t('en weigert zonder de juiste pincode',
+  /ipcMain\.handle\('accounts:remove'[\s\S]{0,800}!pinKlopt\(doel, pin\)\) return \{ ok: false, reden: 'pin-fout' \}/.test(mainJs))
+t('de prullenbak staat alleen bij je eigen account',
+  /accounts\.length > 1 && a\.id === actiefAccount/.test(rendererJs))
+t('het venster vraagt de pincode voordat het verwijdert',
+  /accounts\.verwijderPinTekst/.test(rendererJs)
+  && rendererJs.indexOf('accounts.verwijderPinTekst') < rendererJs.indexOf('accountRemove({ id: a.id, pin })'))
+t('en logt je daarna in op wat er nog over is',
+  /await wisselAccount\(r\.actief, null, \{ geenWerkcontrole: true \}\)/.test(rendererJs)
+  && /actiefAccount = ''[\s\S]{0,240}wisselAccount\(r\.actief/.test(rendererJs))
+t('zonder de projecten van het verdwenen account te laten staan',
+  /projects = \[\]; activeId = ''; gitStaten = \{\}/.test(rendererJs))
+for (const sleutel of ['accounts.verwijderPinTekst', 'accounts.verwijderPinFout',
+                       'accounts.verwijderAnderTekst']) {
+  t('verwijder-tekst ' + sleutel + ' bestaat in nl en en', !!nl[sleutel] && !!en[sleutel])
+}
+
 // ── Inloggen bij het opstarten ───────────────────────────────────────────────
 // Wie hier voor het eerst zit heeft nog geen account, en de instellingen zitten
 // achter dit scherm. Zonder een weg naar "account toevoegen" kom je dus niet

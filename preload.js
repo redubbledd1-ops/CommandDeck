@@ -76,7 +76,7 @@ contextBridge.exposeInMainWorld('api', {
   accountSwitch: (o)     => ipcRenderer.invoke('accounts:switch', o),
   accountSetPin: (o)     => ipcRenderer.invoke('accounts:setPin', o),
   accountCheck:  (o)     => ipcRenderer.invoke('accounts:check', o),
-  accountRemove: (id)    => ipcRenderer.invoke('accounts:remove', id),
+  accountRemove: (o)     => ipcRenderer.invoke('accounts:remove', o),
 
   gitBranches:   (p)     => ipcRenderer.invoke('git:branches', p),
   gitStashLijst: (p)     => ipcRenderer.invoke('git:stashLijst', p),

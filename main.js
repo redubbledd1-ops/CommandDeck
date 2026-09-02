@@ -470,11 +470,29 @@ function actieveInstellingen() {
 }
 
 ipcMain.handle('settings:load', () => actieveInstellingen())
+// De accountlijst hoort bij het main-proces en komt nooit uit het venster
+// terug. Het venster heeft er een kopie van die al verouderd kan zijn — sluit
+// je een account af of verwijder je er een, dan stond hij in die kopie nog. De
+// eerstvolgende bewaaractie (en `lastView` schrijft bij elke schermwissel)
+// zette die oude lijst er dan weer overheen, en na een herstart was het
+// verwijderde account terug. Dit is waar dat gebeurde.
+const ALLEEN_VAN_MAIN = ['accounts', 'actiefAccount', 'perAccount']
+
 ipcMain.handle('settings:save', (_, s) => {
   // De persoonlijke stukken (git) gaan naar het account, de rest is gedeeld.
   const st = accountStand()
-  const opslaan = Accounts.metAccountInstellingen(s, st.actiefAccount, s)
-  saveSettings(opslaan)
+  const opSchijf = loadSettings()
+
+  const binnen = { ...(s || {}) }
+  for (const sleutel of ALLEEN_VAN_MAIN) delete binnen[sleutel]
+
+  const basis = {
+    ...binnen,
+    accounts: st.accounts,
+    actiefAccount: st.actiefAccount,
+    perAccount: opSchijf.perAccount || {},
+  }
+  saveSettings(Accounts.metAccountInstellingen(basis, st.actiefAccount, binnen))
   return true
 })
 
@@ -589,8 +607,21 @@ ipcMain.handle('accounts:switch', (_, arg) => {
 // Verwijderen laat het projectbestand met rust. Dat is bewust: het is de enige
 // plek waar iemands werk staat, en een verkeerd aangeklikt account mag geen
 // projectenlijst kosten. De map opruimen doe je zelf.
-ipcMain.handle('accounts:remove', (_, id) => {
+//
+// Je kunt alleen het account weghalen waar je zelf op ingelogd bent, en je
+// pincode moet er opnieuw bij. Dat is geen slot tegen inbraak — zie de uitleg
+// bij de pincode — maar het houdt wel tegen dat iemand die even achter je pc
+// zit het account van een ander wegklikt. De controle staat hier en niet in het
+// venster: een scherm is een scherm, dit is waar het bestand geschreven wordt.
+ipcMain.handle('accounts:remove', (_, arg) => {
+  const { id, pin } = (typeof arg === 'string') ? { id: arg, pin: '' } : (arg || {})
   const st = accountStand()
+
+  const doel = st.accounts.find(a => a.id === id)
+  if (!doel) return { ok: false, reden: 'onbekend' }
+  if (id !== st.actiefAccount) return { ok: false, reden: 'niet-jezelf' }
+  if (Accounts.heeftPin(doel) && !pinKlopt(doel, pin)) return { ok: false, reden: 'pin-fout' }
+
   const na = Accounts.naVerwijderen(st.accounts, st.actiefAccount, id)
   if (!na) return { ok: false, reden: 'laatste' }
   const s = loadSettings()
