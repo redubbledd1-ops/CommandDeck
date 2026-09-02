@@ -254,6 +254,48 @@ t('wisselen vanuit instellingen blijft daar',
   && /renderSettingsPanel\(\)/.test(rendererJs))
 t('een inactieve accountrij is zelf de wisselknop',
   /account-rij:not\(\.actief\)/.test(rendererJs))
+t('wisselen vraagt eerst of git-werk weggezet moet worden',
+  /controleerOnveiligWerk\('wisselen'\)/.test(rendererJs)
+  && rendererJs.indexOf("controleerOnveiligWerk('wisselen')")
+     < rendererJs.indexOf('accountSwitch({ id, pin'))
+
+// ── Inloggen bij het opstarten ───────────────────────────────────────────────
+// Wie hier voor het eerst zit heeft nog geen account, en de instellingen zitten
+// achter dit scherm. Zonder een weg naar "account toevoegen" kom je dus niet
+// verder dan de accounts die er al waren.
+t('het inlogscherm biedt een account toevoegen aan',
+  /NIEUW_ACCOUNT/.test(rendererJs)
+  && /accounts\.toevoegenBijStart/.test(rendererJs))
+t('en gaat daarna terug naar de lijst, zodat je meteen kunt inloggen',
+  /if \(id === NIEUW_ACCOUNT\) \{[\s\S]{0,200}await voegAccountToe\(\)[\s\S]{0,120}kiesAccountBijStart\(\)/.test(rendererJs))
+t('de toevoegstroom staat los van de instellingen',
+  /async function voegAccountToe\(\)/.test(rendererJs))
+t('de tekst voor die knop bestaat in nl en en',
+  !!nl['accounts.toevoegenBijStart'] && !!en['accounts.toevoegenBijStart'])
+
+// ── Het inlogveld ────────────────────────────────────────────────────────────
+t('de pincode gaat door een wachtwoordveld',
+  /vraagTekst\(\{ titel, tekst, verborgen: true/.test(rendererJs))
+t('typen belandt altijd in dat veld, waar de cursor ook stond',
+  /const vangToets = /.test(rendererJs)
+  && /addEventListener\('keydown', vangToets, true\)/.test(rendererJs))
+t('en enter bevestigt, ook vanaf een knop',
+  /if \(e\.key === 'Enter'\)\s*\{ e\.preventDefault\(\); e\.stopPropagation\(\); af\(true\)/.test(rendererJs))
+t('een venster dat opengaat pakt de cursor niet meer af',
+  /function focusTerminalInput\(\)[\s\S]{0,1200}requestAnimationFrame\([\s\S]{0,600}anyModalOpen\(\)/.test(rendererJs))
+
+// ── Haperingen ───────────────────────────────────────────────────────────────
+// Het pad vers uit het register lezen kost twee synchrone reg.exe-aanroepen.
+// Op de hoofdthread staat in die tijd het hele venster stil, en dat gebeurde
+// elke twee minuten bij de eerstvolgende git-aanroep.
+t('het pad wordt in de achtergrond ververst, niet op de hoofdthread',
+  /function ververWindowsPath\(\)/.test(mainJs)
+  && /readRegPathAsync/.test(mainJs))
+t('windowsMergedPath blokkeert niet meer',
+  !/function windowsMergedPath\(\)[\s\S]{0,400}readRegPath\(/.test(mainJs))
+t('alleen bij het opstarten en na een installatie mag het blokkeren',
+  /function windowsPathNu\(\)/.test(mainJs)
+  && /try \{ windowsPathNu\(\) \} catch/.test(mainJs))
 
 t('de waarschuwing dat dit niets beveiligt staat er, in beide talen',
   /Windows/.test(nl['accounts.eerlijk'] || '') && /Windows/.test(en['accounts.eerlijk'] || ''))

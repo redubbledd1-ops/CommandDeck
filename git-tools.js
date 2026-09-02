@@ -682,14 +682,16 @@
   // ── Afsluitcontrole (ronde 5) ───────────────────────────────────────────────
   // Twee heel verschillende momenten:
   //
-  //   Venster sluiten   volledig controleerbaar. We houden het sluiten tegen,
-  //                     stellen per project een vraag, en sluiten pas als de
-  //                     gebruiker klaar is. Zo lang wachten als nodig.
-  //   Windows afsluiten ~5 seconden, geen tijd voor een gesprek. Hoogstens
-  //                     synchroon iets veiligstellen en het achteraf melden.
+  //   Venster sluiten / account wisselen
+  //                     volledig controleerbaar. Per onveilig project een
+  //                     eigen vraag, en pas verder als de gebruiker klaar is.
+  //   Windows afsluiten ~5 seconden als Windows het proces afkapt. We starten
+  //                     dezelfde vragen (close / QUERYENDSESSION); stash is
+  //                     het vangnet als er geen tijd meer is voor een gesprek.
   //
-  // De instelling gaat alleen over dat tweede geval. Bij het sluiten van het
-  // venster krijg je altijd de vraag, tenzij de controle helemaal uit staat.
+  // De instelling `stashen` gaat over dat vangnet. Bij het sluiten van het
+  // venster en bij wisselen krijg je altijd de vraag, tenzij de controle
+  // helemaal uit staat.
   const AFSLUIT_UIT          = 'uit'
   const AFSLUIT_WAARSCHUWEN  = 'waarschuwen'
   const AFSLUIT_STASHEN      = 'stashen'
@@ -1527,11 +1529,134 @@
     return null
   }
 
+  // De mapnaam die `git clone` zou kiezen: het laatste stuk van het adres,
+  // zonder .git. Leeg als het geen repository-adres is.
+  function repoNaamUitUrl(invoer) {
+    const url = normaliseerRepoUrl(invoer)
+    if (!url) return ''
+    const kaal = String(url).replace(/\.git$/i, '').replace(/[\\/]+$/, '')
+    const stuk = (kaal.split(/[:/\\]/).filter(Boolean).pop() || '').trim()
+    if (!stuk) return ''
+    return veiligeRepoNaam(stuk)
+  }
+
+  // Waar de bestanden terechtkomen. Is de gekozen locatie al de reponaam,
+  // dan is dat de map zelf; anders komt er een map met die naam onder.
+  function cloneDoelPad(url, locatiePad) {
+    const naam = repoNaamUitUrl(url)
+    const loc = String(locatiePad || '').replace(/[\\/]+$/, '')
+    if (!naam || !loc) return null
+    const basis = (loc.split(/[/\\]/).filter(Boolean).pop() || '')
+    if (basis.toLowerCase() === naam.toLowerCase()) return loc
+    const sep = loc.includes('/') && !loc.includes('\\') ? '/' : '\\'
+    return loc + sep + naam
+  }
+
+  function cloneOuderPad(doel) {
+    const p = String(doel || '').replace(/[\\/]+$/, '')
+    const i = Math.max(p.lastIndexOf('\\'), p.lastIndexOf('/'))
+    if (i < 0) return ''
+    if (i === 2 && /^[A-Za-z]:/.test(p)) return p.slice(0, 3)
+    return p.slice(0, i)
+  }
+
+  // De repositories van het ingelogde GitHub-account. Twee vormen komen hier
+  // binnen: `gh repo list --json` (nameWithOwner/url/isPrivate) en, als terugval
+  // voor oudere gh, `gh api user/repos` (full_name/html_url/private). Ze wijzen
+  // naar hetzelfde, dus vertalen we ze allebei naar één vorm.
+  function parseGhRepos(uitvoer) {
+    let ruw = null
+    try { ruw = JSON.parse(String(uitvoer || '')) } catch { return [] }
+    if (!Array.isArray(ruw)) return []
+
+    const uit = []
+    for (const r of ruw) {
+      if (!r || typeof r !== 'object') continue
+      const volledig = String(r.nameWithOwner || r.full_name || '').trim()
+      if (!volledig) continue
+      const naam = String(r.name || volledig.split('/').pop() || '').trim()
+      const adres = String(r.url || r.html_url || r.clone_url || '').trim()
+        || ('https://github.com/' + volledig)
+      uit.push({
+        naam,
+        volledig,
+        url: adres.replace(/\.git$/i, '') + '.git',
+        beschrijving: String(r.description || '').trim(),
+        prive: !!(r.isPrivate || r.private),
+        bijgewerkt: String(r.updatedAt || r.updated_at || r.pushedAt || r.pushed_at || '').trim(),
+      })
+    }
+
+    // Nieuwste bovenaan: waar je gisteren aan werkte is bijna altijd waar je
+    // nu naar zoekt.
+    uit.sort((a, b) => String(b.bijgewerkt).localeCompare(String(a.bijgewerkt)))
+    return uit
+  }
+
+  // ── Een blijven staan slot ──────────────────────────────────────────────────
+  // Git zet een index.lock neer voordat hij schrijft en haalt hem daarna weg.
+  // Wordt hij onderweg afgebroken — venster dicht, pc uit, een crash — dan
+  // blijft dat bestand staan en weigert élke volgende commit. De melding komt
+  // altijd in het Engels uit git zelf, dus daar kunnen we op af.
+  function gitSlotFout(tekst) {
+    const s = String(tekst || '')
+    if (!/index\.lock/i.test(s) && !/Another git process seems to be running/i.test(s)) return null
+    const m = s.match(/(?:Unable to create|kan .* niet maken)\s+'([^']*index\.lock)'/i)
+    return { pad: m ? m[1] : '' }
+  }
+
+  // "eigenaar/repo", kleingeschreven, uit welk adres dan ook. Https, ssh en
+  // `gebruiker/repo` wijzen naar dezelfde repository maar zien er anders uit;
+  // hiermee herken je dat het om dezelfde gaat.
+  function repoSleutel(invoer) {
+    const url = normaliseerRepoUrl(invoer)
+    if (!url) return ''
+    const kaal = String(url).replace(/\.git$/i, '').replace(/[\\/]+$/, '')
+    const delen = kaal.replace(/^[a-z+]+:\/\//i, '').replace(/^[^@/]+@/, '').split(/[:/\\]/).filter(Boolean)
+    if (delen.length < 2) return ''
+    return delen.slice(-2).join('/').toLowerCase()
+  }
+
+  // Repositories die al aan een project van deze gebruiker hangen horen niet in
+  // de kieslijst: die staan er al. Wel tellen hoeveel er wegvielen, want een
+  // stilzwijgend kortere lijst is een lijst waarin je gaat zoeken naar iets dat
+  // er wél zou moeten staan.
+  function zonderGekoppelde(lijst, gebruikteAdressen) {
+    const alles = Array.isArray(lijst) ? lijst.slice() : []
+    const bezet = new Set((gebruikteAdressen || []).map(repoSleutel).filter(Boolean))
+    if (!bezet.size) return { lijst: alles, verborgen: 0 }
+    const over = alles.filter(r => !bezet.has(repoSleutel(r && r.url)))
+    return { lijst: over, verborgen: alles.length - over.length }
+  }
+
+  // Zoeken in die lijst. Naam, eigenaar en omschrijving tellen allemaal mee, en
+  // losse woorden mogen in willekeurige volgorde: "dd music" vindt DD-Music.
+  function filterRepos(lijst, zoek) {
+    const q = String(zoek || '').trim().toLowerCase()
+    const alles = Array.isArray(lijst) ? lijst.slice() : []
+    if (!q) return alles
+    const delen = q.split(/\s+/).filter(Boolean)
+    return alles.filter(r => {
+      const hooiberg = ((r && r.volledig) || '') + ' ' + ((r && r.beschrijving) || '')
+      const kleine = hooiberg.toLowerCase()
+      return delen.every(d => kleine.includes(d))
+    })
+  }
+
+  function cloneCommando(url, doel) {
+    const adres = String(normaliseerRepoUrl(url) || '').replace(/[\r\n"]+/g, '').trim()
+    const map = String(doel || '').replace(/[\r\n"]+/g, '').trim()
+    if (!adres || !map) return null
+    return `git clone -- "${adres}" "${map}"`
+  }
+
   return {
     GIT_CMD_DEFS, GIT_CMD_MAP, GIT_IDS, isGitId, isSchrijfKnop, STANDAARD_UIT_IDS,
     parseRemotes, parseBranch, parseStatusV2, maakStaat, zichtbareGitIds,
     zelfdeGitWeergave,
     koppelStap, koppelCommando, veiligeRepoNaam, normaliseerRepoUrl,
+    repoNaamUitUrl, cloneDoelPad, cloneOuderPad, cloneCommando,
+    parseGhRepos, filterRepos, repoSleutel, zonderGekoppelde, gitSlotFout,
     KOPPELING_GEEN, KOPPELING_ONBEKEND, KOPPELING_OK, KOPPELING_STUK,
     remoteFoutReden, remoteUitslag, lsRemoteArgs, koppelingProbleem,
     herstelCommando, ontkoppelCommando, KOPPEL_HERSTEL,

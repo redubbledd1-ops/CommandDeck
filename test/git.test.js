@@ -1117,9 +1117,32 @@ for (const sleutel of ['git.ind.aheadTitle', 'git.ind.behindTitle', 'git.ind.dir
 
 for (const sleutel of ['git.afsluit.titel', 'git.afsluit.commitPush', 'git.afsluit.terminal',
                        'git.afsluit.tochAf', 'git.afsluit.reden.niet-vastgelegd',
-                       'git.afsluit.reden.niet-gepusht', 'git.stashMelding.titel',
+                       'git.afsluit.reden.niet-gepusht', 'git.afsluit.teller',
+                       'git.wissel.titel', 'git.wissel.tekst', 'git.wissel.tochAf',
+                       'git.wissel.misluktTekst',
+                       'git.stashMelding.titel',
                        'settings.git.label', 'settings.git.off', 'settings.git.warn', 'settings.git.stash']) {
   t('afsluit-tekst ' + sleutel + ' bestaat in nl en en', !!nl[sleutel] && !!en[sleutel])
+}
+
+{
+  const ren = fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8')
+  const main = fs.readFileSync(path.join(APP, 'main.js'), 'utf8')
+  const pre = fs.readFileSync(path.join(APP, 'preload.js'), 'utf8')
+  t('elk onveilig project krijgt een eigen vraag',
+    /for \(let i = 0; i < totaal; i\+\+\)/.test(ren)
+    && /vraagOverProject\(teVragen\[i\]/.test(ren))
+  t('afsluiten en wisselen gebruiken dezelfde ronde',
+    /controleerOnveiligWerk\('afsluiten'\)/.test(ren)
+    && /controleerOnveiligWerk\('wisselen'\)/.test(ren))
+  t('bij meer projecten staat erbij welke beurt het is',
+    /git\.afsluit\.teller/.test(ren))
+  t('de noodrem wordt bij elke vraag opnieuw gezet',
+    /git:afsluitHartslag/.test(main) && /gitAfsluitHartslag/.test(pre)
+    && /hartslagAfsluiten/.test(ren))
+  t('Windows-afsluiten start dezelfde vragen',
+    /hookWindowMessage\(0x0011/.test(main)
+    && main.slice(main.indexOf("app.on('session-end'")).includes('startAfsluitControle()'))
 }
 
 for (const sleutel of ['git.btn.diff', 'git.diff.leegTitel', 'git.diff.nieuweKop',
@@ -1192,8 +1215,7 @@ for (const sleutel of ['git.ident.ontbreektTitel', 'git.ident.ontbreektTekst',
                        'settings.git.profielGhPlaceholder', 'settings.git.profielIncomplete',
                        'settings.git.profielRemoveTitle', 'settings.git.profielRemoveText',
                        'settings.git.profielRemoveUsed', 'settings.git.inlogRemember',
-                       'settings.git.inlogAsk', 'settings.git.inlogEerlijk',
-                       'modal.project.profielLabel', 'modal.project.profielDefault']) {
+                       'settings.git.inlogAsk', 'settings.git.inlogEerlijk']) {
   t('identiteit-tekst ' + sleutel + ' bestaat in nl en en', !!nl[sleutel] && !!en[sleutel])
 }
 
@@ -1210,8 +1232,13 @@ t('en wijst naar aparte Windows-accounts als je het écht wilt scheiden',
 t('de identiteit-chip heeft opmaak in style.css',
   css.includes('.git-ident {') && css.includes('.git-ident.fout') && css.includes('.git-ident.mis'))
 t('de profielrijen ook', css.includes('.git-profiel-rij {'))
-t('index.html heeft de profielkeuze in het projectvenster',
-  html.includes('id="f-profiel"') && html.includes('id="f-profiel-rij"'))
+// Het projectvenster gaat over het project, niet over wie je bent. De
+// profielkeuze zat daar en hoort in Instellingen > Git; op zijn plek staat nu
+// het binnenhalen van een repository.
+t('index.html heeft geen profielkeuze meer in het projectvenster',
+  !html.includes('id="f-profiel"') && !html.includes('id="f-profiel-rij"'))
+t('maar wel een kiezer voor je GitHub-repositories',
+  html.includes('id="btn-git-repos"') && html.includes('id="f-git-repo-lijst"'))
 
 for (const reden of ['schoon', 'geen-commits', 'niets-vooruit']) {
   t('melding voor "' + reden + '" bestaat in nl en en',
@@ -1237,6 +1264,130 @@ t('gebruiker/repo wordt een url',
   G.normaliseerRepoUrl('redubbledd1-ops/Resume') === 'https://github.com/redubbledd1-ops/Resume.git')
 t('onzin wordt geweigerd', G.normaliseerRepoUrl('zomaar wat') === null)
 t('leeg wordt geweigerd', G.normaliseerRepoUrl('') === null)
+
+t('reponaam uit https', G.repoNaamUitUrl('https://github.com/a/Scan-Find.git') === 'Scan-Find')
+t('reponaam uit gebruiker/repo', G.repoNaamUitUrl('a/daykit') === 'daykit')
+t('reponaam uit ssh', G.repoNaamUitUrl('git@github.com:a/b.git') === 'b')
+t('geen naam zonder adres', G.repoNaamUitUrl('zomaar') === '')
+
+t('clone onder de gekozen map',
+  G.cloneDoelPad('a/b', 'C:\\Projects') === 'C:\\Projects\\b')
+t('clone in de map zelf als die al zo heet',
+  G.cloneDoelPad('a/b', 'C:\\Projects\\b') === 'C:\\Projects\\b')
+t('zonder locatie geen doel', G.cloneDoelPad('a/b', '') === null)
+t('ouder van het doel', G.cloneOuderPad('C:\\Projects\\b') === 'C:\\Projects')
+t('ouder van een schijfwortel-map', G.cloneOuderPad('D:\\repo') === 'D:\\')
+t('clone-commando citeert adres en map',
+  G.cloneCommando('a/b', 'C:\\Projects\\b')
+  === 'git clone -- "https://github.com/a/b.git" "C:\\Projects\\b"')
+t('zonder adres geen commando', G.cloneCommando('', 'C:\\x') === null)
+
+// ── De repositories van je GitHub-account ────────────────────────────────────
+// Twee vormen leveren dezelfde lijst: `gh repo list --json` en, als terugval
+// voor oudere gh, `gh api user/repos`. Zolang beide hier doorheen komen, hoeft
+// de rest van de app het verschil niet te kennen.
+const ghLijstJson = JSON.stringify([
+  { nameWithOwner: 'redubbledd1/DD-Music', name: 'DD-Music', url: 'https://github.com/redubbledd1/DD-Music',
+    description: 'muziekspeler', isPrivate: false, updatedAt: '2026-08-30T10:00:00Z' },
+  { nameWithOwner: 'redubbledd1/CommandDeck', name: 'CommandDeck', url: 'https://github.com/redubbledd1/CommandDeck',
+    description: '', isPrivate: true, updatedAt: '2026-09-01T10:00:00Z' },
+])
+const ghApiJson = JSON.stringify([
+  { full_name: 'redubbledd1/DD-Music', name: 'DD-Music', html_url: 'https://github.com/redubbledd1/DD-Music',
+    description: 'muziekspeler', private: false, updated_at: '2026-08-30T10:00:00Z' },
+])
+
+const uitJson = G.parseGhRepos(ghLijstJson)
+t('repolijst gelezen', uitJson.length === 2)
+t('nieuwste bovenaan', uitJson[0].volledig === 'redubbledd1/CommandDeck')
+t('privé wordt herkend', uitJson[0].prive === true && uitJson[1].prive === false)
+t('het adres is er een om mee te clonen',
+  uitJson[1].url === 'https://github.com/redubbledd1/DD-Music.git')
+t('de omschrijving komt mee', uitJson[1].beschrijving === 'muziekspeler')
+
+const uitApi = G.parseGhRepos(ghApiJson)
+t('de api-vorm geeft hetzelfde',
+  uitApi.length === 1 && uitApi[0].volledig === 'redubbledd1/DD-Music'
+  && uitApi[0].url === 'https://github.com/redubbledd1/DD-Music.git')
+
+t('rommel levert een lege lijst, geen fout', G.parseGhRepos('geen json').length === 0)
+t('en een leeg antwoord ook', G.parseGhRepos('').length === 0)
+
+// Hetzelfde adres in drie vormen: zo herken je dat een repo al aan een project
+// hangt, ook als het project 'm via ssh heeft en gh https teruggeeft.
+t('sleutel uit https', G.repoSleutel('https://github.com/A/B.git') === 'a/b')
+t('sleutel uit ssh', G.repoSleutel('git@github.com:a/b.git') === 'a/b')
+t('sleutel uit gebruiker/repo', G.repoSleutel('A/b') === 'a/b')
+t('geen sleutel uit onzin', G.repoSleutel('zomaar') === '')
+
+const gefilterd = G.zonderGekoppelde(uitJson, ['git@github.com:redubbledd1/CommandDeck.git'])
+t('al gekoppelde repo valt weg', gefilterd.lijst.length === 1
+  && gefilterd.lijst[0].volledig === 'redubbledd1/DD-Music')
+t('en er wordt geteld hoeveel', gefilterd.verborgen === 1)
+t('zonder gekoppelde blijft alles staan',
+  G.zonderGekoppelde(uitJson, []).lijst.length === 2
+  && G.zonderGekoppelde(uitJson, []).verborgen === 0)
+t('een adres dat nergens op slaat filtert niets weg',
+  G.zonderGekoppelde(uitJson, ['zomaar']).lijst.length === 2)
+
+// ── Een blijven staan index.lock ─────────────────────────────────────────────
+// De aanleiding: een afgebroken git liet zijn slotbestand staan en daarna
+// weigerde élke commit, met een melding die je de verkenner in stuurt.
+t('de melding van git wordt herkend, met het pad erbij',
+  (G.gitSlotFout("fatal: Unable to create 'C:/x/.git/index.lock': File exists.") || {}).pad
+  === 'C:/x/.git/index.lock')
+t('ook de tweede zin, zonder pad',
+  !!G.gitSlotFout('Another git process seems to be running in this repository'))
+t('een gewone fout is geen slot', G.gitSlotFout('error: pathspec did not match') === null)
+t('en niets is ook geen slot', G.gitSlotFout('') === null && G.gitSlotFout(null) === null)
+
+for (const sleutel of ['git.slot.titel', 'git.slot.rustigTekst', 'git.slot.drukTekst',
+                       'git.slot.wegTekst', 'git.slot.eigenTekst', 'git.slot.ouderdomNet',
+                       'git.slot.ouderdomMin', 'git.slot.draaien', 'git.slot.opnieuw',
+                       'git.slot.weghalen', 'git.slot.weggehaald', 'git.slot.mislukt']) {
+  t('slot-tekst ' + sleutel + ' bestaat in nl en en', !!nl[sleutel] && !!en[sleutel])
+}
+
+const mainSlot = fs.readFileSync(path.join(APP, 'main.js'), 'utf8')
+t('main kan het slot bekijken en weghalen',
+  /ipcMain\.handle\('git:slotInfo'/.test(mainSlot) && /ipcMain\.handle\('git:slotWeg'/.test(mainSlot))
+t('maar niet terwijl de app zelf iets draait',
+  /ipcMain\.handle\('git:slotWeg'[\s\S]{0,400}if \(activeProc\) return \{ ok: false/.test(mainSlot))
+t('en alleen in een map die bij dit account hoort',
+  /ipcMain\.handle\('git:slotWeg'[\s\S]{0,200}padToegestaan\(dir\)/.test(mainSlot))
+t('git-processen worden nooit afgeschoten',
+  !/taskkill[^\n]*git/i.test(mainSlot)
+  && !/ipcMain\.handle\('git:slotWeg'[\s\S]{0,400}(taskkill|process\.kill)/.test(mainSlot))
+
+const rendererSlot = fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8')
+t('de renderer biedt het aan en probeert daarna opnieuw',
+  /async function regelGitSlot\(/.test(rendererSlot)
+  && /geenSlotHerstel: true/.test(rendererSlot))
+t('en probeert maar één keer opnieuw, geen kringetje',
+  /if \(!opties\.geenSlotHerstel\)/.test(rendererSlot))
+
+t('zoeken op naam', G.filterRepos(uitJson, 'music').length === 1)
+t('losse woorden mogen door elkaar', G.filterRepos(uitJson, 'dd music').length === 1)
+t('de omschrijving telt mee', G.filterRepos(uitJson, 'muziek').length === 1)
+t('zonder zoekterm alles', G.filterRepos(uitJson, '').length === 2)
+t('niets gevonden is een lege lijst', G.filterRepos(uitJson, 'zzz').length === 0)
+
+// De teksten van de kiezer, in beide talen — anders staat er een sleutelnaam.
+for (const sleutel of ['modal.project.gitRepoKiezen', 'modal.project.gitRepoZoek',
+                       'modal.project.gitRepoLaden', 'modal.project.gitRepoLeeg',
+                       'modal.project.gitRepoNiets', 'modal.project.gitRepoMeer',
+                       'modal.project.gitRepoGeenGh', 'modal.project.gitRepoNietIngelogd',
+                       'modal.project.gitRepoMislukt', 'modal.project.gitRepoInloggen',
+                       'modal.project.gitRepoHerladen', 'modal.project.gitCloneOf',
+                       'modal.project.gitRepoAl', 'modal.project.gitRepoAllesAl']) {
+  t('kiezer-tekst ' + sleutel + ' bestaat in nl en en', !!nl[sleutel] && !!en[sleutel])
+}
+t('de repolijst heeft opmaak in style.css',
+  css.includes('.git-repo-kiezer {') && css.includes('.git-repo-rij {'))
+t('de kop is een knop om in en uit te klappen',
+  html.includes('id="btn-git-repos"') && css.includes('.git-repo-kop-knop {'))
+t('en de lijst staat niet dichtgeklapt in de html',
+  /id="f-git-repos"(?![^>]*\bhidden\b)/.test(html))
 
 
 // ── Een koppeling die geen koppeling is ──────────────────────────────────────
@@ -1532,7 +1683,10 @@ t('een onzin-adres wijzigt niets', G.remoteUrlCommando('origin', 'zomaar wat') =
   for (const a of acties) t('tekst voor actie ' + a, !!nl['gitset.actie.' + a] && !!en['gitset.actie.' + a])
 }
 
-for (const sleutel of ['modal.project.gitLabel', 'gitset.kopRepo', 'gitset.kopGeenRepo',
+for (const sleutel of ['modal.project.gitLabel', 'modal.project.gitCloneLabel',
+                       'modal.project.gitCloneTekst', 'modal.project.gitCloneDoel',
+                       'git.clone.misluktTitel', 'git.clone.misluktTekst', 'git.clone.geenOuder',
+                       'gitset.kopRepo', 'gitset.kopGeenRepo',
                        'gitset.koppelOk', 'gitset.koppelStuk', 'gitset.koppelGeen', 'gitset.koppelOnbekend',
                        'gitset.adresWijzigen', 'gitset.adresWeg', 'gitset.wegTitel', 'gitset.wegTekst',
                        'gitset.nietsMis', 'gitset.controleren', 'gitset.herstellen', 'gitset.koppelen',
@@ -1559,6 +1713,13 @@ for (const sleutel of ['modal.project.gitLabel', 'gitset.kopRepo', 'gitset.kopGe
   t('en blijft weg zolang er geen map is', /vak\.hidden = !p \|\| !actieveLocPad\(p\)/.test(ren))
   t('de sectie gaat open bij bewerken', /openEditModal[\s\S]{0,1200}toonGitSectie\(p\)/.test(ren))
   t('en leeg bij een nieuw project', /openNewModal[\s\S]{0,900}toonGitSectie\(null\)/.test(ren))
+  t('maar wel een veld om te clonen', html.includes('id="f-git-clone"') && html.includes('id="f-git-url"'))
+  t('een nieuw project toont dat veld', /openNewModal[\s\S]{0,1200}toonCloneVeld\(true\)/.test(ren))
+  t('bewerken verbergt het', /openEditModal[\s\S]{0,1600}toonCloneVeld\(false\)/.test(ren))
+  t('na clonen wordt de git-staat nagekeken',
+    /async function haalRepoBinnen/.test(ren) && /controleerKoppeling\(doel, true\)/.test(ren))
+  t('clone draait in de map erboven, want de doelmap bestaat nog niet',
+    /git-clone['"], \{ cwd: ouder \}/.test(ren))
   t('je kunt een los adres weghalen', ren.includes('data-remote-weg'))
   t('en een los adres wijzigen', ren.includes('data-remote-url'))
   t('elk probleem krijgt zijn eigen knop', ren.includes('data-git-actie'))

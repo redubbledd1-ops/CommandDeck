@@ -86,33 +86,59 @@ function createWindow() {
   win.loadFile('index.html')
 
   // Afsluitcontrole. Het sluiten wordt één keer tegengehouden; de renderer
-  // kijkt de projecten na, stelt zijn vragen en meldt zich terug. Zo lang
-  // wachten als nodig — behalve als er helemaal geen antwoord komt, want dan
-  // zou het venster onsluitbaar zijn. Vandaar de noodrem.
+  // kijkt de projecten na, stelt per project een vraag en meldt zich terug.
+  // Zo lang wachten als nodig — behalve als er helemaal geen antwoord komt,
+  // want dan zou het venster onsluitbaar zijn. Vandaar de noodrem. Die wordt
+  // bij elke nieuwe vraag en bij commit & push opnieuw gezet, zodat meerdere
+  // projecten achter elkaar aan de beurt komen.
   win.on('close', (e) => {
     if (afsluitenBevestigd) return
     if (actieveInstellingen().git.afsluiten === 'uit') return
     if (!win.webContents || win.webContents.isDestroyed()) return
 
     e.preventDefault()
-    if (afsluitenGevraagd) return          // al bezig; niet nog een ronde starten
-    afsluitenGevraagd = true
-
-    win.webContents.send('git:controleerVoorAfsluiten')
-
-    // Antwoordt de renderer niet (fout in de controle, venster vastgelopen),
-    // dan sluiten we alsnog. Vastzitten in je eigen waarschuwing is erger dan
-    // de waarschuwing missen.
-    afsluitNoodrem = setTimeout(() => {
-      afsluitenBevestigd = true
-      try { win.close() } catch {}
-    }, 15000)
+    startAfsluitControle()
   })
+
+  // Windows-afsluiten/uitloggen stuurt eerst QUERYENDSESSION, soms nog vóór
+  // het close-event. Zelfde ronde: per project een melding, tot Windows zelf
+  // het proces afkapt. Stash (hieronder) is het vangnet als er geen tijd is.
+  if (process.platform === 'win32' && typeof win.hookWindowMessage === 'function') {
+    try {
+      win.hookWindowMessage(0x0011, () => { startAfsluitControle() })
+    } catch { /* oudere Electron zonder deze hook */ }
+  }
 }
 
 let afsluitenBevestigd = false
 let afsluitenGevraagd = false
 let afsluitNoodrem = null
+const AFSLUIT_NOODREM_MS = 20 * 1000
+
+function startAfsluitNoodrem(ms) {
+  if (afsluitNoodrem) { clearTimeout(afsluitNoodrem); afsluitNoodrem = null }
+  const wacht = Math.max(AFSLUIT_NOODREM_MS, Number(ms) || AFSLUIT_NOODREM_MS)
+  afsluitNoodrem = setTimeout(() => {
+    afsluitenBevestigd = true
+    try { if (win && !win.isDestroyed()) win.close() } catch {}
+  }, wacht)
+}
+
+function startAfsluitControle() {
+  if (afsluitenBevestigd) return
+  if (actieveInstellingen().git.afsluiten === 'uit') return
+  if (!win || !win.webContents || win.webContents.isDestroyed()) return
+
+  if (afsluitenGevraagd) {
+    // Al bezig (volgend project, commit & push). Niet opnieuw starten,
+    // wél de noodrem openhouden zodat wij zelf niet afkappen.
+    startAfsluitNoodrem(60 * 1000)
+    return
+  }
+  afsluitenGevraagd = true
+  win.webContents.send('git:controleerVoorAfsluiten')
+  startAfsluitNoodrem(AFSLUIT_NOODREM_MS)
+}
 
 ipcMain.on('git:afsluitenMag', () => {
   if (afsluitNoodrem) { clearTimeout(afsluitNoodrem); afsluitNoodrem = null }
@@ -126,7 +152,19 @@ ipcMain.on('git:afsluitenAfgebroken', () => {
   if (afsluitNoodrem) { clearTimeout(afsluitNoodrem); afsluitNoodrem = null }
   afsluitenGevraagd = false
 })
-app.whenReady().then(createWindow)
+
+// Renderer is nog bezig (volgende project, commitvenster, push). Zonder deze
+// tik kapt de noodrem af na één vraag, en komen de andere projecten nooit.
+ipcMain.on('git:afsluitHartslag', (_, extra) => {
+  if (!afsluitenGevraagd || afsluitenBevestigd) return
+  startAfsluitNoodrem(extra && extra.ms)
+})
+app.whenReady().then(() => {
+  // Eén keer blokkerend, vóór het venster er is: daarna heeft elke git- of
+  // gh-aanroep meteen een pad en hoeft er nooit meer gewacht te worden.
+  try { windowsPathNu() } catch {}
+  createWindow()
+})
 
 // De AI-kant registreert zijn eigen ipc-handlers. Alles wat dienst-specifiek is
 // staat in ai-providers.js; hier geven we alleen door waar het venster en de
@@ -1341,6 +1379,58 @@ ipcMain.handle('git:accountInfo', (_, dir) => {
 // aan een klik en niet aan het tekenen, dus hier mag het iets meer kosten.
 // Alle branches, lokaal en op de remote. Alleen op aanvraag: dit hangt aan een
 // knop en hoeft niet mee te draaien in de achtergrondverversing.
+// ── Een blijven staan index.lock ─────────────────────────────────────────────
+// Git zet dat bestand neer voordat hij schrijft. Breekt hij onderweg af, dan
+// blijft het staan en weigert elke volgende commit — met een melding die de
+// gebruiker naar de verkenner stuurt om zelf in .git te gaan graven. Dat kan
+// de app doen, mits ze eerst kijkt of er echt niets meer aan het schrijven is.
+
+function gitSlotPad(dir) {
+  return path.join(dir, '.git', 'index.lock')
+}
+
+// Draait er nog een git op deze pc? Niet te zeggen bij wélke map hij hoort —
+// Windows geeft geen werkmap prijs — dus dit is een aanwijzing, geen bewijs.
+// Daarom staat het aantal in de vraag en beslist de gebruiker.
+function gitProcessenOpDezePc() {
+  if (process.platform !== 'win32') return null
+  try {
+    const uit = execFileSync('tasklist', ['/FI', 'IMAGENAME eq git.exe', '/NH', '/FO', 'CSV'], {
+      encoding: 'utf8', timeout: 4000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    return (String(uit).match(/^"git\.exe"/gmi) || []).length
+  } catch { return null }
+}
+
+ipcMain.handle('git:slotInfo', (_, dir) => {
+  if (!padToegestaan(dir) || !dir) return { bestaat: false }
+  const slot = gitSlotPad(dir)
+  let stat = null
+  try { stat = fs.statSync(slot) } catch { return { bestaat: false } }
+  return {
+    bestaat: true,
+    pad: slot,
+    ouderdomMs: Math.max(0, Date.now() - stat.mtimeMs),
+    // Draait CommandDeck zélf nog iets? Dan is het slot van ons en mag het
+    // niet weg: dat is de enige zekerheid die we hier hebben.
+    eigenCommandoDraait: !!activeProc,
+    gitProcessen: gitProcessenOpDezePc(),
+  }
+})
+
+ipcMain.handle('git:slotWeg', (_, dir) => {
+  if (!padToegestaan(dir) || !dir) return { ok: false, reden: 'pad' }
+  if (activeProc) return { ok: false, reden: 'eigen-commando' }
+  const slot = gitSlotPad(dir)
+  try {
+    if (!fs.existsSync(slot)) return { ok: true, alWeg: true }
+    fs.unlinkSync(slot)
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, reden: 'mislukt', fout: String((e && e.message) || '').split('\n')[0] }
+  }
+})
+
 ipcMain.handle('git:branches', (_, dir) => {
   if (!padToegestaan(dir)) return []
   if (!dir || !fs.existsSync(dir) || !heeftGit()) return []
@@ -1377,14 +1467,14 @@ ipcMain.handle('git:stashInhoud', (_, dir, ref) => {
 })
 
 // ── Windows afsluiten of uitloggen ───────────────────────────────────────────
-// Hier is geen gesprek mogelijk: Windows geeft ongeveer vijf seconden en kapt
-// het proces daarna af. Geen renderer, geen dialoog, geen await — alles wat
-// hier gebeurt moet synchroon zijn en meteen af.
+// QUERYENDSESSION (hierboven) en het close-event starten dezelfde vragen als
+// bij het kruisje. Windows geeft daarna ongeveer vijf seconden extra; kapt het
+// proces af, dan is stash het vangnet. Geen renderer, geen dialoog, geen
+// await — alles wat hier gebeurt moet synchroon zijn en meteen af.
 //
 // Écht pauzeren zou de Windows-API ShutdownBlockReasonCreate vereisen, via een
 // native module of FFI. Dat is een extra build-stap die bij elke Electron-
 // upgrade kan breken, en zelfs dán kan de gebruiker "toch afsluiten" kiezen.
-// Het vangnet hieronder geeft het grootste deel van de waarde zonder dat.
 
 // De renderer houdt bij welke projecten een git-map hebben en hoe ze ervoor
 // staan. Die lijst zetten we hier klaar, want op het moment zelf kunnen we hem
@@ -1407,31 +1497,38 @@ const stashMeldingBestand = (accountId) =>
 
 app.on('session-end', () => {
   try {
-    if (actieveInstellingen().git.afsluiten !== 'stashen') return
+    const alBezig = afsluitenGevraagd
 
-    // Hoort deze lijst nog bij wie er nu ingelogd is? Zo niet, dan raken we
-    // niets aan: liever niets stashen dan in de map van een ander.
-    const st = accountStand()
-    if (gitProjectenVoorAfsluiten.accountId !== st.actiefAccount) return
-
-    const teStashen = GitTools.teStashenProjecten(gitProjectenVoorAfsluiten.lijst, 'stashen')
-    if (!teStashen.length) return
-
-    const gelukt = []
-    for (const p of teStashen) {
-      try {
-        execFileSync('git', ['stash', 'push', '-u', '-m', 'CommandDeck: automatisch bij afsluiten'], {
-          cwd: p.pad, encoding: 'utf8', timeout: 1500, windowsHide: true,
-          stdio: ['ignore', 'pipe', 'ignore'],
-        })
-        gelukt.push({ naam: p.naam, pad: p.pad })
-      } catch { /* geen tijd om iets te proberen; door naar het volgende */ }
+    // Alleen stashen als er nog geen gesprek liep. Midden in commit & push
+    // zou stash de index op slot zetten en de keuze van de gebruiker weggooien.
+    if (!alBezig && actieveInstellingen().git.afsluiten === 'stashen') {
+      const st = accountStand()
+      // Hoort deze lijst nog bij wie er nu ingelogd is? Zo niet, dan raken we
+      // niets aan: liever niets stashen dan in de map van een ander.
+      if (gitProjectenVoorAfsluiten.accountId !== st.actiefAccount) {
+        /* stash overslaan */
+      } else {
+        const teStashen = GitTools.teStashenProjecten(gitProjectenVoorAfsluiten.lijst, 'stashen')
+        const gelukt = []
+        for (const p of teStashen) {
+          try {
+            execFileSync('git', ['stash', 'push', '-u', '-m', 'CommandDeck: automatisch bij afsluiten'], {
+              cwd: p.pad, encoding: 'utf8', timeout: 1500, windowsHide: true,
+              stdio: ['ignore', 'pipe', 'ignore'],
+            })
+            gelukt.push({ naam: p.naam, pad: p.pad })
+          } catch { /* geen tijd om iets te proberen; door naar het volgende */ }
+        }
+        if (gelukt.length) {
+          fs.writeFileSync(stashMeldingBestand(st.actiefAccount),
+            JSON.stringify({ op: Date.now(), projecten: gelukt }))
+        }
+      }
     }
 
-    if (gelukt.length) {
-      fs.writeFileSync(stashMeldingBestand(st.actiefAccount),
-        JSON.stringify({ op: Date.now(), projecten: gelukt }))
-    }
+    // Zelfde meldingen als bij het kruisje: niet-gepushte commits (stash pakt
+    // die niet) en, zonder stash-instelling, ook niet-vastgelegd werk.
+    try { startAfsluitControle() } catch {}
   } catch { /* nooit het afsluiten van Windows ophouden met een fout van ons */ }
 })
 
@@ -1698,6 +1795,53 @@ ipcMain.handle('git:ghAccounts', () => {
   }
 })
 
+// De repositories van het GitHub-account, zodat je bij "project toevoegen" uit
+// je eigen lijst kunt kiezen in plaats van een adres over te typen. Mislukken
+// mag, maar dan staat erbij waaróm: zonder gh is de uitweg installeren, zonder
+// login is het inloggen, en zonder netwerk helpt geen van beide.
+ipcMain.handle('git:ghRepos', (_, opties = {}) => {
+  if (!ghBeschikbaar()) return { ok: false, reden: 'geen-gh', repos: [] }
+
+  // Meerdere GitHub-accounts op deze pc: eerst naar dat van dit CommandDeck-
+  // account, anders krijg je de repositories van iemand anders te zien.
+  const gewenst = String((opties && opties.gebruiker) || '').trim()
+  if (gewenst) {
+    try {
+      execFileSync('gh', ['auth', 'switch', '--hostname', 'github.com', '--user', gewenst], {
+        encoding: 'utf8', timeout: 8000, windowsHide: true, env: childEnv(),
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+    } catch { /* niet kunnen wisselen is geen reden om niets te tonen */ }
+  }
+
+  let laatsteFout = ''
+  const roep = (args) => {
+    try {
+      return execFileSync('gh', args, {
+        encoding: 'utf8', timeout: 20000, windowsHide: true, env: childEnv(),
+        maxBuffer: 8 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'],
+      })
+    } catch (e) {
+      laatsteFout = String((e && (e.stderr || e.message)) || '').trim().split('\n')[0]
+      return ''
+    }
+  }
+
+  const velden = 'nameWithOwner,name,url,description,isPrivate,updatedAt'
+  let repos = GitTools.parseGhRepos(roep(['repo', 'list', '--limit', '200', '--json', velden]))
+
+  // Oudere gh kent `--json` niet. Dan via de API, die dezelfde gegevens onder
+  // andere namen teruggeeft — parseGhRepos snapt beide vormen.
+  if (!repos.length) {
+    repos = GitTools.parseGhRepos(roep(['api', 'user/repos?per_page=100&sort=updated']))
+  }
+
+  if (repos.length) return { ok: true, repos }
+  if (!laatsteFout) return { ok: true, repos: [] }        // echt geen repositories
+  const ingelogd = !/auth login|not logged|niet ingelogd/i.test(laatsteFout)
+  return { ok: false, reden: ingelogd ? 'mislukt' : 'niet-ingelogd', fout: laatsteFout, repos: [] }
+})
+
 ipcMain.handle('git:gh', () => ghBeschikbaar())
 
 // Kan deze pc überhaupt met winget installeren? Op oudere Windows-versies en
@@ -1719,7 +1863,15 @@ ipcMain.handle('git:winget', () => {
 
 // Na een inlog is de uitkomst veranderd; anders blijft de app zeggen dat gh
 // er niet is omdat hij dat één keer heeft gemeten.
-ipcMain.handle('git:ghVergeet', () => { ghAanwezig = null; windowsPathCache = { at: 0, value: '' }; return true })
+// Na een installatie is het pad veranderd en staat de gebruiker te wachten of
+// het gelukt is. Dán mag het even blokkeren: een verkeerd antwoord hier laat een
+// geslaagde installatie op een mislukte lijken.
+ipcMain.handle('git:ghVergeet', () => {
+  ghAanwezig = null
+  gitAanwezig = null
+  try { windowsPathNu() } catch { windowsPathCache = { at: 0, value: '' } }
+  return true
+})
 
 // ── Mapgroottes ───────────────────────────────────────────────────────────────
 // Windows houdt nergens bij hoe groot een map is; dat moet je uitrekenen door de
@@ -2791,14 +2943,59 @@ function expandWinEnv(s) {
   })
 }
 
+const PATH_SLEUTELS = [
+  'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment',
+  'HKCU\\Environment',
+]
+
+function readRegPathAsync(key) {
+  return new Promise((resolve) => {
+    execFile('reg.exe', ['query', key, '/v', 'Path'], {
+      encoding: 'utf8', windowsHide: true, timeout: 2500,
+    }, (err, stdout) => {
+      if (err) return resolve('')
+      const line = String(stdout).split(/\r?\n/).find(l => /\sPath\s+REG_/i.test(l))
+      const m = line && line.match(/REG_(?:EXPAND_)?SZ\s+(.*)$/i)
+      resolve(m ? m[1].trim() : '')
+    })
+  })
+}
+
+// Het pad vers uit het register lezen kost twee reg.exe-aanroepen. Synchroon
+// zet dat de hoofdthread honderden milliseconden stil, en in die tijd reageert
+// het venster nergens op — daar zat de hapering bij het typen, want git:info
+// en elke andere aanroep gingen hier langs. Vandaar: één keer vullen vóór het
+// venster er is, en daarna alleen nog in de achtergrond verversen. Een pad dat
+// twee tellen oud is, is nooit erger dan een venster dat stilstaat.
+let windowsPathVersBezig = false
+
 function windowsMergedPath() {
   if (process.platform !== 'win32') return process.env.PATH || ''
-  const now = Date.now()
-  if (windowsPathCache.value && now - windowsPathCache.at < 120000) return windowsPathCache.value
-  const machine = expandWinEnv(readRegPath('HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment'))
-  const user = expandWinEnv(readRegPath('HKCU\\Environment'))
-  const merged = [machine, user].filter(Boolean).join(';')
-  windowsPathCache = { at: now, value: merged || process.env.PATH || process.env.Path || '' }
+  if (!windowsPathCache.value || Date.now() - windowsPathCache.at >= 120000) ververWindowsPath()
+  return windowsPathCache.value || process.env.PATH || process.env.Path || ''
+}
+
+function ververWindowsPath() {
+  if (windowsPathVersBezig) return
+  windowsPathVersBezig = true
+  // Meteen de klok bijzetten: anders start elke aanroep in de tussentijd nog
+  // een ronde, en staan er tien reg.exe'jes tegelijk.
+  windowsPathCache = { at: Date.now(), value: windowsPathCache.value }
+  Promise.all(PATH_SLEUTELS.map(readRegPathAsync))
+    .then(([machine, user]) => {
+      const merged = [expandWinEnv(machine), expandWinEnv(user)].filter(Boolean).join(';')
+      if (merged) windowsPathCache = { at: Date.now(), value: merged }
+    })
+    .catch(() => {})
+    .finally(() => { windowsPathVersBezig = false })
+}
+
+// De blokkerende variant. Alleen op momenten waarop er tóch niets te doen is:
+// bij het opstarten, en direct na een installatie waar de gebruiker op wacht.
+function windowsPathNu() {
+  if (process.platform !== 'win32') return process.env.PATH || ''
+  const merged = PATH_SLEUTELS.map(k => expandWinEnv(readRegPath(k))).filter(Boolean).join(';')
+  windowsPathCache = { at: Date.now(), value: merged || process.env.PATH || process.env.Path || '' }
   return windowsPathCache.value
 }
 

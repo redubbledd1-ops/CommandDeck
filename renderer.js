@@ -13,6 +13,7 @@ let lastViewBewaarTimer = null
 let editingId   = null
 let deleteId    = null
 let pendingLocs = []
+let cloneNaamOvergenomen = false
 let settingsSubPage      = null   // null | 'talen' — sub-pagina binnen Instellingen
 let LANGUAGES            = []     // opgehaald bij opstart, zie i18n.js/main.js locales/languages.js
 let detectedLanguageCode = null   // Windows-taal, voor bovenaan pinnen in de Talen-lijst
@@ -974,6 +975,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   })
 
   window.api.onOutput(({ projectId, type, text }) => {
+    if (GitTools.gitSlotFout(text)) slotKlacht = true
     if (projectId === activeTermId) {
       if (STDIN_KLACHTEN.test(String(text || ''))) stdinKlacht = true
       appendLine(type, text)
@@ -1302,6 +1304,7 @@ function vraagJaNee(titel, tekst, jaLabel = I18N.t('common.yes'), soort = 'prima
 function vraagTekst({ titel, tekst = '', waarde = '', placeholder = '', okLabel = '', soort = 'primair', verborgen = false }) {
   return new Promise(resolve => {
     vraagKlaar = resolve
+    const mijnKlaar = resolve
     document.getElementById('vraag-titel').textContent = titel
     const uitleg = document.getElementById('vraag-tekst')
     uitleg.textContent = tekst
@@ -1319,13 +1322,51 @@ function vraagTekst({ titel, tekst = '', waarde = '', placeholder = '', okLabel 
     vak.innerHTML = `<button class="btn-ghost" data-v="0">${esc(I18N.t('common.cancel'))}</button>`
       + `<button class="${soort === 'gevaar' ? 'btn-danger' : 'btn-primary'}" data-v="1">${esc(okLabel || I18N.t('common.ok'))}</button>`
 
-    const af = (bevestigd) => sluitVraag(bevestigd ? invoer.value.trim() : null)
+    const af = (bevestigd) => {
+      document.removeEventListener('keydown', vangToets, true)
+      sluitVraag(bevestigd ? invoer.value.trim() : null)
+    }
     vak.querySelector('[data-v="0"]').onclick = () => af(false)
     vak.querySelector('[data-v="1"]').onclick = () => af(true)
+
+    // Waar de cursor ook staat: typen hoort in dit veld te belanden en Enter
+    // hoort te bevestigen. Zonder dit verdween een pincode in het niets zodra
+    // de focus op een knop of op de achtergrond stond, en dat is precies waar
+    // je hem intypt zonder te kijken.
+    const vangToets = (e) => {
+      // Is dit venster inmiddels van iemand anders (of al gesloten), dan hoort
+      // deze luisteraar er niet meer te zijn.
+      if (vraagKlaar !== mijnKlaar) { document.removeEventListener('keydown', vangToets, true); return }
+      if (document.getElementById('modal-vraag').hidden || !invoer.isConnected) return
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      if (e.key === 'Tab') return
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); af(false); return }
+      if (e.key === 'Enter')  { e.preventDefault(); e.stopPropagation(); af(true); return }
+      if (document.activeElement === invoer) return
+
+      const bij = (tekst) => {
+        e.preventDefault(); e.stopPropagation()
+        invoer.focus()
+        invoer.value += tekst
+      }
+      if (e.key.length === 1) { bij(e.key); return }
+      if (e.key === 'Backspace') {
+        e.preventDefault(); e.stopPropagation()
+        invoer.focus()
+        invoer.value = invoer.value.slice(0, -1)
+        return
+      }
+      // Num Lock uit: het numerieke blok stuurt pijltjes. De fysieke toets
+      // klopt wel, en in een pincodeveld is dat gewoon een cijfer.
+      if (verborgen) {
+        const cijfer = Accounts.cijferUitToets(e.code, e.key)
+        if (cijfer) bij(cijfer)
+      }
+    }
+    document.addEventListener('keydown', vangToets, true)
+
     invoer.onkeydown = (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); af(true) }
-      else if (e.key === 'Escape') { e.preventDefault(); af(false) }
-      else if (verborgen && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      if (verborgen && !e.ctrlKey && !e.altKey && !e.metaKey) {
         // Num Lock uit: de cijfertoetsen rechts sturen dan een pijltje in
         // plaats van een cijfer. De fysieke toets klopt wel, dus die gebruiken
         // we — anders kun je je pincode niet intypen op het numerieke blok.
@@ -1342,6 +1383,10 @@ function vraagTekst({ titel, tekst = '', waarde = '', placeholder = '', okLabel 
     }
 
     document.getElementById('modal-vraag').hidden = false
+    // Meteen én in het volgende beeldje. Staat het venster op de achtergrond,
+    // dan komt requestAnimationFrame pas als het weer zichtbaar is; dan is die
+    // eerste focus wat je redt.
+    invoer.focus(); invoer.select()
     requestAnimationFrame(() => { invoer.focus(); invoer.select() })
   })
 }
@@ -7876,6 +7921,18 @@ async function bewaarAccountGit(a, git) {
 async function wisselAccount(id, pin = null) {
   if (!id || id === actiefAccount) return
 
+  // Eerst het werk van dit account wegzetten. Daarna pas pincode en wissel,
+  // anders belandt onopgeslagen werk bij niemand.
+  await wachtOpOnveiligWerk()
+  onveiligWerkBezig = true
+  try {
+    if (await controleerOnveiligWerk('wisselen') === 'blijven') return
+  } catch {
+    // Liever wisselen dan vastzitten in een mislukte git-check.
+  } finally {
+    onveiligWerkBezig = false
+  }
+
   // Vanaf twee accounts is inloggen altijd nodig — juist bij het wisselen, want
   // dat is het moment waarop je in het verkeerde account belandt.
   if (accountPinNodig && pin === null) {
@@ -7925,12 +7982,57 @@ async function wisselAccount(id, pin = null) {
 
 // Bij het opstarten vragen wie er achter de pc zit. Alleen als er iets te
 // kiezen valt — bij één account is dit een venster dat niets toevoegt.
+// Een account erbij. Staat los van de instellingen, want dit moet ook kunnen
+// vanaf het inlogscherm: daar sta je juist als je nog geen eigen account hebt.
+// Geeft true als er echt een account bij is gekomen.
+const NIEUW_ACCOUNT = '__nieuw-account__'
+
+async function voegAccountToe() {
+  // Vanaf nu zijn er twee accounts en gaat de pincode meetellen. Heeft het
+  // huidige account er nog geen, dan moet die er eerst komen — anders maak je
+  // een slot op de ene deur en staat de andere open.
+  const ik = huidigAccount()
+  if (ik && !ik.heeftPin) {
+    await meldKort(I18N.t('accounts.eigenPinTitel'), I18N.t('accounts.eigenPinTekst', { naam: ik.naam }))
+    const eigen = await vraagNieuwePin(I18N.t('accounts.eigenPinTitel'))
+    if (eigen === null) return false
+    const rp = await window.api.accountSetPin({ id: ik.id, pin: eigen })
+    if (!rp || !rp.ok) { await meldKort(I18N.t('accounts.eigenPinTitel'), I18N.t('accounts.pinOngeldig')); return false }
+    await laadAccounts()
+  }
+
+  const naam = await vraagTekst({
+    titel: I18N.t('accounts.toevoegen'), tekst: I18N.t('accounts.toevoegenTekst'),
+    placeholder: I18N.t('accounts.naamPlaceholder'), okLabel: I18N.t('common.next'),
+  })
+  if (!naam) return false
+
+  // Meteen de git-kant erbij: dit account ís straks de naam onder de commits,
+  // en achteraf invullen is precies hoe je met de verkeerde naam commit.
+  const git = await vraagGitIdentiteit(naam, {})
+  if (!git) return false
+
+  const pin = await vraagNieuwePin(I18N.t('accounts.pinVoorTitel', { naam }))
+  if (pin === null) return false
+
+  const r = await window.api.accountAdd({ naam, pin, ...git })
+  if (!r || !r.ok) {
+    await meldKort(I18N.t('accounts.toevoegen'),
+      I18N.t(r && r.reden === 'pin-ongeldig' ? 'accounts.pinOngeldig' : 'accounts.naamBezet'))
+    return false
+  }
+  await laadAccounts()
+  return true
+}
+
 async function kiesAccountBijStart() {
   if (accounts.length < 2) return
 
   const tonen = accounts.slice(0, 8)
   const knoppen = []
-  // column-reverse: achterste eerst, dus het huidige account bovenaan.
+  // column-reverse: achterste eerst. Dus onderaan beginnen: "account
+  // toevoegen" hoort onder de mensen te staan, niet ertussen.
+  knoppen.push({ label: I18N.t('accounts.toevoegenBijStart'), waarde: NIEUW_ACCOUNT })
   for (let i = tonen.length - 1; i >= 0; i--) {
     const a = tonen[i]
     knoppen.push({
@@ -7945,6 +8047,15 @@ async function kiesAccountBijStart() {
     knoppen,
   })
   if (!id) return
+
+  // Even naar het toevoegscherm en daarna terug naar deze lijst — dan staat de
+  // nieuwe erbij en log je gewoon in. Zonder deze weg kom je bij het opstarten
+  // niet verder dan de accounts die er al waren.
+  if (id === NIEUW_ACCOUNT) {
+    await voegAccountToe()
+    await kiesAccountBijStart()
+    return
+  }
 
   // Ook het account waar je al op stond vraagt om de pincode: anders is het
   // venster bij het opstarten een deur die je zonder sleutel voorbij loopt.
@@ -8247,40 +8358,8 @@ function renderSettingsPanel() {
   })
   const accountAdd = document.getElementById('btn-account-add')
   if (accountAdd) accountAdd.onclick = async () => {
-    // Vanaf nu zijn er twee accounts en gaat de pincode meetellen. Heeft het
-    // huidige account er nog geen, dan moet die er eerst komen — anders maak je
-    // een slot op de ene deur en staat de andere open.
-    const ik = huidigAccount()
-    if (ik && !ik.heeftPin) {
-      await meldKort(I18N.t('accounts.eigenPinTitel'), I18N.t('accounts.eigenPinTekst', { naam: ik.naam }))
-      const eigen = await vraagNieuwePin(I18N.t('accounts.eigenPinTitel'))
-      if (eigen === null) return
-      const rp = await window.api.accountSetPin({ id: ik.id, pin: eigen })
-      if (!rp || !rp.ok) { await meldKort(I18N.t('accounts.eigenPinTitel'), I18N.t('accounts.pinOngeldig')); return }
-      await laadAccounts()
-    }
-
-    const naam = await vraagTekst({
-      titel: I18N.t('accounts.toevoegen'), tekst: I18N.t('accounts.toevoegenTekst'),
-      placeholder: I18N.t('accounts.naamPlaceholder'), okLabel: I18N.t('common.next'),
-    })
-    if (!naam) return
-
-    // Meteen de git-kant erbij: dit account ís straks de naam onder de commits,
-    // en achteraf invullen is precies hoe je met de verkeerde naam commit.
-    const git = await vraagGitIdentiteit(naam, {})
-    if (!git) return
-
-    const pin = await vraagNieuwePin(I18N.t('accounts.pinVoorTitel', { naam }))
-    if (pin === null) return
-
-    const r = await window.api.accountAdd({ naam, pin, ...git })
-    if (!r || !r.ok) {
-      await meldKort(I18N.t('accounts.toevoegen'),
-        I18N.t(r && r.reden === 'pin-ongeldig' ? 'accounts.pinOngeldig' : 'accounts.naamBezet'))
-      return
-    }
-    await laadAccounts(); renderSettingsPanel()
+    const gelukt = await voegAccountToe()
+    if (gelukt) renderSettingsPanel()
   }
 
   panel.querySelectorAll('[data-account-git]').forEach(btn => {
@@ -11602,11 +11681,15 @@ function vraagtOmEenVenster(cmd) {
 const STDIN_KLACHTEN = /no stdin data received|must be provided either through stdin|not a tty|inquirer|raw mode is not supported/i
 let stdinKlacht = false
 
+// Git klaagde over een index.lock die er al staat. Zie regelGitSlot hieronder.
+let slotKlacht = false
+
 // `opties.eigenTerminal` dwingt de weg met een echt toetsenbord af, ook als het
 // commando er niet naar uitziet. Nodig zodra git zelf om inloggegevens vraagt:
 // zonder terminal blijft een push wachten op een token dat niemand kan typen.
 async function executeCmd(project, cmd, cmdKey = null, opties = {}) {
   const loc = project.locations[project.activeLocation] || project.locations[0]
+  const werkmap = String((opties && opties.cwd) || (loc && loc.path) || '').trim()
 
   // Alles met een / ervoor hoort bij de app zelf: van dienst wisselen, een
   // sleutel zetten, het gesprek wissen. Dat gaat nooit naar de shell.
@@ -11654,7 +11737,7 @@ async function executeCmd(project, cmd, cmdKey = null, opties = {}) {
     return
   }
 
-  if (!loc || !loc.path) {
+  if (!werkmap) {
     appendLine('err', (project.id === CMD_CTX_ID || project.id === PS_CTX_ID)
       ? I18N.t('term.noCwdWithButtonError')
       : I18N.t('term.noLocationConfiguredError'))
@@ -11668,20 +11751,20 @@ async function executeCmd(project, cmd, cmdKey = null, opties = {}) {
     springNaarOutput()
     appendLine('cmd', '> ' + cmd)
 
-    if (await startPtySessie(project.id, cmd, loc.path, shellVoor(project))) {
-      appendLine('ok', '✓ ' + I18N.t('term.runningHereLine', { name: ptyNaam(cmd), path: loc.path }))
+    if (await startPtySessie(project.id, cmd, werkmap, shellVoor(project))) {
+      appendLine('ok', '✓ ' + I18N.t('term.runningHereLine', { name: ptyNaam(cmd), path: werkmap }))
       appendLine('sep', '')
-      recordHistory({ cmd, cwd: loc.path, projectId: project.id, source: cmdKey ? 'button' : 'run' })
+      recordHistory({ cmd, cwd: werkmap, projectId: project.id, source: cmdKey ? 'button' : 'run' })
       setStatus('running', cmd)
       return
     }
 
     appendLine('warn', I18N.t('term.notForInteractiveWarn'))
-    appendLine('ok',  '✓ ' + I18N.t('term.openedInOwnWindowLine', { path: loc.path }))
+    appendLine('ok',  '✓ ' + I18N.t('term.openedInOwnWindowLine', { path: werkmap }))
     appendLine('sep', '')
-    if (project.id === PS_CTX_ID) window.api.openPs({ cwd: loc.path, cmd })
-    else window.api.openCmd({ cwd: loc.path, cmd })
-    recordHistory({ cmd, cwd: loc.path, projectId: project.id, source: cmdKey ? 'button' : 'run' })
+    if (project.id === PS_CTX_ID) window.api.openPs({ cwd: werkmap, cmd })
+    else window.api.openCmd({ cwd: werkmap, cmd })
+    recordHistory({ cmd, cwd: werkmap, projectId: project.id, source: cmdKey ? 'button' : 'run' })
     setStatus('ended', '✓ ' + I18N.t('term.endedOwnWindowStatus'))
     return
   }
@@ -11702,17 +11785,17 @@ async function executeCmd(project, cmd, cmdKey = null, opties = {}) {
     let result
     if (useAutofix) {
       result = await window.api.runCmdWithAutofix({
-        projectId: project.id, cmd, cwd: loc.path, cmdKey, autoFixEnabled: true,
+        projectId: project.id, cmd, cwd: werkmap, cmdKey, autoFixEnabled: true,
       })
     } else {
-      const r = await window.api.runCmd({ projectId: project.id, cmd, cwd: loc.path, shell: shellVoor(project) })
+      const r = await window.api.runCmd({ projectId: project.id, cmd, cwd: werkmap, shell: shellVoor(project) })
       result = (r && typeof r === 'object') ? r : { success: true }
     }
 
     // Alleen bewaren wat gelukt is. Zelf gestopt telt niet als mislukt — een
     // `flutter run` die je afbreekt wil je later gewoon terug kunnen halen.
     if (result.success || result.cancelled) {
-      recordHistory({ cmd, cwd: loc.path, projectId: project.id, source: cmdKey ? 'button' : 'run' })
+      recordHistory({ cmd, cwd: werkmap, projectId: project.id, source: cmdKey ? 'button' : 'run' })
     }
 
     if (useAutofix) {
@@ -11735,11 +11818,81 @@ async function executeCmd(project, cmd, cmdKey = null, opties = {}) {
       appendLine('warn', I18N.t('term.stdinExpectedWarn2'))
       stdinKlacht = false
     }
+
+    // Struikelde git over een slot dat er nog stond? Dan is er niets mis met
+    // het commando en heeft opnieuw proberen zin — zodra dat slot weg is.
+    if (slotKlacht) {
+      slotKlacht = false
+      if (!opties.geenSlotHerstel) {
+        const opnieuw = await regelGitSlot(project, werkmap)
+        if (opnieuw) return await executeCmd(project, cmd, cmdKey, { ...opties, geenSlotHerstel: true })
+      }
+    }
+    return result
   } finally {
     cmdFlowActive = false
     isRunning = false
     updateRunBtnIfVisible()
   }
+}
+
+// ── Een blijven staan slot ───────────────────────────────────────────────────
+// "Another git process seems to be running" stuurt je normaal de verkenner in
+// om in .git een bestand te gaan zoeken. Bijna altijd is het een restje van een
+// opdracht die is afgebroken en kan het gewoon weg. Bijna — dus eerst kijken
+// wat er nog draait, dat eerlijk zeggen, en de gebruiker laten kiezen.
+//
+// Processen doodschieten doen we niet: op Windows is niet te zien bij wélke map
+// een git-proces hoort, dus dat zou ook de commit van een ander project kunnen
+// afkappen — en juist dát is hoe je een half geschreven index krijgt.
+// Geeft true als het commando opnieuw geprobeerd mag worden.
+async function regelGitSlot(project, pad) {
+  const info = await window.api.gitSlotInfo(pad).catch(() => null)
+  if (!info || !info.bestaat) {
+    // Slot al weg, en toch de melding: dan was het een wedloop met iets anders.
+    // Opnieuw proberen is dan precies het goede antwoord.
+    return await vraagJaNee(I18N.t('git.slot.titel'), I18N.t('git.slot.wegTekst'),
+      I18N.t('git.slot.opnieuw'))
+  }
+
+  if (info.eigenCommandoDraait) {
+    await meldKort(I18N.t('git.slot.titel'), I18N.t('git.slot.eigenTekst'))
+    return false
+  }
+
+  const minuten = Math.floor((info.ouderdomMs || 0) / 60000)
+  const ouderdom = minuten >= 1
+    ? I18N.t('git.slot.ouderdomMin', { minuten })
+    : I18N.t('git.slot.ouderdomNet')
+  const draaien = Number.isFinite(info.gitProcessen) ? info.gitProcessen : null
+
+  const regels = [info.pad || '', ouderdom]
+  if (draaien) regels.push(I18N.t('git.slot.draaien', { aantal: draaien }))
+
+  // Draait er nergens een git, dan is weghalen het veilige antwoord en mag het
+  // de aanbevolen knop zijn. Draait er wel een, dan is wachten dat.
+  const rustig = !draaien
+  const keuze = await vraagKeuze({
+    titel: I18N.t('git.slot.titel'),
+    tekst: I18N.t(rustig ? 'git.slot.rustigTekst' : 'git.slot.drukTekst'),
+    regels,
+    knoppen: [
+      { label: I18N.t('common.cancel'), waarde: '' },
+      { label: I18N.t('git.slot.opnieuw'), waarde: 'opnieuw', soort: rustig ? '' : 'primair' },
+      { label: I18N.t('git.slot.weghalen'), waarde: 'weg', soort: rustig ? 'primair' : 'gevaar' },
+    ],
+  })
+  if (!keuze) return false
+  if (keuze === 'opnieuw') return true
+
+  const r = await window.api.gitSlotWeg(pad).catch(() => null)
+  if (!r || !r.ok) {
+    await meldKort(I18N.t('git.slot.titel'),
+      I18N.t(r && r.reden === 'eigen-commando' ? 'git.slot.eigenTekst' : 'git.slot.mislukt'))
+    return false
+  }
+  appendLine('ok', '✓ ' + I18N.t('git.slot.weggehaald'))
+  return true
 }
 
 // ── Achterlopen opmerken ─────────────────────────────────────────────────────
@@ -11799,56 +11952,80 @@ async function controleerAchterstand(p) {
   }
 }
 
-// ── Afsluitcontrole ──────────────────────────────────────────────────────────
-// Het main-proces houdt het sluiten tegen en vraagt ons om te kijken. Wij
-// nemen de projecten door en melden ons pas terug als de gebruiker klaar is.
-//
-// Dit ziet ook werk dat buiten CommandDeck om is gemaakt: git kijkt naar de
-// bestanden, niet naar wie ze geschreven heeft. Bewerk je iets in VS Code en
-// sluit je daarna CommandDeck, dan staat het hier gewoon tussen.
-let afsluitControleBezig = false
+// ── Onveilig git-werk: afsluiten én accountwisselen ──────────────────────────
+// Het main-proces houdt het sluiten tegen en vraagt ons om te kijken. Dezelfde
+// ronde draait bij het wisselen van account: per project een eigen vraag, zodat
+// meerdere mappen achter elkaar weggezet kunnen worden. Dit ziet ook werk dat
+// buiten CommandDeck om is gemaakt: git kijkt naar de bestanden, niet naar wie
+// ze geschreven heeft.
+let onveiligWerkBezig = false
+
+function hartslagAfsluiten(ms) {
+  try { window.api.gitAfsluitHartslag({ ms: ms || 60 * 1000 }) } catch {}
+}
+
+async function wachtOpOnveiligWerk() {
+  while (onveiligWerkBezig) {
+    hartslagAfsluiten()
+    await new Promise(r => setTimeout(r, 250))
+  }
+}
+
+// Geeft 'door' (verder: sluiten of wisselen) of 'blijven' (afbreken).
+async function controleerOnveiligWerk(reden) {
+  await ververesAlleGitStaten(true)
+
+  const instelling = GitTools.afsluitInstelling((settings.git || {}).afsluiten)
+  const teVragen = GitTools.teVragenProjecten(gitProjectenLijst(), instelling)
+  const totaal = teVragen.length
+
+  for (let i = 0; i < totaal; i++) {
+    hartslagAfsluiten(totaal > 1 ? 90 * 1000 : 60 * 1000)
+    const klaar = await vraagOverProject(teVragen[i], { reden, nr: i + 1, totaal })
+    if (klaar === 'blijven') return 'blijven'
+  }
+  return 'door'
+}
 
 async function controleerVoorAfsluiten() {
-  if (afsluitControleBezig) return
-  afsluitControleBezig = true
+  hartslagAfsluiten()
+  await wachtOpOnveiligWerk()
+  onveiligWerkBezig = true
   try {
-    // Verse cijfers: de laatste poll kan dertig seconden oud zijn, en in die
-    // tijd kan er van alles gebeurd zijn.
-    await ververesAlleGitStaten(true)
-
-    const instelling = GitTools.afsluitInstelling((settings.git || {}).afsluiten)
-    const teVragen = GitTools.teVragenProjecten(gitProjectenLijst(), instelling)
-
-    for (const project of teVragen) {
-      const klaar = await vraagOverProject(project)
-      if (klaar === 'blijven') { window.api.gitAfsluitenAf(); return }
-    }
+    const uitkomst = await controleerOnveiligWerk('afsluiten')
+    if (uitkomst === 'blijven') { window.api.gitAfsluitenAf(); return }
     window.api.gitAfsluitenMag()
   } catch (e) {
     // Nooit door onze eigen fout het venster onsluitbaar maken.
     window.api.gitAfsluitenMag()
   } finally {
-    afsluitControleBezig = false
+    onveiligWerkBezig = false
   }
 }
 
-// Geeft 'door' (volgende project) of 'blijven' (afsluiten afbreken).
-async function vraagOverProject(project) {
+// Geeft 'door' (volgende project) of 'blijven' (afsluiten/wisselen afbreken).
+async function vraagOverProject(project, opties = {}) {
+  const prefix = opties.reden === 'wisselen' ? 'git.wissel' : 'git.afsluit'
+  const nr = opties.nr || 1
+  const totaal = opties.totaal || 1
   const redenen = GitTools.onveiligeRedenen(project.staat)
   const regels = redenen.map(r => I18N.t('git.afsluit.reden.' + r.soort, { aantal: r.aantal }))
   if (project.staat.bestanden && project.staat.bestanden.length) {
     regels.push('', ...project.staat.bestanden.slice(0, 12))
   }
 
+  let tekst = I18N.t(prefix + '.tekst')
+  if (totaal > 1) tekst += ' ' + I18N.t('git.afsluit.teller', { n: nr, totaal })
+
   const keuze = await vraagKeuze({
-    titel: I18N.t('git.afsluit.titel', { project: project.naam }),
-    tekst: I18N.t('git.afsluit.tekst'),
+    titel: I18N.t(prefix + '.titel', { project: project.naam }),
+    tekst,
     regels,
     // Onder elkaar (vier keuzes), dus achterste eerst: commit & push bovenaan,
     // blijven onderaan, en de rode knop niet direct onder de aanbevolen.
     knoppen: [
       { label: I18N.t('git.afsluit.blijven'), waarde: 'blijven' },
-      { label: I18N.t('git.afsluit.tochAf'), waarde: 'door', soort: 'gevaar' },
+      { label: I18N.t(prefix + '.tochAf'), waarde: 'door', soort: 'gevaar' },
       { label: I18N.t('git.afsluit.terminal'), waarde: 'terminal' },
       { label: I18N.t('git.afsluit.commitPush'), waarde: 'commitpush', soort: 'primair' },
     ],
@@ -11858,14 +12035,15 @@ async function vraagOverProject(project) {
   if (keuze === 'door') return 'door'
 
   if (keuze === 'terminal') {
-    // Zelf regelen in een echte terminal. Het afsluiten gaat niet door — de
-    // gebruiker is nu juist aan het werk in dat project.
+    // Zelf regelen in een echte terminal. Het afsluiten of wisselen gaat niet
+    // door — de gebruiker is nu juist aan het werk in dat project.
     try { await window.api.openCmd({ cwd: project.pad }) } catch {}
     return 'blijven'
   }
 
   // Commit en push in één keer. We tonen het in de terminal van de app zodat
   // je ziet wat er gebeurt, en kijken daarna of het gelukt is.
+  hartslagAfsluiten(180 * 1000)
   const p = projects.find(x => x.id === project.id)
   if (!p) return 'door'
 
@@ -11888,12 +12066,16 @@ async function vraagOverProject(project) {
     // dan vullen we er zelf een in op basis van wat er verandert.
     if (bericht === null) return 'blijven'
     selectProject(p.id)
+    hartslagAfsluiten(180 * 1000)
     await executeCmd(p, GitTools.commitCommando(bericht || GitTools.automatischCommitBericht(project.staat)), 'git-commit')
   }
 
   const na = await ververesGitStaat(p, true)
   const pushCmd = GitTools.pushCommando(na)
-  if (pushCmd) await executeCmd(p, pushCmd, 'git-push')
+  if (pushCmd) {
+    hartslagAfsluiten(180 * 1000)
+    await executeCmd(p, pushCmd, 'git-push')
+  }
 
   // Nagekeken in plaats van aangenomen: als de push mislukte (geen netwerk,
   // geweigerd) staat het werk er nog steeds, en dan hoor je dat te weten.
@@ -11902,8 +12084,8 @@ async function vraagOverProject(project) {
   if (nog && nog.onveilig) {
     const toch = await vraagJaNee(
       I18N.t('git.afsluit.misluktTitel'),
-      I18N.t('git.afsluit.misluktTekst', { project: project.naam }),
-      I18N.t('git.afsluit.tochAf'), 'gevaar')
+      I18N.t(prefix + '.misluktTekst', { project: project.naam }),
+      I18N.t(prefix + '.tochAf'), 'gevaar')
     return toch ? 'door' : 'blijven'
   }
   return 'door'
@@ -13363,8 +13545,18 @@ function setupTerminalInput(project) {
 function setupModalEvents() {
   document.getElementById('modal-proj-close').onclick  = closeProjectModal
   document.getElementById('modal-proj-cancel').onclick = closeProjectModal
-  document.getElementById('modal-proj-save').onclick   = saveProjectModal
+  document.getElementById('modal-proj-save').onclick   = () => saveProjectModal()
   document.getElementById('btn-add-loc').onclick       = () => addLocEntry()
+  const gitUrl = document.getElementById('f-git-url')
+  if (gitUrl) gitUrl.oninput = onCloneUrlInvoer
+  const repoKnop = document.getElementById('btn-git-repos')
+  if (repoKnop) repoKnop.onclick = wisselRepoKiezer
+  const repoHerlaad = document.getElementById('btn-git-repos-herlaad')
+  if (repoHerlaad) repoHerlaad.onclick = () => laadGithubRepos({ opnieuw: true })
+  const repoZoek = document.getElementById('f-git-repo-zoek')
+  if (repoZoek) repoZoek.oninput = () => tekenRepoLijst()
+  const naamVeld = document.getElementById('f-name')
+  if (naamVeld) naamVeld.oninput = () => { cloneNaamOvergenomen = false }
   // Het potlood zit ín de cmd-knop van de zijbalk. Klikken mag die knop niet
   // ook nog eens openen, en lang drukken hoort de sorteerstand niet aan te
   // zetten — vandaar dat beide gebeurtenissen hier stoppen.
@@ -13655,6 +13847,7 @@ function bindGitSectie(p, pad, staat) {
 
 function openNewModal() {
   editingId = null; selEmoji = '📱'
+  cloneNaamOvergenomen = false
   document.getElementById('modal-title').textContent = I18N.t('modal.project.title')
   document.getElementById('f-name').value   = ''
   document.getElementById('f-device').value = ''
@@ -13666,8 +13859,9 @@ function openNewModal() {
   cmdvisSorteerModus = ''
   document.getElementById('modal-proj').hidden = false
   buildEmojiPicker()
-  refreshEmojiPicker(); refreshLocList(); renderCmdVisibilitySection(); vulProfielKeuze('')
+  refreshEmojiPicker(); refreshLocList(); renderCmdVisibilitySection()
   toonGitSectie(null)
+  toonCloneVeld(true)
   focusField('f-name')
 }
 
@@ -13689,8 +13883,9 @@ function openEditModal(id) {
   cmdvisSorteerModus = ''
   document.getElementById('modal-proj').hidden = false
   buildEmojiPicker()
-  refreshEmojiPicker(); refreshLocList(); renderCmdVisibilitySection(); vulProfielKeuze(p.gitProfiel || '')
+  refreshEmojiPicker(); refreshLocList(); renderCmdVisibilitySection()
   toonGitSectie(p)
+  toonCloneVeld(false)
 
   const footer = document.querySelector('#modal-proj .modal-footer')
   if (!footer.querySelector('.btn-delete')) {
@@ -13704,23 +13899,6 @@ function openEditModal(id) {
   focusField('f-name')
 }
 
-// De profielkeuze verschijnt pas zodra er profielen zijn. Een keuzelijst met
-// één regel "standaard" erin is geen keuze, alleen een vraag zonder antwoord.
-function vulProfielKeuze(gekozenId) {
-  const rij = document.getElementById('f-profiel-rij')
-  const keuze = document.getElementById('f-profiel')
-  if (!rij || !keuze) return
-  const lijst = gitProfielen()
-  rij.hidden = lijst.length === 0
-  if (!lijst.length) return
-
-  const std = GitTools.zoekProfiel(lijst, gitStandaardProfielId())
-  keuze.innerHTML =
-    `<option value="">${esc(I18N.t('modal.project.profielDefault', { naam: std ? GitTools.profielLabel(std) : '—' }))}</option>`
-    + lijst.map(p => `<option value="${esc(p.id)}" ${p.id === gekozenId ? 'selected' : ''}>${esc(GitTools.profielLabel(p))}</option>`).join('')
-  keuze.value = GitTools.zoekProfiel(lijst, gekozenId) ? gekozenId : ''
-}
-
 function focusField(id) {
   const el = document.getElementById(id)
   if (!el) return
@@ -13731,25 +13909,258 @@ function closeProjectModal() {
   document.getElementById('modal-proj').hidden = true
   document.querySelector('#modal-proj .btn-delete')?.remove()
   cmdvisSorteerModus = ''
+  toonCloneVeld(false)
   focusTerminalInput()
 }
 
-function saveProjectModal() {
+function toonCloneVeld(aan) {
+  const vak = document.getElementById('f-git-clone')
+  if (vak) vak.hidden = !aan
+  const url = document.getElementById('f-git-url')
+  if (url && !aan) url.value = ''
+  const zoek = document.getElementById('f-git-repo-zoek')
+  if (zoek && !aan) zoek.value = ''
+  if (!aan) {
+    cloneNaamOvergenomen = false
+    // Verse lijst bij de volgende keer: tussendoor kan er van account gewisseld
+    // zijn, en dan hoort er een andere lijst te staan.
+    cloneRepos = null
+    cloneRepoFout = ''
+    zetRepoKiezer(false)
+  } else {
+    // Uitgeklapt en meteen aan het ophalen: je opent dit venster om een project
+    // te kiezen, dus daar hoort geen extra klik voor te staan. Inklappen kan,
+    // voor als je alleen een adres komt plakken.
+    zetRepoKiezer(true)
+    laadGithubRepos()
+  }
+  updateCloneDoelPreview()
+}
+
+function cloneUrlInvoer() {
+  return (document.getElementById('f-git-url')?.value || '').trim()
+}
+
+function updateCloneDoelPreview() {
+  const doelEl = document.getElementById('f-git-clone-doel')
+  if (!doelEl) return
+  const vak = document.getElementById('f-git-clone')
+  if (!vak || vak.hidden) { doelEl.hidden = true; return }
+  const url = cloneUrlInvoer()
+  const loc = (pendingLocs[0] && pendingLocs[0].path || '').trim()
+  const doel = GitTools.cloneDoelPad(url, loc)
+  if (!doel) { doelEl.hidden = true; doelEl.textContent = ''; return }
+  doelEl.hidden = false
+  doelEl.textContent = I18N.t('modal.project.gitCloneDoel', { pad: doel })
+}
+
+function onCloneUrlInvoer() {
+  const naam = GitTools.repoNaamUitUrl(cloneUrlInvoer())
+  const nameEl = document.getElementById('f-name')
+  if (naam && nameEl && (!nameEl.value.trim() || cloneNaamOvergenomen)) {
+    nameEl.value = naam
+    cloneNaamOvergenomen = true
+  }
+  updateCloneDoelPreview()
+  markeerGekozenRepo()
+}
+
+// ── Een project van je GitHub-account kiezen ─────────────────────────────────
+// De lijst komt van `gh repo list`, dus van het account waarmee je bent
+// ingelogd. Eén keer ophalen zolang het venster openstaat: het gaat over een
+// netwerkverbinding, en de lijst verandert niet terwijl je hem doorleest.
+let cloneRepos      = null    // null = nog niet opgehaald
+let cloneRepoFout   = ''
+let cloneReposBezig = false
+
+function zetRepoKiezer(open) {
+  const vak = document.getElementById('f-git-repos')
+  if (vak) vak.hidden = !open
+  // Het pijltje in de kop wijst naar wat er gebeurt als je klikt.
+  const knop = document.getElementById('btn-git-repos')
+  if (!knop) return
+  knop.classList.toggle('dicht', !open)
+  const pijl = knop.querySelector('i')
+  pijl?.classList.toggle('ti-chevron-down', !!open)
+  pijl?.classList.toggle('ti-chevron-right', !open)
+}
+
+async function wisselRepoKiezer() {
+  const vak = document.getElementById('f-git-repos')
+  if (!vak) return
+  if (!vak.hidden) { zetRepoKiezer(false); return }
+
+  zetRepoKiezer(true)
+  await laadGithubRepos()
+  document.getElementById('f-git-repo-zoek')?.focus()
+}
+
+// De adressen die al aan een project hangen. Best effort: alleen mappen die de
+// app heeft nagekeken staan in gitStaten, en dat is precies de verzameling waar
+// "die heb ik al" over gaat.
+function gekoppeldeRepoAdressen() {
+  const uit = []
+  for (const p of projects) {
+    for (const loc of projectLocaties(p)) {
+      const staat = gitStaten[loc.pad]
+      if (!staat || !staat.isRepo) continue
+      for (const r of (staat.remoteLijst || [])) if (r && r.url) uit.push(r.url)
+      if (staat.remoteUrl) uit.push(staat.remoteUrl)
+    }
+  }
+  return uit
+}
+
+async function laadGithubRepos(opties = {}) {
+  if (cloneReposBezig) return
+  if (opties.opnieuw) { cloneRepos = null; cloneRepoFout = '' }
+  if (cloneRepos !== null && !cloneRepoFout) { tekenRepoLijst(); return }
+  cloneReposBezig = true
+  cloneRepoFout = ''
+  tekenRepoLijst()
+  try {
+    // Meerdere accounts op deze pc: vragen om de repos van het GitHub-account
+    // dat bij dít CommandDeck-account hoort, niet om die van het actieve.
+    const acc = huidigAccount()
+    const uitslag = await window.api.gitGhRepos({ gebruiker: (acc && acc.ghGebruiker) || '' })
+    if (uitslag && uitslag.ok) { cloneRepos = uitslag.repos || []; cloneRepoFout = '' }
+    else { cloneRepos = []; cloneRepoFout = (uitslag && uitslag.reden) || 'mislukt' }
+  } catch {
+    cloneRepos = []
+    cloneRepoFout = 'mislukt'
+  } finally {
+    cloneReposBezig = false
+    tekenRepoLijst()
+  }
+}
+
+function tekenRepoLijst() {
+  const doel = document.getElementById('f-git-repo-lijst')
+  if (!doel) return
+
+  if (cloneReposBezig) {
+    doel.innerHTML = `<div class="git-repo-melding">${esc(I18N.t('modal.project.gitRepoLaden'))}</div>`
+    return
+  }
+
+  // Niets kúnnen ophalen is iets anders dan niets hebben: bij het eerste hoort
+  // een knop die de oorzaak wegneemt, bij het tweede alleen een zin.
+  if (cloneRepoFout) {
+    const sleutel = cloneRepoFout === 'geen-gh'       ? 'gitRepoGeenGh'
+                  : cloneRepoFout === 'niet-ingelogd' ? 'gitRepoNietIngelogd'
+                  :                                     'gitRepoMislukt'
+    doel.innerHTML =
+      `<div class="git-repo-melding">${esc(I18N.t('modal.project.' + sleutel))}</div>`
+      + `<div class="git-repo-acties"><button class="btn-ghost btn-mini" type="button" id="git-repo-inloggen">`
+      + `${esc(I18N.t('modal.project.gitRepoInloggen'))}</button></div>`
+    doel.querySelector('#git-repo-inloggen')?.addEventListener('click', async () => {
+      const klaar = await zorgVoorGithub()
+      if (klaar === true) { cloneRepos = null; await laadGithubRepos() }
+    })
+    return
+  }
+
+  const opgehaald = cloneRepos || []
+  if (!opgehaald.length) {
+    doel.innerHTML = `<div class="git-repo-melding">${esc(I18N.t('modal.project.gitRepoLeeg'))}</div>`
+    return
+  }
+
+  // Wat al aan een project hangt hoeft niet nóg een keer binnengehaald te
+  // worden. Wel zeggen hoeveel er wegvielen, anders zoek je straks naar iets
+  // waarvan je zeker weet dat het er is.
+  const { lijst: over, verborgen } = GitTools.zonderGekoppelde(opgehaald, gekoppeldeRepoAdressen())
+  const staart = verborgen
+    ? `<div class="git-repo-melding">${esc(I18N.t('modal.project.gitRepoAl', { aantal: verborgen }))}</div>`
+    : ''
+
+  if (!over.length) {
+    doel.innerHTML = `<div class="git-repo-melding">${esc(I18N.t('modal.project.gitRepoAllesAl'))}</div>`
+    return
+  }
+
+  const lijst = GitTools.filterRepos(over, document.getElementById('f-git-repo-zoek')?.value || '')
+  if (!lijst.length) {
+    doel.innerHTML = `<div class="git-repo-melding">${esc(I18N.t('modal.project.gitRepoNiets'))}</div>` + staart
+    return
+  }
+
+  const tonen = lijst.slice(0, 60)
+  doel.innerHTML = tonen.map((r, i) => `
+    <button class="git-repo-rij" type="button" data-repo="${i}" data-sleutel="${esc(GitTools.repoSleutel(r.url))}">
+      <i class="ti ${r.prive ? 'ti-lock' : 'ti-book-2'}"></i>
+      <span class="git-repo-naam">${esc(r.volledig)}</span>
+      ${r.beschrijving ? `<span class="git-repo-om">${esc(r.beschrijving)}</span>` : ''}
+    </button>`).join('')
+    + (lijst.length > tonen.length
+        ? `<div class="git-repo-melding">${esc(I18N.t('modal.project.gitRepoMeer', { aantal: lijst.length - tonen.length }))}</div>`
+        : '')
+    + staart
+
+  doel.querySelectorAll('[data-repo]').forEach(el => el.addEventListener('click', () => {
+    kiesRepo(tonen[parseInt(el.dataset.repo, 10)])
+  }))
+  markeerGekozenRepo()
+}
+
+// Een gekozen repo vult het adres, en de projectnaam als je die nog niet zelf
+// hebt getypt. Het venster blijft open: de map hoort er nog bij.
+function kiesRepo(repo) {
+  if (!repo) return
+  const url = document.getElementById('f-git-url')
+  if (url) url.value = repo.url
+  onCloneUrlInvoer()
+  markeerGekozenRepo()
+}
+
+// De lijst blijft staan na een keuze — je kunt je bedenken — dus moet eraan te
+// zien zijn welke het is. Het adresveld is de waarheid, ook als je zelf typt.
+function markeerGekozenRepo() {
+  const sleutel = GitTools.repoSleutel(cloneUrlInvoer())
+  document.querySelectorAll('#f-git-repo-lijst .git-repo-rij').forEach(el => {
+    el.classList.toggle('gekozen', !!sleutel && el.dataset.sleutel === sleutel)
+  })
+}
+
+let projectOpslaanBezig = false
+
+async function saveProjectModal() {
+  if (projectOpslaanBezig) return
   const name   = document.getElementById('f-name').value.trim()
   const device = document.getElementById('f-device').value.trim()
-  const profielId = (document.getElementById('f-profiel')?.value || '').trim()
+  // Het profiel staat niet meer in dit venster (Instellingen > Git), dus een
+  // bewerkte project houdt gewoon wat het had.
+  const bestaand = editingId ? projects.find(x => x.id === editingId) : null
+  const profielId = (bestaand && bestaand.gitProfiel) || ''
   const locs   = pendingLocs.filter(l => l.path.trim())
   if (!name) { document.getElementById('f-name').focus(); return }
   if (!locs.length) { showToast(I18N.t('project.needLocationToast')); return }
 
-  // Een gewijzigd profiel is pas echt gewijzigd als het ook in de map staat.
-  // Dat vragen we na het opslaan, want het schrijft in .git/config en dat is
-  // iets anders dan een instelling van de app.
-  let profielTeZetten = null
+  let cloneAdres = ''
+  let cloneDoel = ''
+  let cloneOuder = ''
+  if (!editingId) {
+    const ruw = cloneUrlInvoer()
+    if (ruw) {
+      cloneAdres = GitTools.normaliseerRepoUrl(ruw)
+      if (!cloneAdres) {
+        await meldKort(I18N.t('git.link.urlBadTitle'), I18N.t('git.link.urlBadText'))
+        document.getElementById('f-git-url')?.focus()
+        return
+      }
+      cloneDoel = GitTools.cloneDoelPad(cloneAdres, locs[0].path)
+      cloneOuder = GitTools.cloneOuderPad(cloneDoel)
+      if (!cloneDoel || !cloneOuder) {
+        await meldKort(I18N.t('git.link.urlBadTitle'), I18N.t('git.clone.geenOuder'))
+        return
+      }
+      locs[0] = { ...locs[0], path: cloneDoel }
+      if (!locs[0].label) locs[0].label = 'main'
+    }
+  }
 
   if (editingId) {
     const p = projects.find(x => x.id === editingId)
-    if ((p.gitProfiel || '') !== profielId) profielTeZetten = p
     p.gitProfiel = profielId
     p.name = name; p.icon = selEmoji; p.device = device; p.locations = locs
     p.cmdVisibility = { ...pendingCmdVisibility }
@@ -13762,14 +14173,14 @@ function saveProjectModal() {
     if (p.activeLocation >= locs.length) p.activeLocation = 0
   } else {
     projects.push({ id: 'proj_' + Date.now(), name, icon: selEmoji, device, gitProfiel: profielId, locations: locs, activeLocation: 0, release: false, cmdVisibility: { ...pendingCmdVisibility }, secties: { ...pendingSecties }, customCmds: pendingCustomCmds.map(c => ({ ...c })), cmdVolgorde: { run: [...(pendingCmdVolgorde.run || [])], tools: [...(pendingCmdVolgorde.tools || [])] } })
-    if (profielId) profielTeZetten = projects[projects.length - 1]
   }
 
   saveProjects(); renderSidebar()
 
+  const vers = !editingId ? projects[projects.length - 1] : null
+
   // Nieuw project zonder eigen keuze over tools: even kijken of het Flutter is
-  if (!editingId) {
-    const vers = projects[projects.length - 1]
+  if (vers) {
     bepaalToolsVoorProject(vers).then(verborgen => {
       if (verborgen) showToast(I18N.t('project.notFlutterToast'))
       if (activeId === vers.id) vraagProjectHertekenen()
@@ -13781,14 +14192,47 @@ function saveProjectModal() {
   if (view === 'settings') renderSettingsPanel()
   closeProjectModal()
 
-  // Pas na het sluiten van het venster: anders staat de vraag achter de modal.
-  if (profielTeZetten) {
-    const profiel = profielVanProject(profielTeZetten)
-    if (GitTools.profielGeldig(profiel)) {
-      const staat = gitStaatVan(profielTeZetten)
-      if (staat && staat.isRepo) pasProfielToe(profielTeZetten, profiel)
+  if (vers && cloneAdres) {
+    projectOpslaanBezig = true
+    try {
+      selectProject(vers.id)
+      meldGitPadenAanMain()
+      await haalRepoBinnen(vers, cloneAdres, cloneDoel, cloneOuder)
+    } finally {
+      projectOpslaanBezig = false
     }
   }
+}
+
+// Map binnenhalen en daarna de git-knoppen laten werken: verse staat, koppeling
+// nagekeken, profiel in .git/config. Zonder die laatste stappen blijft de
+// koppelknop staan alsof er niets is gedownload.
+async function haalRepoBinnen(project, adres, doel, ouder) {
+  const cmd = GitTools.cloneCommando(adres, doel)
+  if (!cmd) return
+
+  await ververesGitStaat(project, true)
+  const al = gitStaatVan(project)
+  if (!(al && al.isRepo)) {
+    await executeCmd(project, cmd, 'git-clone', { cwd: ouder })
+    await ververesGitStaat(project, true)
+    const staat = gitStaatVan(project)
+    if (!staat || !staat.isRepo) {
+      await meldKort(I18N.t('git.clone.misluktTitel'), I18N.t('git.clone.misluktTekst'))
+      vraagProjectHertekenen()
+      return
+    }
+  }
+
+  await controleerKoppeling(doel, true)
+  const profiel = profielVanProject(project)
+  if (GitTools.profielGeldig(profiel)) await pasProfielToe(project, profiel)
+  bepaalToolsVoorProject(project).then(verborgen => {
+    if (verborgen) showToast(I18N.t('project.notFlutterToast'))
+    if (activeId === project.id) vraagProjectHertekenen()
+    renderSidebar()
+  })
+  vraagProjectHertekenen()
 }
 
 function refreshLocList() {
@@ -13804,14 +14248,14 @@ function refreshLocList() {
 
     const pathInput = document.createElement('input')
     pathInput.className = 'field mono'; pathInput.value = loc.path; pathInput.placeholder = I18N.t('location.pathPlaceholder')
-    pathInput.oninput = () => { pendingLocs[i].path = pathInput.value }
+    pathInput.oninput = () => { pendingLocs[i].path = pathInput.value; updateCloneDoelPreview() }
 
     const browseBtn = document.createElement('button')
     browseBtn.className = 'loc-browse'; browseBtn.title = I18N.t('location.pickFolderTitle')
     browseBtn.innerHTML = '<i class="ti ti-folder-open" style="font-size:14px"></i>'
     browseBtn.onclick = async () => {
       const picked = await window.api.pickFolder()
-      if (picked) { pendingLocs[i].path = picked; pathInput.value = picked }
+      if (picked) { pendingLocs[i].path = picked; pathInput.value = picked; updateCloneDoelPreview() }
     }
 
     const delBtn = document.createElement('button')
@@ -13980,6 +14424,11 @@ function focusTerminalInput() {
   const input = document.getElementById('term-input')
   if (!input || input.closest('[hidden]')) return
   requestAnimationFrame(() => {
+    // Nog een keer kijken. Tussen de aanroep en dit beeldje kan er een venster
+    // opengegaan zijn — de pincodevraag bij het opstarten is er zo een — en dan
+    // springt de cursor uit dat venster weg terwijl je aan het typen bent.
+    if (anyModalOpen()) return
+    if (!input.isConnected || input.closest('[hidden]')) return
     input.focus()
     input.selectionStart = input.selectionEnd = input.value.length
   })

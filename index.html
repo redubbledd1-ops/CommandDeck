@@ -155,13 +155,33 @@
     <div class="emoji-row" id="emoji-row"></div>
     <label class="field-label"><span data-i18n="modal.project.deviceLabel">android device id</span> <span class="opt" data-i18n="common.optional">(optioneel)</span></label>
     <input class="field mono" id="f-device" placeholder="437d872e" />
-    <div id="f-profiel-rij" hidden>
-      <label class="field-label"><span data-i18n="modal.project.profielLabel">git-profiel</span></label>
-      <select class="field" id="f-profiel"></select>
-    </div>
     <label class="field-label" data-i18n="modal.project.locationsLabel">locaties</label>
     <div id="loc-list"></div>
     <button class="add-loc-btn" id="btn-add-loc"><i class="ti ti-plus"></i> <span data-i18n="modal.project.addLocation">locatie toevoegen</span></button>
+    <!-- Een project van GitHub binnenhalen. Alleen bij een nieuw project: bij
+         bewerken staat de map er al en hoort dit bij de git-sectie hieronder. -->
+    <div id="f-git-clone" hidden>
+      <label class="field-label"><span data-i18n="modal.project.gitCloneLabel">git-repository</span> <span class="opt" data-i18n="common.optional">(optioneel)</span></label>
+      <p class="git-clone-hint" data-i18n="modal.project.gitCloneTekst">Kies een project van je GitHub-account, of plak een adres. De bestanden worden binnengehaald in de map hierboven.</p>
+      <button class="git-repo-kop-knop" id="btn-git-repos" type="button">
+        <i class="ti ti-chevron-down"></i>
+        <span data-i18n="modal.project.gitRepoKiezen">GitHub Repo's</span>
+      </button>
+      <div class="git-repo-kiezer" id="f-git-repos">
+        <div class="git-repo-kop">
+          <input class="field" id="f-git-repo-zoek" spellcheck="false" autocomplete="off"
+                 data-i18n-placeholder="modal.project.gitRepoZoek" placeholder="zoeken in je repositories" />
+          <button class="btn-ghost btn-mini" id="btn-git-repos-herlaad" type="button"
+                  data-i18n-title="modal.project.gitRepoHerladen" title="lijst opnieuw ophalen"><i class="ti ti-refresh"></i></button>
+        </div>
+        <div class="git-repo-lijst" id="f-git-repo-lijst"></div>
+      </div>
+      <p class="git-clone-hint git-clone-of" data-i18n="modal.project.gitCloneOf">Staat hij er niet bij, of komt hij ergens anders vandaan? Plak dan het adres.</p>
+      <input class="field mono" id="f-git-url" spellcheck="false" autocomplete="off"
+             data-i18n-placeholder="modal.project.gitClonePlaceholder"
+             placeholder="gebruiker/repo of https://github.com/gebruiker/repo.git" />
+      <div class="git-clone-doel" id="f-git-clone-doel" hidden></div>
+    </div>
     <label class="field-label" data-i18n="modal.project.visibleCommandsLabel">zichtbare commando's</label>
     <div id="cmdvis-section"></div>
     <!-- Alles wat met de git-koppeling van dít project te maken heeft. Verborgen

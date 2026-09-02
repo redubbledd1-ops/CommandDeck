@@ -135,6 +135,8 @@ let gitStaatNu = null
 let gitChecks = []
 let gitVergeten = []
 let gitignoreGeschreven = []
+let ghRepoVragen = []
+let ghRepoAntwoord = { ok: true, repos: [] }
 
 const api = {
   gitInfo: async () => gitStaatNu ? JSON.parse(JSON.stringify(gitStaatNu)) : null,
@@ -145,6 +147,8 @@ const api = {
   gitIgnoreSchrijf: async (o) => { gitignoreGeschreven.push(o); return { ok: true, pad: 'C:\\a\\.gitignore' } },
   gitPaden: async () => true,
   gitProjecten: async () => true,
+  gitAfsluitHartslag: () => {},
+  gitGhRepos: async (o) => { ghRepoVragen.push(o); return ghRepoAntwoord },
   loadProjects: async () => JSON.parse(JSON.stringify(projects)),
   saveProjects: async (p) => { projects.length = 0; projects.push(...JSON.parse(JSON.stringify(p))); return true },
   loadLocale: async (code) => {
@@ -373,7 +377,11 @@ window.Element.prototype.scrollIntoView = function (o) { inBeeldGehaald.push(thi
 window.eval(fs.readFileSync(path.join(APP, 'i18n.js'), 'utf8') + '\nglobalThis.I18N = I18N;')
 window.eval(fs.readFileSync(path.join(APP, 'git-tools.js'), 'utf8'))
 window.eval(fs.readFileSync(path.join(APP, 'accounts.js'), 'utf8'))
-window.eval(fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8'))
+// Een handvat om iets in de projecten van de renderer te zetten. Elke
+// window.eval krijgt in jsdom zijn eigen scope, dus zonder dit komen we niet
+// bij zijn `projects` — en dan is niet te testen of opslaan iets laat staan.
+window.eval(fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8')
+  + '\nglobalThis.__test = { zetProjectProfiel: (i, id) => { projects[i].gitProfiel = id } };')
 startVraagAutomaat()
 const W = window
 const inBevrorenPaneel = (el) => {
@@ -2863,16 +2871,17 @@ function startVraagAutomaat() {
   check('github-naam en inloggedrag worden bewaard',
     settings.git.profielen[0].ghGebruiker === 'jan-werk' && settings.git.profielen[0].inloggen === 'vragen')
 
-  // De keuze per project verschijnt pas als er iets te kiezen valt.
+  // Het projectvenster gaat over het project, niet over wie je bent: de
+  // profielkeuze hoort hier niet meer te staan. Wat er wél aan hangt blijft
+  // staan als je het project bewerkt — anders raak je het kwijt met opslaan.
+  W.__test.zetProjectProfiel(0, gpId)
   $('#btn-settings').click(); await tick()
   $$('.proj-edit')[0].click(); await tick()
-  check('nu er een profiel is, staat de keuze in het projectvenster',
-    $('#f-profiel-rij').hidden === false)
-  check('en "standaard" noemt welk profiel dat is',
-    $('#f-profiel').options[0].textContent.includes('Jan Jansen'))
-  $('#f-profiel').value = gpId
+  check('er staat geen profielkeuze meer in het projectvenster',
+    !$('#f-profiel-rij') && !$('#f-profiel'))
   $('#modal-proj-save').click(); await tick(); await tick()
-  check('het gekozen profiel hangt aan het project', projects[0].gitProfiel === gpId)
+  check('en opslaan laat het profiel van het project met rust',
+    projects[0].gitProfiel === gpId)
 
   // Weghalen: het profiel verdwijnt en het project valt terug op de standaard.
   $('#btn-settings').click(); await tick()
@@ -3607,6 +3616,47 @@ function startVraagAutomaat() {
   global.window = window; global.document = window.document
   settings.cmd = { cwd: bewaardeCwd, recentCwds: [bewaardeCwd] }
 
+  // ── het inlogveld ─────────────────────────────────────────────────────────
+  // Bij het opstarten staat de cursor niet altijd waar je denkt: een venster dat
+  // net opengaat of een knop die focus pakt. Een pincode die je blind intypt
+  // verdween dan in het niets. Waar je ook staat: typen hoort hierin te komen,
+  // en Enter hoort in te loggen.
+  {
+    const w = await herstart()
+    const antwoord = w.eval("vraagTekst({ titel: 'pin', verborgen: true, okLabel: 'inloggen' })")
+    await tick()
+    const veld = w.document.getElementById('vraag-invoer')
+    check('de pincode gaat in een wachtwoordveld', !!veld && veld.type === 'password')
+    check('en de cursor staat er meteen in', w.document.activeElement === veld)
+
+    const toets = (key, code) => w.document.dispatchEvent(
+      new w.KeyboardEvent('keydown', { key, code: code || key, bubbles: true, cancelable: true }))
+
+    // Zoals een knop of de achtergrond de focus wegpakt.
+    const focusWeg = () => w.document.querySelector('#vraag-knoppen button').focus()
+    focusWeg()
+    check('de focus is echt weg', w.document.activeElement !== veld)
+    toets('1')
+    check('typen komt tóch in het veld', veld.value === '1')
+    check('en de cursor staat er weer in', w.document.activeElement === veld)
+    focusWeg(); toets('2')
+    check('ook de volgende toets', veld.value === '12')
+    focusWeg(); toets('Backspace')
+    check('backspace haalt er een af', veld.value === '1')
+
+    // Num Lock uit stuurt pijltjes vanaf het numerieke blok; de fysieke toets
+    // klopt wel, en in een pincodeveld is dat een cijfer.
+    focusWeg()
+    toets('ArrowUp', 'Numpad8')
+    check('het numerieke blok werkt met Num Lock uit', veld.value === '18')
+
+    focusWeg()
+    toets('Enter')
+    check('enter probeert in te loggen', (await antwoord) === '18')
+    check('en het venster gaat dicht', w.document.getElementById('modal-vraag').hidden)
+    global.window = window; global.document = window.document
+  }
+
   $('#btn-nav-cmd').click(); await tick()
   check('cmd-weergave wordt onthouden', settings.lastView.view === 'cmd')
   let w2 = await herstart()
@@ -3753,7 +3803,65 @@ function startVraagAutomaat() {
 
     // Bij een nieuw project is er nog geen map om iets over te zeggen.
     $('#btn-add-proj').click(); await tick()
-    check('een nieuw project toont geen git-sectie', $('#f-git-sectie').hidden)
+    check('een nieuw project toont geen git-onderhoud', $('#f-git-sectie').hidden)
+    check('maar wel een veld om van git te downloaden', !$('#f-git-clone').hidden)
+    check('met een adresveld', $('#f-git-url'))
+
+    $('#modal-proj-cancel').click(); await tick()
+
+    // Kiezen uit je eigen repositories. De lijst staat meteen open en is al
+    // opgehaald: hem eerst moeten opendoen is een klik om niets.
+    ghRepoVragen.length = 0
+    ghRepoAntwoord = { ok: true, repos: [
+      { naam: 'DD-Music', volledig: 'redubbledd1/DD-Music', url: 'https://github.com/redubbledd1/DD-Music.git',
+        beschrijving: 'muziekspeler', prive: false, bijgewerkt: '2026-09-01T10:00:00Z' },
+      { naam: 'TimeGuess', volledig: 'redubbledd1/TimeGuess', url: 'https://github.com/redubbledd1/TimeGuess.git',
+        beschrijving: '', prive: true, bijgewerkt: '2026-08-01T10:00:00Z' },
+    ] }
+    $('#btn-add-proj').click(); await tick(); await tick()
+    check('de lijst staat meteen open', !$('#f-git-repos').hidden)
+    check('en is uit zichzelf opgehaald', ghRepoVragen.length === 1)
+    check('met beide repositories erin', $$('#f-git-repo-lijst .git-repo-rij').length === 2)
+
+    // Inklappen kan, voor als je alleen een adres komt plakken.
+    $('#btn-git-repos').click(); await tick()
+    check('de kop klapt de lijst dicht', $('#f-git-repos').hidden)
+    $('#btn-git-repos').click(); await tick(); await tick()
+    check('en weer open', !$('#f-git-repos').hidden)
+    check('zonder er nog een keer voor het netwerk op te gaan', ghRepoVragen.length === 1)
+
+    $('#f-git-repo-zoek').value = 'music'
+    $('#f-git-repo-zoek').dispatchEvent(new window.Event('input')); await tick()
+    check('zoeken filtert de lijst', $$('#f-git-repo-lijst .git-repo-rij').length === 1)
+
+    $$('#f-git-repo-lijst .git-repo-rij')[0].click(); await tick()
+    check('kiezen vult het adres', $('#f-git-url').value === 'https://github.com/redubbledd1/DD-Music.git')
+    check('en de projectnaam', $('#f-name').value === 'DD-Music')
+    check('de lijst blijft staan, met de keuze aangewezen',
+      !$('#f-git-repos').hidden && !!$('#f-git-repo-lijst .git-repo-rij.gekozen'))
+
+    // Wat al aan een project hangt hoort er niet meer bij te staan. Het project
+    // uit deze tests wijst naar DD-Music, dus die valt weg.
+    $('#modal-proj-cancel').click(); await tick()
+    gitStaatNu = maakStaat({ ...gezond, remoteLijst: [{ naam: 'origin', url: 'git@github.com:redubbledd1/DD-Music.git' }] })
+    $$('.proj-edit')[0].click(); await tick(); await tick()
+    $('#modal-proj-save').click(); await tick(); await tick()
+    ghRepoVragen.length = 0
+    $('#btn-add-proj').click(); await tick(); await tick()
+    check('een repo die al aan een project hangt staat niet in de lijst',
+      $$('#f-git-repo-lijst .git-repo-rij').length === 1
+      && !$('#f-git-repo-lijst .git-repo-rij').textContent.includes('DD-Music'))
+    check('en er staat bij hoeveel er zijn weggelaten',
+      !!$$('#f-git-repo-lijst .git-repo-melding').length)
+    $('#modal-proj-cancel').click(); await tick()
+
+    // Zonder gh valt er niets te kiezen. Dan hoort er een uitweg te staan, geen
+    // lege lijst waar je niets aan hebt.
+    ghRepoAntwoord = { ok: false, reden: 'geen-gh', repos: [] }
+    $('#btn-add-proj').click(); await tick(); await tick()
+    check('zonder gh staat er uitleg', !!$('#f-git-repo-lijst .git-repo-melding'))
+    check('met een knop om GitHub alsnog te koppelen', !!$('#git-repo-inloggen'))
+    ghRepoAntwoord = { ok: true, repos: [] }
     $('#modal-proj-cancel').click(); await tick()
     gitStaatNu = null
   }

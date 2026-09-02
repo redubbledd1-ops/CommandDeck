@@ -60,6 +60,9 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeListener('git:ghCode', h)
   },
   gitGhAccounts: ()      => ipcRenderer.invoke('git:ghAccounts'),
+  gitGhRepos:    (o)     => ipcRenderer.invoke('git:ghRepos', o || {}),
+  gitSlotInfo:   (d)     => ipcRenderer.invoke('git:slotInfo', d),
+  gitSlotWeg:    (d)     => ipcRenderer.invoke('git:slotWeg', d),
   gitGhIdentiteit: (u)   => ipcRenderer.invoke('git:ghIdentiteit', u),
   gitAccountActiveren: (p) => ipcRenderer.invoke('git:accountActiveren', p),
   gitFetch:      (p)     => ipcRenderer.invoke('git:fetch', p),
@@ -82,6 +85,7 @@ contextBridge.exposeInMainWorld('api', {
   opAfsluitControle: (f) => ipcRenderer.on('git:controleerVoorAfsluiten', () => f()),
   gitAfsluitenMag:  ()   => ipcRenderer.send('git:afsluitenMag'),
   gitAfsluitenAf:   ()   => ipcRenderer.send('git:afsluitenAfgebroken'),
+  gitAfsluitHartslag: (o) => ipcRenderer.send('git:afsluitHartslag', o || {}),
   listArchive:   (p)     => ipcRenderer.invoke('arch:list', p),
   openInArchive: (p)     => ipcRenderer.invoke('arch:open', p),
   archiveTool:   ()      => ipcRenderer.invoke('arch:tool'),

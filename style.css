@@ -945,6 +945,38 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
 }
 .add-loc-btn:hover { border-color: var(--accent); color: var(--accent); }
 
+.git-clone-hint { font-size: 12px; color: var(--muted2); margin: 0 0 8px; line-height: 1.4; }
+.git-clone-rij { display: flex; gap: 6px; align-items: stretch; }
+.git-clone-rij .field { flex: 1; min-width: 0; }
+.git-clone-rij .btn-mini { white-space: nowrap; display: flex; align-items: center; gap: 5px; }
+
+/* De lijst met repositories van GitHub. Hij zit ín het venster en niet in een
+   eigen dialoog: je hebt de mapkeuze ernaast nog nodig. */
+/* De kop is de knop: klikken klapt de lijst in en uit. */
+.git-repo-kop-knop { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left;
+  background: none; border: 0; padding: 4px 2px; margin-top: 2px; cursor: pointer;
+  color: var(--text); font: inherit; font-size: 12px; }
+.git-repo-kop-knop:hover { color: var(--accent); }
+.git-repo-kop-knop i { font-size: 13px; color: var(--muted2); }
+.git-repo-kop-knop:hover i { color: var(--accent); }
+.git-repo-kop { display: flex; gap: 6px; align-items: center; }
+.git-repo-kop .field { flex: 1; min-width: 0; margin-bottom: 0; }
+.git-repo-rij.gekozen { background: var(--accent-d); }
+.git-repo-rij.gekozen i, .git-repo-rij.gekozen .git-repo-naam { color: var(--accent); }
+.git-clone-of { margin: 10px 0 6px; }
+.git-repo-kiezer { margin-top: 8px; border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; background: var(--s1); }
+.git-repo-kiezer .git-repo-kop { margin-bottom: 6px; }
+.git-repo-lijst { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.git-repo-rij { display: flex; align-items: baseline; gap: 7px; width: 100%; text-align: left;
+  background: none; border: 0; border-radius: 6px; padding: 6px 8px; cursor: pointer; color: var(--text); font: inherit; }
+.git-repo-rij:hover, .git-repo-rij:focus-visible { background: var(--s3); outline: none; }
+.git-repo-rij i { color: var(--muted); font-size: 13px; flex: none; }
+.git-repo-naam { font-size: 12.5px; flex: none; }
+.git-repo-om { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.git-repo-melding { font-size: 12px; color: var(--muted); padding: 8px; line-height: 1.4; }
+.git-repo-acties { padding: 0 8px 6px; }
+.git-clone-doel { font-size: 11px; color: var(--muted); margin-top: 6px; word-break: break-all; }
+
 /* Zichtbare commando's (project bewerken) */
 .cmdvis-group { margin-top: 6px; }
 .cmdvis-group + .cmdvis-group { margin-top: 14px; }
