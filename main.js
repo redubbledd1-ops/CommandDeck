@@ -3613,6 +3613,7 @@ ipcMain.handle('cmd:run', async (_, opts) => {
   return {
     success: r.code === 0,
     code: r.code,
+    output: r.output || '',
     cancelled: cancelRequested,
     flutterMissing: !!r.flutterMissing,
     manual: !!r.flutterMissing,
