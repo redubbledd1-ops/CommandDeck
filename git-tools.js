@@ -684,6 +684,195 @@
     return null
   }
 
+  // ── Netwerkpaden (UNC) ──────────────────────────────────────────────────────
+  // `\\server\share\map` is een geldig pad voor Node, voor de verkenner en voor
+  // git. Niet voor cmd.exe: die weigert een UNC-pad als werkmap, wijkt uit naar
+  // C:\Windows en geeft daarna gewoon exit 0 terug. Het commando draait dan in
+  // de verkeerde map terwijl alles op geslaagd lijkt — en bij `git add -A` of
+  // iets dat bestanden weggooit is dat geen kleine vergissing. Vandaar dat de
+  // app zo'n pad moet kunnen herkennen vóórdat er iets start.
+  //
+  // Een gekoppelde schijfletter (P:\) heeft dit probleem niet. Voor cmd is dat
+  // een gewone schijf, ook al zit er een netwerkshare achter. Dat is meteen de
+  // uitweg die we de gebruiker aanraden.
+  //
+  // Alleen een servernaam (`\\server`) telt niet: daar valt niet in te werken,
+  // er moet een share achter staan.
+  function serverEnShare(rest) {
+    return /^[^\\/]+[\\/]+[^\\/]/.test(String(rest || ''))
+  }
+
+  function isUncPad(pad) {
+    const p = String(pad || '')
+    if (!/^[\\/]{2}/.test(p)) return false
+    const rest = p.slice(2)
+    // `\\?\` en `\\.\` zijn apparaatnamen, geen netwerkpad. Uitzondering:
+    // `\\?\UNC\server\share` is er wél een, alleen in de lange schrijfwijze.
+    if (/^[?.][\\/]/.test(rest)) {
+      const lang = rest.match(/^[?.][\\/]UNC[\\/]([\s\S]+)$/i)
+      return lang ? serverEnShare(lang[1]) : false
+    }
+    return serverEnShare(rest)
+  }
+
+  // Schijfletter uit een pad (`P:\x` → `P`). Leeg bij UNC of iets zonder letter.
+  function schijfLetterVan(pad) {
+    const m = String(pad || '').match(/^([a-zA-Z]):/)
+    return m ? m[1].toUpperCase() : ''
+  }
+
+  // UNC óf een gekoppelde netwerkschijf (P:, Z:, …). De set met letters komt
+  // van buiten — git-tools blijft puur, main/renderer bepalen welke letters
+  // Remote zijn. Zonder set blijft alleen UNC herkend: dat is bewust, zodat
+  // tests en niet-Windows geen valse positieven krijgen op C:.
+  function isNetwerkPad(pad, netwerkLetters) {
+    if (isUncPad(pad)) return true
+    const letter = schijfLetterVan(pad)
+    if (!letter) return false
+    if (!netwerkLetters) return false
+    if (netwerkLetters instanceof Set) return netwerkLetters.has(letter)
+    if (Array.isArray(netwerkLetters)) return netwerkLetters.map(l => String(l).toUpperCase()).includes(letter)
+    return false
+  }
+
+  // De regel waarmee cmd.exe meldt dat hij is uitgeweken. Dit is een vangnet en
+  // niet de eerste verdediging: Windows vertaalt deze tekst, dus op een
+  // anderstalige installatie herkennen we hem niet. Daarom houdt de app een
+  // UNC-werkmap al tegen vóór het starten, en dient dit alleen voor het geval
+  // een commando er onderweg zelf een van maakt.
+  function uncWaarschuwing(regel) {
+    const r = String(regel || '')
+    return /UNC[- ]paths? are not supported/i.test(r)
+        || /CMD\.EXE was started with the above path/i.test(r)
+  }
+
+  // De wortel van een netwerkpad: `\\server\share`, zonder wat erachter staat.
+  // Geeft '' als het geen netwerkpad is.
+  //
+  // De boom heeft dit op twee plekken nodig. Bij "omhoog", want boven een share
+  // zit geen map meer — en bij het opbouwen van de keten naar een pad, want die
+  // begint daar bij `\\server\share` in plaats van bij een schijfletter.
+  function uncWortel(pad) {
+    const p = String(pad || '')
+    if (!isUncPad(p)) return ''
+    const scheider = p[0] === '/' ? '/' : '\\'
+    // `\\?\UNC\server\share` wijst naar dezelfde plek als `\\server\share`, maar
+    // het voorvoegsel hoort bij de wortel: laat je het weg, dan is het pad niet
+    // langer hetzelfde pad.
+    const lang = p.slice(2).match(/^([?.][\\/]UNC[\\/])([\s\S]+)$/i)
+    const kop = lang ? p.slice(0, 2) + lang[1] : p.slice(0, 2)
+    const delen = (lang ? lang[2] : p.slice(2)).split(/[\\/]/).filter(Boolean)
+    if (delen.length < 2) return ''
+    return kop + delen[0] + scheider + delen[1]
+  }
+
+  // Is dit de share zelf, zonder submap erachter? Dan houdt "omhoog" hier op.
+  function isUncWortel(pad) {
+    const w = uncWortel(pad)
+    if (!w) return false
+    const kaal = (x) => String(x).replace(/[\\/]+$/, '').toLowerCase()
+    return kaal(w) === kaal(pad)
+  }
+
+  // Hoe een netwerkwortel in de boom en de schijvenlijst komt te staan. De twee
+  // strepen ervoor zeggen niets extra's; `server\share` leest prettiger en valt
+  // meteen op tussen C: en D:.
+  function uncNaam(pad) {
+    const w = uncWortel(pad) || String(pad || '')
+    return w.replace(/^[\\/]{2}/, '').replace(/^[?.][\\/]UNC[\\/]/i, '')
+  }
+
+  // Een cmd-commando dat wél in een netwerkmap draait.
+  //
+  // cmd kan zelf niet in een UNC-map starten, maar `pushd` kan er een tijdelijke
+  // schijfletter aan hangen en daarheen springen. Die letter verdwijnt vanzelf
+  // zodra het cmd-proces eindigt — nagemeten over zes ronden, er blijft niets
+  // hangen in `net use`.
+  //
+  // Er staat bewust géén `popd` achteraan, en dat is geen slordigheid: `… & popd`
+  // overschrijft de exitcode van het commando met die van popd. Gemeten gaf
+  // `pushd … && cmd /c exit 3 & popd` gewoon status 0, en `git` in een map zonder
+  // repo net zo goed. Dan meldt de app "klaar" bij een mislukking, en dat is
+  // precies de fout die dit hele verhaal moest oplossen.
+  //
+  // `&&` in plaats van `&` is net zo bewust: lukt pushd niet (share weg, geen
+  // rechten), dan draait het commando niet alsnog in een andere map. Dat is
+  // gemeten: een niet-bestaande share geeft status 1 en het commando blijft uit.
+  //
+  // Geeft terug wat er gespawned moet worden. Op een gewoon pad, of buiten
+  // Windows, verandert er niets: zelfde commando, zelfde werkmap.
+  //
+  // Let op — `%CD%` en andere `%VAR%` in het commando worden door cmd uitgevouwen
+  // vóórdat pushd draait, dus die wijzen niet naar de netwerkmap. Daar valt
+  // binnen cmd niets aan te doen; de app zegt het er daarom bij.
+  function cmdInMap(cmd, pad, windows = true) {
+    if (!windows || !isUncPad(pad)) return { cmd, cwd: pad, viaLetter: false }
+    // Een aanhalingsteken kan niet in een Windows-pad voorkomen, dus weghalen
+    // kan geen geldig pad slopen — en het houdt de commandoregel heel.
+    const schoon = String(pad).replace(/["\r\n]+/g, '')
+    // Zonder commando is er niets om aan vast te plakken: dan alleen de sprong,
+    // en geen `&&` die aan het eind in de lucht hangt. Dat geval bestaat bij het
+    // lege consolevenster (zie vensterInMap).
+    const kern = String(cmd == null ? '' : cmd).trim()
+    if (!kern) return { cmd: `pushd "${schoon}"`, cwd: null, viaLetter: true }
+    return { cmd: `pushd "${schoon}" && ${kern}`, cwd: null, viaLetter: true }
+  }
+
+  // Hetzelfde probleem, maar voor de knoppen die een LOS consolevenster openen.
+  //
+  // Die gaan via `cmd.exe /c start "" /D <map> <programma>`. Gemeten op
+  // `\\192.168.100.200\Projecten`: `/D` met een netwerkpad gaat mis zodra het
+  // programma cmd.exe is (of een .bat, want die wordt dóór cmd gedraaid). Het
+  // venster opende gewoon, maar stond in `C:\Windows` — dezelfde stille
+  // verhuizing als in fase 1, en nog stiller, want main.js doet `.unref()` en
+  // meldt `true` zonder ooit naar een exitcode te kijken. Een andere ronde gaf
+  // `start` zelf "The current directory is invalid." en helemaal geen venster.
+  // Geen van beide is te zien voor de gebruiker.
+  //
+  // `/D` is niet de boosdoener: met powershell.exe erachter landde hetzelfde
+  // `start "" /D <unc>` netjes in de share. Het is opnieuw cmd.exe zelf. Daarom
+  // blijft de powershell-knop ongemoeid.
+  //
+  // De oplossing is dezelfde `pushd` als bij cmdInMap, maar hij moet nu door twee
+  // cmd-lagen heen: die van `start` en die van het venster. Dat overleeft een
+  // argumentenlijst niet — node ontsnapt een `"` in een argument als `\"`, en
+  // cmd.exe kent die schrijfwijze niet. Gemeten: met een argumentenlijst kwam er
+  // "The specified path is invalid." en geen venster. Met één commandoregel via
+  // `shell: true` (precies zoals runCommandOnce het al doet) opende het venster
+  // wél op de tijdelijke letter, ook bij een share met een spatie in de naam.
+  //
+  // Het extra paar aanhalingstekens om de hele pushd-regel is nodig en niet
+  // dubbelop: het houdt de `&&` binnen de aanhalingstekens, zodat de buitenste
+  // cmd (die van `start`) hem niet als scheidingsteken opvat en het commando
+  // buiten het venster om zou draaien. `cmd /k` haalt dat buitenste paar er zelf
+  // weer af.
+  //
+  // Ook hier geen `popd`. Bij cmdInMap omdat het de exitcode opslokt; hier omdat
+  // een venster dat blijft openstaan de gebruiker meteen weer uit de map zou
+  // gooien terwijl hij nog zit te typen.
+  //
+  // Prijs daarvan, nagemeten: gaat het venster hard dicht (kruisje, taskkill),
+  // dan blijft de tijdelijke letter in `net use` staan. Sluit de gebruiker het
+  // met `exit`, of eindigt het commando gewoon, dan ruimt cmd hem wel op. Een
+  // achtergebleven letter wijst naar dezelfde share die de gebruiker zelf koos,
+  // dus hij is onschuldig — maar hij is er.
+  //
+  //   pad        de map waar het venster moet staan
+  //   binnen     wat er in dat venster moet draaien; leeg = alleen de prompt.
+  //              Een pad met spaties hoort hier al tussen aanhalingstekens.
+  //   blijfOpen  true -> `cmd /k`, het venster blijft na afloop staan
+  //              false -> `cmd /c`, het venster sluit als het klaar is
+  //
+  // Geeft `null` terug als er niets bijzonders nodig is (geen Windows, of een
+  // gewoon pad). De aanroeper houdt dan zijn eigen `start "" /D <map> …` en er
+  // verandert helemaal niets. Anders een kant-en-klare commandoregel voor
+  // `spawn(regel, [], { shell: true })`.
+  function vensterInMap(pad, binnen, blijfOpen, windows = true) {
+    if (!windows || !isUncPad(pad)) return null
+    const kern = cmdInMap(binnen, pad, true).cmd
+    return `start "" cmd.exe ${blijfOpen ? '/k' : '/c'} "${kern}"`
+  }
+
   // ── Locaties van een project ────────────────────────────────────────────────
   // Een project kan meerdere mappen hebben — Resume heeft er een voor de app en
   // een voor de extensie — en die kunnen los van elkaar vuil staan. Alles wat
@@ -1019,6 +1208,34 @@
       return `git remote add origin ${url} && git push -u origin ${branch || 'main'}`
     }
     return null
+  }
+
+  // Aanhalingstekens om een pad op de commandoregel. Dubbele quotes erin
+  // worden weggehaald — cmd ziet die anders als einde van de string.
+  function cmdPad(pad) {
+    return '"' + String(pad || '').replace(/"/g, '') + '"'
+  }
+
+  // Bare repo op een share. Zonder `-b main` zet `git init --bare` HEAD op
+  // master; een kloon komt dan op een lege master uit (gemeten, zie onderzoek
+  // netwerkschijven §4). Het pad zit in het commando zodat cwd de bestaande
+  // share mag blijven — de bare-map hoeft nog niet te bestaan.
+  function bareInitCommando(barePad) {
+    if (!barePad) return null
+    return `git init --bare -b main ${cmdPad(barePad)}`
+  }
+
+  function bareCloneCommando(barePad, lokaleMap) {
+    if (!barePad || !lokaleMap) return null
+    return `git clone ${cmdPad(barePad)} ${cmdPad(lokaleMap)}`
+  }
+
+  // Pad + mapnaam samenvoegen, met de scheidingstekens van het basispad.
+  function joinPad(basis, naam) {
+    const b = String(basis || '').replace(/[\\/]+$/, '')
+    if (!b) return String(naam || '')
+    const sep = b.includes('/') && !b.includes('\\') ? '/' : '\\'
+    return b + sep + String(naam || '')
   }
 
   // ── Schrijven (ronde 2) ─────────────────────────────────────────────────────
@@ -1684,6 +1901,7 @@
     parseRemotes, parseBranch, parseStatusV2, maakStaat, zichtbareGitIds,
     zelfdeGitWeergave,
     koppelStap, koppelCommando, veiligeRepoNaam, normaliseerRepoUrl,
+    bareInitCommando, bareCloneCommando, joinPad, cmdPad,
     repoNaamUitUrl, cloneDoelPad, cloneOuderPad, cloneCommando,
     parseGhRepos, filterRepos, repoSleutel, zonderGekoppelde, gitSlotFout,
     KOPPELING_GEEN, KOPPELING_ONBEKEND, KOPPELING_OK, KOPPELING_STUK,
@@ -1711,6 +1929,8 @@
     geldigeBranchNaam, veiligeBranchNaam, checkoutCommando, nieuweBranchCommando,
     verwijderBranchCommando, verwijderRemoteBranchCommando, mergeCommando, wisselBlokkade,
     projectLocaties, locatieNaam,
+    isUncPad, uncWaarschuwing, cmdInMap, vensterInMap, uncWortel, isUncWortel, uncNaam,
+    schijfLetterVan, isNetwerkPad,
     teVragenProjecten, teStashenProjecten, afsluitSamenvatting, afsluitInstelling,
     AFSLUIT_UIT, AFSLUIT_WAARSCHUWEN, AFSLUIT_STASHEN, AFSLUIT_KEUZES,
     KOPPEL_INIT, KOPPEL_COMMIT, KOPPEL_GH, KOPPEL_URL, KOPPEL_AL_GEDAAN,

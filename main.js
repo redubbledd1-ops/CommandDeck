@@ -360,6 +360,10 @@ const DEFAULT_SETTINGS = {
   // Welke takken van de boom onder "deze pc" open staan. De schijven zelf
   // staan altijd in beeld; hier bewaren we alleen opengeklapte mappen.
   boomOpen: [],
+  // Netwerkmappen (\\server\share) die naast de schijven in de boom horen.
+  // Die hebben geen schijfletter, dus de A-Z-ronde in fs:listDrives vindt ze
+  // nooit; ze moeten hier staan of ze bestaan niet voor de app.
+  netwerkWortels: [],
   // Gevonden editors die je hebt weggeklikt; daar vragen we niet meer naar
   editorsGeweigerd: [],
   editorsGezocht: false,
@@ -426,6 +430,7 @@ function loadSettings() {
         termSplits: { ...DEFAULT_SETTINGS.termSplits, ...(s.termSplits || {}) },
         verkennerPaden: { ...DEFAULT_SETTINGS.verkennerPaden, ...(s.verkennerPaden || {}) },
         editorsGeweigerd: Array.isArray(s.editorsGeweigerd) ? s.editorsGeweigerd : [],
+        netwerkWortels: Array.isArray(s.netwerkWortels) ? s.netwerkWortels : [],
         dictThemas: Array.isArray(s.dictThemas) ? s.dictThemas : [],
         ai: { ...DEFAULT_SETTINGS.ai, ...(s.ai || {}),
               modellen:  { ...(s.ai && s.ai.modellen  || {}) },
@@ -1098,9 +1103,17 @@ ipcMain.handle('fs:resolveDir', (_, { base, target } = {}) => {
 })
 
 // ── Bladeren door mappen ──────────────────────────────────────────────────────
-ipcMain.handle('fs:listDir', (_, dirPath) => {
+ipcMain.handle('fs:listDir', async (_, dirPath) => {
   try {
     if (!dirPath) return { ok: false, reason: 'geen pad' }
+    // Netwerkpad: eerst asynchroon aankloppen bij de share. Zonder dit zet de
+    // fs.existsSync hieronder het hele venster 28 seconden vast zodra de server
+    // niet antwoordt — zie de uitleg bij netwerkBereikbaar. Op een share die het
+    // gewoon doet kost dit niets: het antwoord staat na de eerste keer vast.
+    const wortel = netwerkWortelVan(dirPath)
+    if (wortel && !(await netwerkBereikbaar(wortel))) {
+      return { ok: false, reason: 'netwerkmap niet bereikbaar' }
+    }
     if (!fs.existsSync(dirPath)) return { ok: false, reason: 'bestaat niet' }
     if (!fs.statSync(dirPath).isDirectory()) return { ok: false, reason: 'geen map' }
 
@@ -2102,11 +2115,114 @@ ipcMain.handle('arch:open', async (_, p) => {
   }
 })
 
+// ── Netwerkmappen (UNC) ──────────────────────────────────────────────────────
+// Een UNC-pad naar een server die niet antwoordt laat fs.existsSync 28 seconden
+// hangen. Gemeten, geen schatting. Dit draait in het hoofdproces, dus dat is
+// geen trage lijst maar een bevroren venster.
+//
+// En het is erger dan het lijkt. Zo'n vastzittende lookup houdt een thread uit
+// de libuv-pool bezet, en die pool is standaard vier threads groot. Met een
+// handvol dode paden erin duurde een doodgewone stat op C:\Windows 29 seconden.
+// Eén onbereikbare netwerkmap legt dus álle bestands-IO van de app stil, ook
+// het lezen van je eigen schijf.
+//
+// Vandaar drie regels, en alle drie zijn ze nodig:
+//   - nooit synchroon aankloppen (async houdt de event loop vrij)
+//   - nooit meer dan één probe tegelijk (anders is de threadpool zo op)
+//   - het antwoord onthouden (anders klop je bij elke tekenronde opnieuw aan)
+//
+// Een bereikbare share antwoordt in ~6 ms, dus wie gewoon verbinding heeft merkt
+// hier niets van.
+const NETWERK_TIMEOUT_MS = 2000
+const NETWERK_GOED_TTL   = 5 * 60 * 1000
+const NETWERK_STUK_TTL   = 60 * 1000
+const netwerkCache = new Map()        // wortel (kleine letters) -> { ok, tijd }
+let netwerkRij = Promise.resolve()    // probes achter elkaar, niet naast elkaar
+
+const netwerkSleutel = (pad) => String(pad || '').replace(/[\\/]+$/, '').toLowerCase()
+
+function netwerkUitCache(pad) {
+  const sleutel = netwerkSleutel(pad)
+  const hit = netwerkCache.get(sleutel)
+  if (!hit) return null
+  if (Date.now() - hit.tijd > (hit.ok ? NETWERK_GOED_TTL : NETWERK_STUK_TTL)) {
+    netwerkCache.delete(sleutel)
+    return null
+  }
+  return hit
+}
+
+// Geeft een belofte terug, nooit een blokkade. De tijdslimiet is er om snel
+// antwoord te kunnen geven; de thread die eronder vastzit laten we los, die komt
+// vanzelf vrij als Windows het opgeeft. Daarom blijft het antwoord ook staan:
+// meteen opnieuw proberen zou precies die thread weer bezet houden.
+function netwerkBereikbaar(pad) {
+  const bekend = netwerkUitCache(pad)
+  if (bekend) return Promise.resolve(bekend.ok)
+  netwerkRij = netwerkRij.then(async () => {
+    // Terwijl we in de rij stonden kan een ander dit al hebben uitgezocht.
+    const nogSteeds = netwerkUitCache(pad)
+    if (nogSteeds) return nogSteeds.ok
+    let tijdje
+    const ok = await Promise.race([
+      fs.promises.stat(pad).then(() => true, () => false),
+      new Promise(r => { tijdje = setTimeout(() => r(false), NETWERK_TIMEOUT_MS) }),
+    ])
+    clearTimeout(tijdje)
+    netwerkCache.set(netwerkSleutel(pad), { ok, tijd: Date.now() })
+    return ok
+  }).catch(() => false)
+  return netwerkRij
+}
+
+// De wortel waar dit pad bij hoort, zodat er één antwoord per share in de cache
+// staat en niet één per submap.
+function netwerkWortelVan(pad) {
+  return GitTools.uncWortel(pad) || ''
+}
+
+function netwerkWortels() {
+  const lijst = loadSettings().netwerkWortels
+  return (Array.isArray(lijst) ? lijst : [])
+    .map(p => String(p || '').trim())
+    .filter(p => GitTools.isUncPad(p))
+}
+
 // Beschikbare schijven, met de vrije ruimte erbij voor het overzicht "Deze pc"
-ipcMain.handle('fs:listDrives', () => {
+// Welke letters een netwerkschijf zijn (P:, Z:, …). Eén PowerShell-ronde voor
+// alles tegelijk — GetDriveType per letter zou N ronden kosten. Cache kort, zodat
+// listDrives niet elke boom-refresh PowerShell start, maar een net use tussendoor
+// wél binnen een minuut zichtbaar wordt.
+let netwerkLetterCache = { letters: null, tot: 0 }
+
+function netwerkSchijfLetters() {
+  if (process.platform !== 'win32') return new Set()
+  if (netwerkLetterCache.letters && Date.now() < netwerkLetterCache.tot) {
+    return netwerkLetterCache.letters
+  }
+  const letters = new Set()
+  try {
+    // DriveType Network = gekoppelde share. Lokaal (Fixed/Removable/CDRom) blijft
+    // erbuiten; UNC-wortels gaan apart mee via netwerkWortels().
+    const uit = execFileSync('powershell.exe', [
+      '-NoProfile', '-Command',
+      "[IO.DriveInfo]::GetDrives() | Where-Object { $_.DriveType -eq 'Network' } | ForEach-Object { $_.Name.Substring(0,1) }",
+    ], { encoding: 'utf8', timeout: 5000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] })
+    for (const regel of String(uit).split(/\r?\n/)) {
+      const l = regel.trim().toUpperCase()
+      if (/^[A-Z]$/.test(l)) letters.add(l)
+    }
+  } catch {}
+  netwerkLetterCache = { letters, tot: Date.now() + 60_000 }
+  return letters
+}
+
+ipcMain.handle('fs:listDrives', async () => {
   const uit = []
+  const netwerkLetters = netwerkSchijfLetters()
   for (let i = 65; i <= 90; i++) {
-    const d = String.fromCharCode(i) + ':\\'
+    const letter = String.fromCharCode(i)
+    const d = letter + ':\\'
     try {
       if (!fs.existsSync(d)) continue
       let free = 0, total = 0
@@ -2116,10 +2232,68 @@ ipcMain.handle('fs:listDrives', () => {
         free  = st.bsize * st.bfree
         total = st.bsize * st.blocks
       } catch {}
-      uit.push({ path: d, free, total })
+      uit.push({
+        path: d, free, total,
+        // cmd heeft op een letter geen UNC-probleem, maar git-begeleiding wél:
+        // werkkopie op SMB is afgeraden. Vandaar deze markering.
+        netwerk: netwerkLetters.has(letter),
+      })
     } catch {}
   }
+
+  // De netwerkmappen erachteraan. Hier wordt bewust niet op een probe gewacht:
+  // de boom moet meteen kunnen tekenen, ook als een server er niet is. Wat we al
+  // weten gaat mee, de rest wordt op de achtergrond opgezocht en staat er de
+  // volgende ronde bij. `bereikbaar: null` betekent dus "weten we nog niet",
+  // niet "stuk".
+  for (const pad of netwerkWortels()) {
+    if (uit.some(d => netwerkSleutel(d.path) === netwerkSleutel(pad))) continue
+    const bekend = netwerkUitCache(pad)
+    if (!bekend) netwerkBereikbaar(pad).catch(() => {})
+    uit.push({
+      path: pad,
+      // Vrije ruimte opvragen kan alleen synchroon, en dat is precies wat hier
+      // niet mag. De boom gebruikt het niet; de verkenner toont dan niets.
+      free: 0, total: 0,
+      netwerk: true,
+      bereikbaar: bekend ? bekend.ok : null,
+    })
+  }
   return uit
+})
+
+ipcMain.handle('fs:netwerkWortels', () => netwerkWortels().map(pad => ({
+  pad,
+  naam: GitTools.uncNaam(pad),
+  bereikbaar: (netwerkUitCache(pad) || {}).ok ?? null,
+})))
+
+ipcMain.handle('fs:netwerkWortelToevoegen', async (_, ruw) => {
+  const pad = String(ruw || '').trim().replace(/[\\/]+$/, '')
+  if (!GitTools.isUncPad(pad)) return { ok: false, reden: 'geen-netwerkpad' }
+  const wortel = GitTools.uncWortel(pad) || pad
+  const s = loadSettings()
+  const lijst = Array.isArray(s.netwerkWortels) ? s.netwerkWortels : []
+  if (lijst.some(p => netwerkSleutel(p) === netwerkSleutel(wortel))) {
+    return { ok: false, reden: 'staat-er-al', pad: wortel }
+  }
+  // Wél even kijken of het bestaat, maar met dezelfde tijdslimiet: iemand die
+  // een typefout maakt hoort dat te horen, en niemand hoort er 28 seconden op
+  // te wachten.
+  const bereikbaar = await netwerkBereikbaar(wortel)
+  if (!bereikbaar) return { ok: false, reden: 'niet-bereikbaar', pad: wortel }
+  saveSettings({ ...s, netwerkWortels: [...lijst, wortel] })
+  return { ok: true, pad: wortel, naam: GitTools.uncNaam(wortel) }
+})
+
+ipcMain.handle('fs:netwerkWortelWeg', (_, ruw) => {
+  const s = loadSettings()
+  const lijst = Array.isArray(s.netwerkWortels) ? s.netwerkWortels : []
+  const over = lijst.filter(p => netwerkSleutel(p) !== netwerkSleutel(ruw))
+  if (over.length === lijst.length) return { ok: false, reden: 'onbekend' }
+  saveSettings({ ...s, netwerkWortels: over })
+  netwerkCache.delete(netwerkSleutel(ruw))
+  return { ok: true }
 })
 
 // ── Zoeken in submappen ───────────────────────────────────────────────────────
@@ -2588,7 +2762,18 @@ ipcMain.handle('shell:openCmd', (_, arg) => {
   // Mag een pad zijn, of { cwd, cmd } als er meteen iets moet draaien.
   const cwd = typeof arg === 'string' ? arg : arg?.cwd
   const cmd = typeof arg === 'string' ? '' : String(arg?.cmd || '').trim()
-  if (!cwd || !fs.existsSync(cwd)) return false
+  if (!cwd || !fs.existsSync(cwd)) return { ok: false, viaLetter: false }
+
+  // Op een netwerkpad kan `start "" /D <map> cmd.exe` niet: het venster opent
+  // dan in C:\Windows zonder dat iemand het merkt. GitTools.vensterInMap maakt
+  // er een pushd-regel van; op een gewoon pad geeft het null en blijft alles
+  // zoals het was. viaLetter gaat mee terug zodat de renderer een toast kan
+  // tonen — een los venster heeft geen uitvoerpaneel voor die melding.
+  const viaLetter = GitTools.vensterInMap(cwd, cmd, true, process.platform === 'win32')
+  if (viaLetter) {
+    spawn(viaLetter, [], { detached: true, windowsHide: false, shell: true }).unref()
+    return { ok: true, viaLetter: true }
+  }
 
   if (cmd) {
     // /k houdt het venster open als het commando klaar is, zodat je de uitvoer
@@ -2596,7 +2781,7 @@ ipcMain.handle('shell:openCmd', (_, arg) => {
     spawn('cmd.exe', ['/c', 'start', '""', '/D', cwd, 'cmd.exe', '/k', cmd], {
       detached: true, windowsHide: false, shell: false,
     }).unref()
-    return true
+    return { ok: true, viaLetter: false }
   }
   // Direct `spawn('cmd.exe', ...)` doesn't reliably pop a new visible window when
   // the Electron process has no console of its own to hand off (packaged .exe,
@@ -2606,7 +2791,7 @@ ipcMain.handle('shell:openCmd', (_, arg) => {
   spawn('cmd.exe', ['/c', 'start', '""', '/D', cwd, 'cmd.exe'], {
     detached: true, windowsHide: false, shell: false,
   }).unref()
-  return true
+  return { ok: true, viaLetter: false }
 })
 
 ipcMain.handle('shell:openPs', (_, arg) => {
@@ -2614,6 +2799,10 @@ ipcMain.handle('shell:openPs', (_, arg) => {
   const cmd = typeof arg === 'string' ? '' : String(arg?.cmd || '').trim()
   if (!cwd || !fs.existsSync(cwd)) return false
   const start = psWindowLaunch(loadSettings().ps, cmd)
+  // Geen pushd-omweg hier, en dat is gemeten en niet aangenomen: `start "" /D
+  // <unc> powershell.exe` landde netjes op \\192.168.100.200\Projecten. `/D`
+  // zelf kan een netwerkpad prima aan; het is cmd.exe als dóélprogramma dat het
+  // weigert. Zie vensterInMap in git-tools.js.
   spawn('cmd.exe', ['/c', 'start', '""', '/D', cwd, start.exe, ...start.args], {
     detached: true, windowsHide: false, shell: false,
   }).unref()
@@ -2708,11 +2897,22 @@ ipcMain.handle('bat:test', (_, { dir, name, content } = {}) => {
     const file = path.join(target, `~proef-${base}.bat`)
     fs.writeFileSync(file, String(content || '').replace(/\r?\n/g, '\r\n'), 'utf8')
 
-    spawn('cmd.exe', ['/c', 'start', '""', '/D', target, file], {
-      detached: true, windowsHide: false, shell: false,
-    }).unref()
+    // Een .bat wordt door cmd.exe gedraaid, dus dit loopt tegen dezelfde muur
+    // aan als de cmd-knop: op een netwerkpad draaide de proef in C:\Windows.
+    // `blijfOpen: false`, want een proefdraai hoort net als nu vanzelf te
+    // sluiten als het script klaar is — met `pause` erin blijft hij staan.
+    const viaLetter = GitTools.vensterInMap(target, `"${file}"`, false, process.platform === 'win32')
+    if (viaLetter) {
+      spawn(viaLetter, [], { detached: true, windowsHide: false, shell: true }).unref()
+    } else {
+      spawn('cmd.exe', ['/c', 'start', '""', '/D', target, file], {
+        detached: true, windowsHide: false, shell: false,
+      }).unref()
+    }
 
-    return { ok: true, path: file, dir: target }
+    // viaLetter mee zodat de renderer een toast kan tonen — zelfde reden als
+    // bij shell:openCmd: een los consolevenster heeft geen uitvoerpaneel.
+    return { ok: true, path: file, dir: target, viaLetter: !!viaLetter }
   } catch (e) { return { ok: false, reason: e.message } }
 })
 
@@ -3082,7 +3282,7 @@ function sendOutput(projectId, type, text) {
   if (!win.isDestroyed()) win.webContents.send('cmd:output', { projectId, type, text })
 }
 
-function validateCwd(projectId, cwd) {
+function validateCwd(projectId, cwd, shell) {
   if (!cwd) {
     sendOutput(projectId, 'err', 'Geen projectmap ingesteld. Voeg een locatie toe via projectinstellingen.')
     sendOutput(projectId, 'sep', '')
@@ -3094,10 +3294,15 @@ function validateCwd(projectId, cwd) {
     sendOutput(projectId, 'sep', '')
     return false
   }
+  // Een netwerkpad wordt hier niet meer tegengehouden: GitTools.cmdInMap hangt
+  // er een tijdelijke schijfletter aan zodat cmd er wél in kan werken.
   return true
 }
 
 function classifyLine(line) {
+  // Uitwijken naar C:\Windows is geen mededeling maar een fout: vanaf dat moment
+  // klopt de map niet meer waar het commando in draait.
+  if (GitTools.uncWaarschuwing(line)) return 'err'
   return /^\s*(error:|exception|failed)/i.test(line) ? 'err' : 'info'
 }
 
@@ -3139,7 +3344,7 @@ function checkFlutterOpPad() {
 
 function runCommandOnce({ projectId, cmd, cwd, echoCmd = true, shell } = {}) {
   return new Promise(async (resolve) => {
-    if (!validateCwd(projectId, cwd)) {
+    if (!validateCwd(projectId, cwd, shell)) {
       resolve({ code: 1, output: '' })
       return
     }
@@ -3155,19 +3360,35 @@ function runCommandOnce({ projectId, cmd, cwd, echoCmd = true, shell } = {}) {
 
     const chunks = []
     const capture = (line) => { chunks.push(line) }
+    // Zet cmd zichzelf onderweg alsnog in een andere map, dan mag de uitkomst
+    // niet als geslaagd langskomen. Zie de uitleg bij isUncPad in git-tools.js.
+    let uitgeweken = false
 
     if (echoCmd) sendOutput(projectId, 'cmd', `> ${cmd}`)
 
     const isPs = shell === 'powershell'
     const psStart = isPs ? psCommandLaunch(loadSettings().ps, cmd) : null
+    // PowerShell kan gewoon in een netwerkmap starten; cmd niet, en die krijgt er
+    // een tijdelijke schijfletter bij. Op een gewoon pad verandert er niets.
+    const start = isPs ? null : GitTools.cmdInMap(cmd, cwd, process.platform === 'win32')
+    if (start && start.viaLetter) {
+      sendOutput(projectId, 'info', 'Netwerkpad: cmd werkt hier via een tijdelijke schijfletter. Paden in de uitvoer tonen die letter, en %CD% of %VAR% wijzen niet naar deze map.')
+    }
     const proc = isPs
       ? spawn(psStart.exe, psStart.args, {
           cwd, env: childEnv(), windowsHide: true, shell: false,
         })
-      : spawn(cmd, [], { cwd, env: childEnv(), windowsHide: true, shell: true })
+      : spawn(start.cmd, [], {
+          // cwd null = starten waar het hoofdproces staat; pushd springt meteen
+          // daarna naar de netwerkmap, en zonder dat springen doet het commando
+          // niets (zie het `&&` in cmdInMap).
+          cwd: start.cwd === null ? undefined : start.cwd,
+          env: childEnv(), windowsHide: true, shell: true,
+        })
     activeProc = proc
 
     const onLine = (type, line) => {
+      if (GitTools.uncWaarschuwing(line)) uitgeweken = true
       capture(line)
       sendOutput(projectId, type, line)
     }
@@ -3180,7 +3401,10 @@ function runCommandOnce({ projectId, cmd, cwd, echoCmd = true, shell } = {}) {
     proc.on('close', code => {
       if (activeProc === proc) activeProc = null
       const output = chunks.join('\n')
-      const ok = code === 0
+      // Exit 0 is hier niet genoeg: cmd geeft die ook af nadat hij zelf naar
+      // C:\Windows is uitgeweken. Dan is er wel iets gedraaid, maar niet waar
+      // het hoorde.
+      const ok = code === 0 && !uitgeweken
       // Fallback: PATH-check was ok, maar het proces klaagt alsnog over flutter
       if (!ok && isFlutterCommand(cmd) && looksLikeFlutterMissing(output)) {
         flutterOpPad = false
@@ -3189,9 +3413,16 @@ function runCommandOnce({ projectId, cmd, cwd, echoCmd = true, shell } = {}) {
         resolve({ code: code ?? 1, output, flutterMissing: true })
         return
       }
-      sendOutput(projectId, ok ? 'ok' : 'err', ok ? '✓ klaar' : `✗ afgebroken (exit ${code})`)
+      if (uitgeweken) {
+        sendOutput(projectId, 'err', 'Dit commando draaide niet in de projectmap: cmd is uitgeweken naar C:\\Windows omdat de map een netwerkpad is.')
+        sendOutput(projectId, 'err', 'Koppel er een schijfletter aan en zet de projectlocatie op die letter.')
+      }
+      sendOutput(projectId, ok ? 'ok' : 'err',
+        ok           ? '✓ klaar'
+        : uitgeweken ? '✗ niet in de projectmap gedraaid'
+        :              `✗ afgebroken (exit ${code})`)
       sendOutput(projectId, 'sep', '')
-      resolve({ code: code ?? 1, output })
+      resolve({ code: uitgeweken && code === 0 ? 1 : (code ?? 1), output, uitgeweken })
     })
 
     proc.on('error', err => {
@@ -3443,9 +3674,16 @@ ipcMain.handle('pty:start', (_, { id, cmd, cwd, cols, rows, shell } = {}) => {
   const shellPad = isWin
     ? (isPs ? psStart.exe : (process.env.COMSPEC || 'cmd.exe'))
     : (process.env.SHELL || '/bin/bash')
+  // Zelfde verhaal als bij runCommandOnce: cmd komt een netwerkmap alleen
+  // binnen via een tijdelijke schijfletter, powershell heeft dat niet nodig.
+  const start = isPs ? null : GitTools.cmdInMap(cmd, cwd, isWin)
   const args = isWin
-    ? (isPs ? psStart.args : ['/c', cmd])
+    ? (isPs ? psStart.args : ['/c', start.cmd])
     : ['-lc', cmd]
+  // node-pty wil een bestaande map. Welke maakt niet uit zodra pushd het
+  // overneemt, maar het UNC-pad zelf mag het niet zijn — daar struikelt cmd op
+  // vóórdat hij aan het commando toekomt.
+  const startMap = (start && start.viaLetter) ? os.homedir() : cwd
 
   let proc
   try {
@@ -3453,7 +3691,7 @@ ipcMain.handle('pty:start', (_, { id, cmd, cwd, cols, rows, shell } = {}) => {
       name: 'xterm-256color',
       cols: Math.max(20, Number(cols) || 100),
       rows: Math.max(5, Number(rows) || 30),
-      cwd,
+      cwd: startMap,
       env,
     })
   } catch (e) {

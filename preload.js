@@ -31,6 +31,9 @@ contextBridge.exposeInMainWorld('api', {
   resolveDir:    (o)     => ipcRenderer.invoke('fs:resolveDir', o),
   listDir:       (p)     => ipcRenderer.invoke('fs:listDir', p),
   listDrives:    ()      => ipcRenderer.invoke('fs:listDrives'),
+  netwerkWortels:      ()  => ipcRenderer.invoke('fs:netwerkWortels'),
+  netwerkWortelToevoegen: (p) => ipcRenderer.invoke('fs:netwerkWortelToevoegen', p),
+  netwerkWortelWeg:    (p) => ipcRenderer.invoke('fs:netwerkWortelWeg', p),
   zoek:          (o)     => ipcRenderer.invoke('fs:zoek', o),
   stopZoeken:    ()      => ipcRenderer.invoke('fs:stopZoeken'),
   onZoekTreffers: (cb) => {

@@ -302,6 +302,7 @@ const call = (n, a) => handlers[n](null, a)
   // ── proefdraaien ───────────────────────────────────────────────────────────
   let r2 = await call('bat:test', { dir: WORK, name: 'mijn-script.bat', content: 'echo proef\necho tweede' })
   t('proefdraaien lukt', r2.ok === true)
+  t('viaLetter staat in het antwoord', r2.viaLetter === false)
   t('tijdelijk bestand staat in de doelmap', r2.path.startsWith(WORK) && /~proef-mijn-script\.bat$/.test(r2.path))
   t('tijdelijk bestand bestaat', fs.existsSync(r2.path))
   t('inhoud klopt en heeft Windows-regeleindes',

@@ -1430,6 +1430,7 @@ t('een gewone fout is geen slot', G.gitSlotFout('error: pathspec did not match')
 t('en niets is ook geen slot', G.gitSlotFout('') === null && G.gitSlotFout(null) === null)
 
 for (const sleutel of ['git.slot.titel', 'git.slot.rustigTekst', 'git.slot.drukTekst',
+                       'git.slot.netwerkTekst',
                        'git.slot.wegTekst', 'git.slot.eigenTekst', 'git.slot.ouderdomNet',
                        'git.slot.ouderdomMin', 'git.slot.draaien', 'git.slot.opnieuw',
                        'git.slot.weghalen', 'git.slot.weggehaald', 'git.slot.mislukt']) {
@@ -1451,6 +1452,11 @@ const rendererSlot = fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8')
 t('de renderer biedt het aan en probeert daarna opnieuw',
   /async function regelGitSlot\(/.test(rendererSlot)
   && /geenSlotHerstel: true/.test(rendererSlot))
+t('op een netwerkpad eerst een stille wachtronde',
+  /padIsNetwerk\(pad\)/.test(rendererSlot)
+  && /setTimeout\(r, 5000\)/.test(rendererSlot))
+t('en houdt opnieuw primair tot twee minuten ouderdom',
+  /netwerkGeduld/.test(rendererSlot) && /120000/.test(rendererSlot))
 t('en probeert maar één keer opnieuw, geen kringetje',
   /if \(!opties\.geenSlotHerstel\)/.test(rendererSlot))
 
@@ -1963,6 +1969,324 @@ t('de knop heet Kopieer link', nl['accounts.gitKopieerLink'] === 'Kopieer link')
   // Dit is de plek waar het misging: de commit zelf.
   t('en vóór een commit met bouwrommel erin', /GitTools\.bouwrommel[\s\S]{0,900}regelGitignore/.test(ren))
   t('lange paden zijn met één knop aan te zetten', ren.includes('async function zetLangePaden'))
+}
+
+// ── netwerkpaden (UNC) ───────────────────────────────────────────────────────
+// cmd.exe weigert een UNC-pad als werkmap, wijkt uit naar C:\Windows en meldt
+// dan alsnog exit 0. Herkennen is dus geen luxe: zonder dit draait een commando
+// in de verkeerde map terwijl de app "klaar" toont.
+t('UNC: server met share',        G.isUncPad('\\\\server\\share') === true)
+t('UNC: met submap',              G.isUncPad('\\\\192.168.100.200\\Projecten\\app') === true)
+t('UNC: forward slashes tellen ook', G.isUncPad('//server/share') === true)
+t('UNC: alleen een servernaam is geen werkmap', G.isUncPad('\\\\server') === false)
+t('UNC: gewoon schijfpad is geen UNC', G.isUncPad('C:\\Windows') === false)
+t('UNC: gekoppelde letter is geen UNC — dat is juist de uitweg',
+  G.isUncPad('P:\\') === false && G.isUncPad('P:\\project\\app') === false)
+t('UNC: leeg of niets',           G.isUncPad('') === false && G.isUncPad(null) === false)
+t('UNC: apparaatnaam \\\\?\\C: telt niet mee', G.isUncPad('\\\\?\\C:\\Users') === false)
+t('UNC: maar \\\\?\\UNC\\server\\share wel',
+  G.isUncPad('\\\\?\\UNC\\server\\share') === true)
+
+t('de waarschuwing van cmd wordt herkend',
+  G.uncWaarschuwing('UNC paths are not supported.  Defaulting to Windows directory.') === true)
+t('ook de regel erboven',
+  G.uncWaarschuwing('CMD.EXE was started with the above path as the current directory.') === true)
+t('een gewone regel niet', G.uncWaarschuwing('alles ging goed') === false)
+
+// Het omhulsel dat cmd alsnog in een netwerkmap laat werken.
+{
+  const B = String.fromCharCode(92)
+  const share = B + B + 'server' + B + 'share'
+  const omhuld = G.cmdInMap('git status', share)
+  t('UNC krijgt een pushd ervoor', omhuld.cmd === 'pushd "' + share + '" && git status')
+  t('en meldt dat er een letter aan hangt', omhuld.viaLetter === true)
+  // cwd moet weg: geef je het UNC-pad alsnog mee, dan wijkt cmd uit vóórdat
+  // pushd ooit draait en is het omhulsel zinloos.
+  t('de werkmap gaat niet meer als cwd mee', omhuld.cwd === null)
+
+  // `&&` en niet `&`: lukt pushd niet, dan hoort het commando niet alsnog in een
+  // andere map te draaien.
+  t('pushd en commando hangen met && aan elkaar', omhuld.cmd.includes('" && '))
+  // Geen popd: die overschrijft de exitcode van het commando met die van popd,
+  // en dan meldt een mislukking zich als geslaagd. De tijdelijke letter valt
+  // vanzelf weg als het cmd-proces eindigt.
+  t('er staat geen popd achter — die zou de exitcode opeten',
+    !/popd/.test(omhuld.cmd))
+
+  const gewoon = G.cmdInMap('git status', 'C:' + B + 'werk')
+  t('gewoon schijfpad blijft onaangeraakt',
+    gewoon.cmd === 'git status' && gewoon.cwd === 'C:' + B + 'werk' && gewoon.viaLetter === false)
+  const letter = G.cmdInMap('git status', 'P:' + B + 'werk')
+  t('gekoppelde letter blijft ook onaangeraakt',
+    letter.cmd === 'git status' && letter.viaLetter === false)
+  t('buiten Windows gebeurt er niets',
+    G.cmdInMap('ls', '//server/share', false).viaLetter === false)
+  // Een " kan niet in een Windows-pad voorkomen; weghalen kan dus geen geldig
+  // pad slopen, en het houdt de commandoregel heel.
+  t('aanhalingstekens in het pad worden weggehaald',
+    !G.cmdInMap('x', share + '"rare').cmd.replace('pushd "', '').replace('" && x', '').includes('"'))
+
+  const mainUnc = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8')
+  t('runCommandOnce gebruikt het omhulsel voor cmd',
+    /const start = isPs \? null : GitTools\.cmdInMap\(cmd, cwd, process\.platform === 'win32'\)/.test(mainUnc))
+  t('en spawnt het omhulde commando', /spawn\(start\.cmd, \[\]/.test(mainUnc))
+  t('powershell gaat nog steeds rechtstreeks, met eigen cwd',
+    /spawn\(psStart\.exe, psStart\.args, \{\s*\n\s*cwd,/.test(mainUnc))
+  t('de gebruiker hoort dat er een tijdelijke letter aan hangt',
+    /start\.viaLetter[\s\S]{0,200}tijdelijke schijfletter/.test(mainUnc))
+  t('inclusief de waarschuwing over %CD%', /%CD% of %VAR%/.test(mainUnc))
+
+  const ptyBlok = (mainUnc.match(/ipcMain\.handle\('pty:start'[\s\S]*?\n\}\)/) || [''])[0]
+  t('de pty gebruikt hetzelfde omhulsel',
+    /GitTools\.cmdInMap\(cmd, cwd, isWin\)/.test(ptyBlok))
+  t('en start niet in het UNC-pad zelf',
+    /const startMap = \(start && start\.viaLetter\) \? os\.homedir\(\) : cwd/.test(ptyBlok))
+
+  // Vangnet uit fase 1 blijft staan: mocht een commando zichzelf alsnog laten
+  // verhuizen, dan telt de uitkomst niet als geslaagd.
+  t('classifyLine ziet het uitwijken nog steeds als fout',
+    /function classifyLine[\s\S]{0,220}GitTools\.uncWaarschuwing/.test(mainUnc))
+  t('exit 0 telt niet als geslaagd na uitwijken',
+    /const ok = code === 0 && !uitgeweken/.test(mainUnc))
+  t('en er komt een uitleg in beeld', /niet in de projectmap gedraaid/.test(mainUnc))
+  t('validateCwd blokkeert netwerkpaden niet meer',
+    !/isUncPad/.test((mainUnc.match(/function validateCwd\([\s\S]*?\n\}/) || [''])[0]))
+
+  // Zonder commando hoort er geen `&&` in de lucht te blijven hangen; dat geval
+  // bestaat bij de knop die een leeg consolevenster opent.
+  const leeg = G.cmdInMap('', share)
+  t('zonder commando alleen de sprong', leeg.cmd === 'pushd "' + share + '"')
+  t('en geen losse && aan het eind', !/&&\s*$/.test(leeg.cmd))
+  t('null telt als geen commando', G.cmdInMap(null, share).cmd === 'pushd "' + share + '"')
+}
+
+// ── losse consolevensters op een netwerkpad ──────────────────────────────────
+// De knoppen die een eigen venster openen gaan via `start "" /D <map> …`. Met
+// cmd.exe (of een .bat) als doelprogramma heeft dat dezelfde beperking als cmd
+// zelf, maar dan onzichtbaar: gemeten op \\192.168.100.200\Projecten opende het
+// venster in C:\Windows, en main.js kijkt daar nooit naar — het doet `.unref()`
+// en meldt `true`.
+{
+  const B = String.fromCharCode(92)
+  const share = B + B + 'server' + B + 'share'
+
+  const metCmd = G.vensterInMap(share, 'git status', true)
+  t('venster op een UNC-pad gaat via pushd',
+    metCmd === 'start "" cmd.exe /k "pushd "' + share + '" && git status"')
+  // Het extra paar aanhalingstekens is geen slordigheid: het houdt de `&&`
+  // binnen de aanhalingstekens, zodat de cmd van `start` hem niet als
+  // scheidingsteken pakt en het commando buiten het venster om draait.
+  t('de hele pushd-regel staat tussen aanhalingstekens',
+    /\/k "pushd .*"$/.test(metCmd))
+  t('blijfOpen true wordt /k', metCmd.includes(' /k '))
+  t('blijfOpen false wordt /c',
+    G.vensterInMap(share, 'git status', false).includes(' /c '))
+
+  // Ook hier geen popd, maar niet om dezelfde reden als bij cmdInMap: daar eet
+  // popd de exitcode op, hier zou hij de gebruiker meteen weer uit de map
+  // gooien terwijl het venster nog openstaat en hij zit te typen.
+  t('geen popd achter een venster dat blijft openstaan', !/popd/.test(metCmd))
+  // De titel moet leeg blijven: een titel met spaties wordt door de
+  // argument-ontsnapping van spawn stukgemaakt en `start` draait er dan een
+  // stuk van als programmanaam.
+  t('de titel van start blijft leeg', metCmd.startsWith('start "" '))
+
+  const leegVenster = G.vensterInMap(share, '', true)
+  t('een leeg venster springt alleen naar de map',
+    leegVenster === 'start "" cmd.exe /k "pushd "' + share + '""')
+  t('en heeft geen losse && in zich', !leegVenster.includes('&&'))
+
+  t('een gewoon pad verandert niet — dan blijft /D staan',
+    G.vensterInMap('C:' + B + 'werk', 'git status', true) === null)
+  t('een gekoppelde letter ook niet',
+    G.vensterInMap('P:' + B + 'werk', '', true) === null)
+  t('buiten Windows gebeurt er niets',
+    G.vensterInMap('//server/share', 'ls', true, false) === null)
+  t('aanhalingstekens in het pad worden weggehaald',
+    G.vensterInMap(share + '"rare', '', true) ===
+      'start "" cmd.exe /k "pushd "' + share + 'rare""')
+
+  const mainVenster = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8')
+  const openCmdBlok = (mainVenster.match(/ipcMain\.handle\('shell:openCmd'[\s\S]*?\n\}\)/) || [''])[0]
+  const openPsBlok = (mainVenster.match(/ipcMain\.handle\('shell:openPs'[\s\S]*?\n\}\)/) || [''])[0]
+  const batTestBlok = (mainVenster.match(/ipcMain\.handle\('bat:test'[\s\S]*?\n\}\)/) || [''])[0]
+
+  t('de cmd-knop vraagt het omhulsel op',
+    /GitTools\.vensterInMap\(cwd, cmd, true, process\.platform === 'win32'\)/.test(openCmdBlok))
+  // shell: true en niet een argumentenlijst: node ontsnapt een " in een argument
+  // als \", en cmd.exe kent die schrijfwijze niet. Gemeten gaf dat "The
+  // specified path is invalid." en helemaal geen venster.
+  t('en spawnt die regel via de shell',
+    /spawn\(viaLetter, \[\], \{ detached: true, windowsHide: false, shell: true \}\)/.test(openCmdBlok))
+  t('de gewone weg met /D staat er nog voor gewone paden',
+    /'start', '""', '\/D', cwd, 'cmd\.exe', '\/k', cmd/.test(openCmdBlok) &&
+    /'start', '""', '\/D', cwd, 'cmd\.exe'\]/.test(openCmdBlok))
+
+  // Gemeten: `start "" /D <unc> powershell.exe` landt wél in de share. /D kan
+  // een netwerkpad prima aan; het is cmd.exe als doelprogramma dat het weigert.
+  t('de powershell-knop blijft ongemoeid', !/GitTools\.vensterInMap\(/.test(openPsBlok))
+  t('en houdt zijn eigen /D', /'start', '""', '\/D', cwd, start\.exe/.test(openPsBlok))
+
+  // Een .bat wordt door cmd.exe gedraaid, dus de proefdraai loopt tegen dezelfde
+  // muur aan. false: het venster hoort net als nu vanzelf te sluiten.
+  t('de proefdraai gaat ook via het omhulsel',
+    /GitTools\.vensterInMap\(target, `"\$\{file\}"`, false, process\.platform === 'win32'\)/.test(batTestBlok))
+  t('en houdt de gewone /D-weg als terugval',
+    /'start', '""', '\/D', target, file/.test(batTestBlok))
+
+  t('nergens een popd achter een vensterknop',
+    !/popd/.test(openCmdBlok + openPsBlok + batTestBlok))
+
+  // Los venster heeft geen uitvoerpaneel: viaLetter gaat mee terug zodat de
+  // renderer een toast kan tonen (zelfde tekst als bij runCommandOnce).
+  t('openCmd geeft viaLetter terug bij het omhulsel',
+    /return \{ ok: true, viaLetter: true \}/.test(openCmdBlok))
+  t('openCmd geeft viaLetter false op een gewoon pad',
+    /return \{ ok: true, viaLetter: false \}/.test(openCmdBlok))
+  t('openCmd faalt als object, niet als false',
+    /return \{ ok: false, viaLetter: false \}/.test(openCmdBlok))
+  t('bat:test vermeldt viaLetter in het antwoord',
+    /viaLetter:\s*!!viaLetter/.test(batTestBlok))
+}
+
+{
+  // De toast hoort in de renderer: een los venster heeft geen uitvoerpaneel.
+  const ren = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer.js'), 'utf8')
+  t('renderer heeft openCmdMetMelding', /async function openCmdMetMelding\(arg\)/.test(ren))
+  t('die toast bij viaLetter', /r\.viaLetter[\s\S]{0,80}cmd\.uncViaLetterToast/.test(ren))
+  // Alleen de helper mag openCmd aanroepen; knoppen gaan via openCmdMetMelding.
+  t('knoppen gaan via de helper, niet rechtstreeks',
+    (ren.match(/window\.api\.openCmd\(/g) || []).length === 1
+    && /openCmdMetMelding\(/.test(ren))
+}
+
+// ── netwerkmappen als wortel in de boom ──────────────────────────────────────
+{
+  const B = String.fromCharCode(92)
+  const share = B + B + 'server' + B + 'share'
+
+  t('wortel van een share is de share zelf', G.uncWortel(share) === share)
+  t('wortel van een submap is nog steeds de share',
+    G.uncWortel(share + B + 'map' + B + 'diep') === share)
+  t('een gewoon pad heeft geen netwerkwortel', G.uncWortel('C:' + B + 'werk') === '')
+  t('alleen een servernaam levert geen wortel', G.uncWortel(B + B + 'server') === '')
+  t('forward slashes houden hun eigen vorm', G.uncWortel('//server/share/map') === '//server/share')
+  t('de lange schrijfwijze houdt zijn voorvoegsel',
+    G.uncWortel(B + B + '?' + B + 'UNC' + B + 'server' + B + 'share' + B + 'x')
+      === B + B + '?' + B + 'UNC' + B + 'server' + B + 'share')
+
+  t('de share zelf is een wortel', G.isUncWortel(share) === true)
+  t('met een sluitende streep ook', G.isUncWortel(share + B) === true)
+  t('een submap is geen wortel', G.isUncWortel(share + B + 'map') === false)
+  t('een schijfpad is geen netwerkwortel', G.isUncWortel('C:' + B) === false)
+
+  t('de naam in beeld laat de strepen weg', G.uncNaam(share) === 'server' + B + 'share')
+  t('ook vanaf een submap', G.uncNaam(share + B + 'diep') === 'server' + B + 'share')
+
+  // ouderVan liep hier door naar \\server en daarna naar een losse \, allebei
+  // geen map die je kunt openen.
+  const ren = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer.js'), 'utf8')
+  const mainUnc = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8')
+  const ouderBlok = (ren.match(/function ouderVan\([\s\S]*?\n\}/) || [''])[0]
+  t('boven een share zit alleen nog Deze pc',
+    /GitTools\.isUncWortel\(kaal\)[\s\S]{0,40}return DEZE_PC/.test(ouderBlok))
+  t('de boomketen herkent een netwerkpad',
+    /const wortel = GitTools\.uncWortel\(schoon\)/.test(ren))
+  t('en de schijvenlijst toont server\\share in plaats van \\server\\share',
+    /function wortelNaam/.test(ren) && /naam: wortelNaam\(d\)/.test(ren))
+
+  // Dit is de kern van fase 3. Een UNC-pad naar een server die niet antwoordt
+  // laat fs.existsSync 28 seconden hangen, en dat gebeurt in het hoofdproces.
+  // Erger nog: zo'n vastzittende lookup bezet een thread uit de libuv-pool, en
+  // dan wacht een gewone stat op C:\Windows er 29 seconden achter. De volgorde
+  // in fs:listDir is daarom geen stijlkwestie.
+  const lijstBlok = (mainUnc.match(/ipcMain\.handle\('fs:listDir'[\s\S]*?\n\}\)/) || [''])[0]
+  t('fs:listDir is asynchroon geworden', /handle\('fs:listDir', async/.test(lijstBlok))
+  // Op de aanroep zoeken en niet op de naam: die staat er ook in het commentaar
+  // vlak erboven, en dan vergelijk je de volgorde met een stuk uitleg.
+  t('en klopt eerst aan bij de share',
+    lijstBlok.indexOf('await netwerkBereikbaar') > 0 &&
+    lijstBlok.indexOf('await netwerkBereikbaar') < lijstBlok.indexOf('if (!fs.existsSync(dirPath))'))
+  t('een onbereikbare share geeft een nette reden',
+    /netwerkmap niet bereikbaar/.test(lijstBlok))
+
+  t('de probe heeft een tijdslimiet', /NETWERK_TIMEOUT_MS/.test(mainUnc))
+  t('en onthoudt het antwoord', /netwerkCache/.test(mainUnc))
+  t('probes staan in de rij, niet naast elkaar',
+    /netwerkRij = netwerkRij\.then/.test(mainUnc))
+  t('een onbereikbare wortel wordt korter onthouden dan een werkende',
+    /NETWERK_STUK_TTL\s*=\s*60 \* 1000/.test(mainUnc) && /NETWERK_GOED_TTL\s*=\s*5 \* 60/.test(mainUnc))
+  // De schijvenlijst mag nooit op een probe wachten: dan tekent de boom pas als
+  // de laatste server geantwoord heeft.
+  const drivesBlok = (mainUnc.match(/ipcMain\.handle\('fs:listDrives'[\s\S]*?\n\}\)/) || [''])[0]
+  t('fs:listDrives wacht niet op een netwerkprobe',
+    /if \(!bekend\) netwerkBereikbaar\(pad\)\.catch/.test(drivesBlok))
+  t('en geeft "weten we nog niet" door als null',
+    /bereikbaar: bekend \? bekend\.ok : null/.test(drivesBlok))
+  // Gekoppelde letters (P:, Z:) markeren als netwerk — nodig voor git-begeleiding,
+  // niet voor cmd (die kan op een letter wél).
+  t('listDrives markeert netwerkschijfletters',
+    /netwerk: netwerkLetters\.has\(letter\)/.test(drivesBlok)
+    || /netwerk:\s*netwerkLetters\.has/.test(mainUnc))
+  t('netwerkwortels worden bewaard in de instellingen',
+    /netwerkWortels: \[\]/.test(mainUnc) &&
+    /netwerkWortels: Array\.isArray\(s\.netwerkWortels\)/.test(mainUnc))
+  t('toevoegen weigert iets dat geen netwerkpad is',
+    /reden: 'geen-netwerkpad'/.test(mainUnc))
+  t('en iets dat niet antwoordt', /reden: 'niet-bereikbaar'/.test(mainUnc))
+
+  const pre = require('fs').readFileSync(require('path').join(__dirname, '..', 'preload.js'), 'utf8')
+  t('de renderer kan erbij via preload',
+    /netwerkWortelToevoegen/.test(pre) && /netwerkWortelWeg/.test(pre))
+}
+
+// ── fase 4: git-begeleiding op netwerklocaties ───────────────────────────────
+{
+  const B = String.fromCharCode(92)
+  const share = B + B + 'server' + B + 'share'
+
+  t('UNC is een netwerkpad', G.isNetwerkPad(share) === true)
+  t('een gewone schijf niet, zonder letterset',
+    G.isNetwerkPad('C:' + B + 'werk') === false)
+  t('een letter in de set wel',
+    G.isNetwerkPad('P:' + B + 'werk', new Set(['P'])) === true)
+  t('dezelfde letter als array ook',
+    G.isNetwerkPad('Z:' + B + 'x', ['Z']) === true)
+  t('een andere letter niet',
+    G.isNetwerkPad('P:' + B + 'werk', new Set(['Z'])) === false)
+  t('schijfLetterVan pakt de letter', G.schijfLetterVan('p:' + B + 'x') === 'P')
+  t('schijfLetterVan leeg bij UNC', G.schijfLetterVan(share) === '')
+
+  // Zonder -b main zet git init --bare HEAD op master; een kloon komt dan op
+  // een lege master uit (gemeten, onderzoek §4).
+  const bare = G.bareInitCommando(share + B + 'proj.git')
+  t('bare-init zet -b main', /git init --bare -b main/.test(bare))
+  t('en neemt het pad mee', bare.includes(share + B + 'proj.git'))
+  t('clone-commando koppelt bare aan lokaal',
+    G.bareCloneCommando(share + B + 'proj.git', 'C:' + B + 'lok' + B + 'proj')
+      === 'git clone "' + share + B + 'proj.git" "C:' + B + 'lok' + B + 'proj"')
+  t('joinPad gebruikt de scheidingstekens van de basis',
+    G.joinPad(share, 'x.git') === share + B + 'x.git')
+
+  for (const sleutel of ['git.link.netwerkTitle', 'git.link.netwerkText',
+                         'git.link.netwerkBare', 'git.link.netwerkTochHier',
+                         'git.link.netwerkBareBestaat', 'git.link.netwerkLokaalBestaat',
+                         'git.link.netwerkKlaar', 'cmd.uncViaLetterToast']) {
+    t('netwerk-tekst ' + sleutel + ' bestaat in nl en en', !!nl[sleutel] && !!en[sleutel])
+  }
+
+  const ren4 = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer.js'), 'utf8')
+  t('koppelen vraagt het bare-patroon op een netwerkpad',
+    /padIsNetwerk\(pad\)/.test(ren4)
+    && /git\.link\.netwerkBare/.test(ren4)
+    && /initBareOpNetwerk/.test(ren4))
+  t('bare-init gebruikt bareInitCommando',
+    /GitTools\.bareInitCommando\(barePad\)/.test(ren4))
+  t('en clone daarna lokaal',
+    /GitTools\.bareCloneCommando\(barePad, lokaleMap\)/.test(ren4))
+  // Geen popd in dit traject — die les is al duur betaald in fase 2.
+  t('geen popd in de bare-flow',
+    !/popd/.test((ren4.match(/async function initBareOpNetwerk[\s\S]*?\n\}/) || [''])[0]))
 }
 
 console.log(ok ? '\nALLE GIT-TESTS OK' : '\nER ZIJN GIT-TESTS GEZAKT')

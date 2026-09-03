@@ -3126,7 +3126,7 @@ function renderMain() {
     if (activeLoc) window.api.openFolder(activeLoc.path)
   }
   document.getElementById('btn-open-cmd').onclick = () => {
-    if (activeLoc) window.api.openCmd(activeLoc.path)
+    if (activeLoc) openCmdMetMelding(activeLoc.path)
   }
   document.getElementById('btn-copy-loc').onclick = () => {
     if (!activeLoc) return
@@ -3200,8 +3200,10 @@ function renderMain() {
           showToast(I18N.t('editor.runningInOutputToast', { name: ptyNaam(editorPath) }))
           return
         }
-        window.api.openCmd({ cwd: loc.path, cmd: `"${editorPath}"` })
-        showToast(I18N.t('editor.claudeCodeOpenedToast'))
+        const r = await openCmdMetMelding({ cwd: loc.path, cmd: `"${editorPath}"` })
+        // Netwerk-toast wint: die is nieuwer en zegt iets wat de gebruiker
+        // anders niet ziet in het losse venster.
+        if (!(r && r.viaLetter)) showToast(I18N.t('editor.claudeCodeOpenedToast'))
         return
       }
       window.api.openEditor({ editorPath, cwd: loc.path })
@@ -3396,6 +3398,36 @@ function wisTerminal() {
 // Het uitvoervenster kan omschakelen naar een bladerweergave: door mappen lopen,
 // bestanden openen, en in de cmd-sectie een map als werkmap kiezen.
 const DEZE_PC = '::deze-pc'   // virtueel niveau boven de schijven
+
+// Letters van gekoppelde netwerkschijven (P:, Z:, …), bijgewerkt bij listDrives.
+// UNC wordt apart herkend via isUncPad; deze set vult isNetwerkPad aan.
+let netwerkSchijfLetters = new Set()
+
+function onthoudNetwerkSchijven(schijven) {
+  const set = new Set()
+  for (const d of schijven || []) {
+    if (!d || !d.netwerk) continue
+    const letter = GitTools.schijfLetterVan(d.path)
+    if (letter) set.add(letter)
+  }
+  netwerkSchijfLetters = set
+}
+
+function padIsNetwerk(pad) {
+  return GitTools.isNetwerkPad(pad, netwerkSchijfLetters)
+}
+
+// Hoe een wortel heet in de boom, de verkenner en de schijvenlijst: "C:" voor
+// een schijf, "server\share" voor een netwerkmap. Die laatste heeft geen letter,
+// dus zonder dit stond er `\server\share` — de eerste streep eraf gehaald door
+// een replace die op schijven was geschreven.
+function wortelNaam(d) {
+  const pad = String((d && d.path) || d || '')
+  // Alleen UNC-wortels: een gekoppelde letter (P:) is óók netwerk voor git, maar
+  // hoort in de boom gewoon als "P:" te blijven staan.
+  if (d && d.netwerk && GitTools.isUncPad(pad)) return GitTools.uncNaam(pad)
+  return pad.replace(/[\\/]+$/, '')
+}
 const ARCHIEF_EXT = /\.(zip|jar|apk|aar|war|docx|xlsx|pptx|epub|whl|nupkg|vsix|rar|7z|tar|gz|tgz|bz2|xz|iso|cab)$/i
 
 // Een pad ín een archief ziet eruit als  C:\map\archief.zip::submap/bestand
@@ -4848,11 +4880,12 @@ async function navigeerNaar(pad, pid) {
   if (pad === DEZE_PC) {
     let schijven = []
     try { schijven = await window.api.listDrives() } catch {}
+    onthoudNetwerkSchijven(schijven)
     browserFout   = schijven.length ? '' : I18N.t('browser.noDrivesFoundError')
     browserPath   = DEZE_PC
     browserParent = null
     browserItems  = schijven.map(d => ({
-      name: d.path.replace('\\', ''),
+      name: wortelNaam(d),
       path: d.path,
       dir: true,
       size: 0,
@@ -5156,9 +5189,20 @@ async function bedraadVerkennerHost(suffix) {
   const drives = $('br-drives')
   let schijven = []
   try { schijven = await window.api.listDrives() } catch {}
+  onthoudNetwerkSchijven(schijven)
   drives.innerHTML = [`<option value="${DEZE_PC}">${esc(I18N.t('browser.thisComputerLabel'))}</option>`]
-    .concat(schijven.map(d => `<option value="${esc(d.path)}">${esc(d.path.replace('\\', ''))}</option>`)).join('')
-  drives.value = (browserPath.slice(0, 3) || '').toUpperCase()
+    .concat(schijven.map(d => `<option value="${esc(d.path)}">${esc(wortelNaam(d))}</option>`)).join('')
+  // Welke wortel staat er open? Opzoeken in de lijst zelf en niet de eerste drie
+  // tekens pakken: een netwerkmap begint niet met een schijfletter, en dan koos
+  // de lijst zichzelf leeg.
+  const kaalPad = (p) => String(p || '').replace(/[\\/]+$/, '').toLowerCase()
+  const open = schijven.find(d => {
+    const k = kaalPad(d.path)
+    const l = kaalPad(browserPath)
+    return l === k || l.startsWith(k + '\\') || l.startsWith(k + '/')
+  })
+  drives.value = browserPath === DEZE_PC ? DEZE_PC
+    : (open ? open.path : (browserPath.slice(0, 3) || '').toUpperCase())
   drives.onchange = () => navigeerNaar(drives.value)
 }
 
@@ -5592,7 +5636,7 @@ function renderCmdPanel() {
     if (picked) { await setCmdCwd(picked); renderCmdPanel(); showToast(I18N.t('cmd.cwdSetToast', { path: picked })) }
   }
   document.getElementById('cmd-open-folder').onclick = () => { if (cwd) window.api.openFolder(cwd) }
-  document.getElementById('cmd-open-cmd').onclick    = () => { if (cwd) window.api.openCmd(cwd) }
+  document.getElementById('cmd-open-cmd').onclick    = () => { if (cwd) openCmdMetMelding(cwd) }
   document.getElementById('cmd-copy-loc').onclick    = () => {
     if (!cwd) return
     navigator.clipboard.writeText(cwd)
@@ -7010,7 +7054,8 @@ function renderBatFileList() {
   })
   list.querySelectorAll('[data-run-file]').forEach(b => b.onclick = async () => {
     const r = await window.api.testBat({ dir: batCwd(), name: 'run', content: `call "${b.dataset.runFile}"` })
-    showToast(r?.ok ? I18N.t('bat.startedToast') : I18N.t('bat.startFailedToast'))
+    if (!r?.ok) showToast(I18N.t('bat.startFailedToast'))
+    else batToastNaStart(r, 'bat.startedToast')
   })
   list.querySelectorAll('[data-del-file]').forEach(b => b.onclick = async () => {
     const naam = b.dataset.delFile.split(/[\\/]/).pop()
@@ -7222,7 +7267,7 @@ async function testBatNow() {
   })
   if (!r || !r.ok) { setBatWarning(I18N.t('bat.testFailedPrefix') + (r?.reason || I18N.t('common.unknownError'))); return }
   setBatWarning('')
-  showToast(I18N.t('bat.testStartedToast'))
+  batToastNaStart(r, 'bat.testStartedToast')
 }
 
 // ── Knoppen in het paneel ─────────────────────────────────────────────────────
@@ -9742,7 +9787,19 @@ function boomKeten(pad) {
     })
 
   if (!schijf) {
-    // Schijven nog niet ingelezen: dan afgaan op de vorm van een Windows-pad.
+    // Schijven nog niet ingelezen: dan afgaan op de vorm van het pad.
+    // Een netwerkpad begint bij \\server\share; die twee delen horen bij elkaar
+    // en vormen samen één schakel, want los is geen van beide een map.
+    const wortel = GitTools.uncWortel(schoon)
+    if (wortel) {
+      const keten = [wortel]
+      let nu = wortel
+      for (const deel of schoon.slice(wortel.length).split(/[\\/]/).filter(Boolean)) {
+        nu += '\\' + deel
+        keten.push(nu)
+      }
+      return keten
+    }
     if (!/^[a-z]:/i.test(schoon)) return []
     const delen = schoon.split(/[\\/]/)
     const keten = [delen[0] + '\\']
@@ -9773,11 +9830,16 @@ async function laadTak(pad, opnieuw = false) {
   try {
     if (pad === DEZE_PC) {
       const schijven = await window.api.listDrives()
+      onthoudNetwerkSchijven(schijven)
       boomKinderen.set(pad, (schijven || []).map(d => ({
-        naam: d.path.replace(/\\$/, ''),
+        naam: wortelNaam(d),
         pad: d.path,
         dir: true,
         schijf: true,
+        netwerk: !!d.netwerk,
+        // null = nog niet uitgezocht. Dat is iets anders dan onbereikbaar, en de
+        // boom hoort die twee niet door elkaar te halen.
+        bereikbaar: d.bereikbaar === undefined ? true : d.bereikbaar,
       })))
     } else {
       const r = await window.api.listDir(pad)
@@ -10245,6 +10307,10 @@ function renderBoom() {
 // De map waar dit pad in zit. Boven een schijf zit alleen nog Deze pc.
 function ouderVan(pad) {
   const kaal = String(pad || '').replace(/[\\/]+$/, '')
+  // Een netwerkshare is zelf de bovenste laag, net als een schijfletter. Zonder
+  // dit liep de boom door naar \\server en daarna naar een losse \ — allebei
+  // geen map die je kunt openen.
+  if (GitTools.isUncWortel(kaal)) return DEZE_PC
   const knip = Math.max(kaal.lastIndexOf('\\'), kaal.lastIndexOf('/'))
   if (knip < 0) return DEZE_PC
   const ouder = kaal.slice(0, knip)
@@ -11682,7 +11748,7 @@ async function aiStartProgramma(project, info, programma) {
 
   // Geen echte terminal beschikbaar: dan alsnog een eigen consolevenster.
   aiRegel(id, 't-warn', I18N.t('term.notForInteractiveWarn'))
-  window.api.openCmd({ cwd: loc.path, cmd: programma.cmd })
+  openCmdMetMelding({ cwd: loc.path, cmd: programma.cmd })
 }
 
 function aiKiesModel(id, arg) {
@@ -11831,7 +11897,7 @@ async function executeCmd(project, cmd, cmdKey = null, opties = {}) {
     appendLine('ok',  '✓ ' + I18N.t('term.openedInOwnWindowLine', { path: werkmap }))
     appendLine('sep', '')
     if (project.id === PS_CTX_ID) window.api.openPs({ cwd: werkmap, cmd })
-    else window.api.openCmd({ cwd: werkmap, cmd })
+    else openCmdMetMelding({ cwd: werkmap, cmd })
     recordHistory({ cmd, cwd: werkmap, projectId: project.id, source: cmdKey ? 'button' : 'run' })
     setStatus('ended', '✓ ' + I18N.t('term.endedOwnWindowStatus'))
     return
@@ -11915,7 +11981,16 @@ async function executeCmd(project, cmd, cmdKey = null, opties = {}) {
 // afkappen — en juist dát is hoe je een half geschreven index krijgt.
 // Geeft true als het commando opnieuw geprobeerd mag worden.
 async function regelGitSlot(project, pad) {
-  const info = await window.api.gitSlotInfo(pad).catch(() => null)
+  const netwerk = padIsNetwerk(pad)
+
+  // Op SMB ruimt git index.lock trager op dan lokaal. Eén stille wachtronde
+  // voorkomt dat we meteen "weghalen" aanbieden terwijl het slot nog mag
+  // verdwijnen. Geen auto-unlink — de gebruiker beslist.
+  if (netwerk) {
+    await new Promise(r => setTimeout(r, 5000))
+  }
+
+  let info = await window.api.gitSlotInfo(pad).catch(() => null)
   if (!info || !info.bestaat) {
     // Slot al weg, en toch de melding: dan was het een wedloop met iets anders.
     // Opnieuw proberen is dan precies het goede antwoord.
@@ -11939,15 +12014,22 @@ async function regelGitSlot(project, pad) {
 
   // Draait er nergens een git, dan is weghalen het veilige antwoord en mag het
   // de aanbevolen knop zijn. Draait er wel een, dan is wachten dat.
+  // Op netwerk: tot 2 minuten ouderdom blijft "opnieuw" primair — SMB kan
+  // trager zijn met opruimen, ook zonder zichtbare git.exe.
   const rustig = !draaien
+  const netwerkGeduld = netwerk && (info.ouderdomMs || 0) < 120000
+  const opnieuwPrimair = !rustig || netwerkGeduld
+  const tekstSleutel = netwerk
+    ? 'git.slot.netwerkTekst'
+    : (rustig ? 'git.slot.rustigTekst' : 'git.slot.drukTekst')
   const keuze = await vraagKeuze({
     titel: I18N.t('git.slot.titel'),
-    tekst: I18N.t(rustig ? 'git.slot.rustigTekst' : 'git.slot.drukTekst'),
+    tekst: I18N.t(tekstSleutel),
     regels,
     knoppen: [
       { label: I18N.t('common.cancel'), waarde: '' },
-      { label: I18N.t('git.slot.opnieuw'), waarde: 'opnieuw', soort: rustig ? '' : 'primair' },
-      { label: I18N.t('git.slot.weghalen'), waarde: 'weg', soort: rustig ? 'primair' : 'gevaar' },
+      { label: I18N.t('git.slot.opnieuw'), waarde: 'opnieuw', soort: opnieuwPrimair ? 'primair' : '' },
+      { label: I18N.t('git.slot.weghalen'), waarde: 'weg', soort: opnieuwPrimair ? 'gevaar' : 'primair' },
     ],
   })
   if (!keuze) return false
@@ -12184,7 +12266,7 @@ async function vraagOverProject(project, opties = {}) {
   if (keuze === 'terminal') {
     // Zelf regelen in een echte terminal. Het afsluiten of wisselen gaat niet
     // door — de gebruiker is nu juist aan het werk in dat project.
-    try { await window.api.openCmd({ cwd: project.pad }) } catch {}
+    try { await openCmdMetMelding({ cwd: project.pad }) } catch {}
     return 'blijven'
   }
 
@@ -12852,7 +12934,7 @@ async function branchSamenvoegen(project, kandidaten, huidig) {
       ],
     })
     if (keuze === 'terminal') {
-      try { await window.api.openCmd({ cwd: actieveLocPad(project) }) } catch {}
+      try { await openCmdMetMelding({ cwd: actieveLocPad(project) }) } catch {}
     }
   }
 }
@@ -13193,6 +13275,54 @@ async function herstelKoppeling(project, pad, staat) {
   await controleerKoppeling(pad, true)
 }
 
+// Bare-repo-patroon op een netwerkpad: bare op de share, werkkopie lokaal.
+// De share blijft remote; de projectlocatie wijst daarna naar de lokale kloon.
+async function initBareOpNetwerk(project, sharePad) {
+  const lokaleOuder = await window.api.pickFolder()
+  if (!lokaleOuder) return
+
+  const naam = GitTools.veiligeRepoNaam(project.name)
+  const barePad = GitTools.joinPad(sharePad, naam + '.git')
+  const lokaleMap = GitTools.joinPad(lokaleOuder, naam)
+
+  // Bestaat de bare-map of de lokale kloon al? Dan niet overschrijven.
+  const bareCheck = await window.api.listDir(barePad).catch(() => null)
+  if (bareCheck && bareCheck.ok) {
+    await meldKort(I18N.t('git.link.netwerkTitle'), I18N.t('git.link.netwerkBareBestaat', { pad: barePad }))
+    return
+  }
+  const lokaalCheck = await window.api.listDir(lokaleMap).catch(() => null)
+  if (lokaalCheck && lokaalCheck.ok) {
+    await meldKort(I18N.t('git.link.netwerkTitle'), I18N.t('git.link.netwerkLokaalBestaat', { pad: lokaleMap }))
+    return
+  }
+
+  const initCmd = GitTools.bareInitCommando(barePad)
+  const cloneCmd = GitTools.bareCloneCommando(barePad, lokaleMap)
+  if (!initCmd || !cloneCmd) return
+
+  const initResult = await executeCmd(project, initCmd, 'git-koppelen', { cwd: sharePad })
+  if (!initResult || !initResult.success) return
+
+  const cloneResult = await executeCmd(project, cloneCmd, 'git-koppelen', { cwd: lokaleOuder })
+  if (!cloneResult || !cloneResult.success) return
+
+  // Verdere git-knoppen horen op de lokale werkkopie te landen, niet op de share.
+  const i = Number.isFinite(project.activeLocation) ? project.activeLocation : 0
+  if (project.locations && project.locations[i]) {
+    project.locations[i].path = lokaleMap
+    if (!project.locations[i].label || project.locations[i].label === sharePad) {
+      project.locations[i].label = naam
+    }
+    saveProjects()
+  }
+
+  await ververesGitStaat(project, true)
+  await meldKort(I18N.t('git.link.netwerkTitle'), I18N.t('git.link.netwerkKlaar'))
+  await regelGitignore(project)
+  renderMain()
+}
+
 async function koppelGithub(project) {
   const pad = actieveLocPad(project)
   if (!pad) return
@@ -13235,8 +13365,36 @@ async function koppelGithub(project) {
   }
 
   if (stap === GitTools.KOPPEL_INIT) {
-    const ja = await vraagJaNee(I18N.t('git.link.initTitle'), I18N.t('git.link.initText'), I18N.t('git.link.initOk'))
-    if (!ja) return
+    // Op een netwerkpad eerst het bare-patroon voorstellen: werkkopie met .git
+    // op SMB is afgeraden (index.lock, latentie, PowerShell-zone). Zie
+    // onderzoek-netwerkschijven §4.
+    try {
+      if (!netwerkSchijfLetters.size) {
+        const schijven = await window.api.listDrives()
+        onthoudNetwerkSchijven(schijven)
+      }
+    } catch {}
+
+    if (padIsNetwerk(pad)) {
+      const keuze = await vraagKeuze({
+        titel: I18N.t('git.link.netwerkTitle'),
+        tekst: I18N.t('git.link.netwerkText'),
+        knoppen: [
+          { label: I18N.t('common.cancel'), waarde: '' },
+          { label: I18N.t('git.link.netwerkTochHier'), waarde: 'hier' },
+          { label: I18N.t('git.link.netwerkBare'), waarde: 'bare', soort: 'primair' },
+        ],
+      })
+      if (!keuze) return
+      if (keuze === 'bare') {
+        await initBareOpNetwerk(project, pad)
+        return
+      }
+      // 'hier': door naar dezelfde init als op een lokale schijf.
+    } else {
+      const ja = await vraagJaNee(I18N.t('git.link.initTitle'), I18N.t('git.link.initText'), I18N.t('git.link.initOk'))
+      if (!ja) return
+    }
     await executeCmd(project, GitTools.koppelCommando(GitTools.KOPPEL_INIT), 'git-koppelen')
     await ververesGitStaat(project, true)
     // Meteen erachteraan, want de eerstvolgende knop die je indrukt is
@@ -14645,4 +14803,17 @@ function showToast(msg) {
   toast.classList.add('show')
   clearTimeout(toastTimer)
   toastTimer = setTimeout(() => toast.classList.remove('show'), 2200)
+}
+
+// Los consolevenster op een UNC-pad: main geeft viaLetter mee omdat er geen
+// uitvoerpaneel is voor de melding die runCommandOnce wél in de terminal zet.
+async function openCmdMetMelding(arg) {
+  const r = await window.api.openCmd(arg)
+  if (r && r.viaLetter) showToast(I18N.t('cmd.uncViaLetterToast'))
+  return r
+}
+
+function batToastNaStart(r, gewoneSleutel) {
+  if (r && r.viaLetter) showToast(I18N.t('cmd.uncViaLetterToast'))
+  else showToast(I18N.t(gewoneSleutel))
 }

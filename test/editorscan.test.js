@@ -54,11 +54,16 @@ const echtePath = process.env.PATH
 const echteLocal = process.env.LOCALAPPDATA
 process.env.PATH = padMap
 process.env.LOCALAPPDATA = lokaal
-// Windows-paden omleiden naar onze nagebootste mappen. Deze test draait op
-// Linux, waar path.join schuine strepen zet en de catalogus backslashes; beide
+// Windows-paden omleiden naar onze nagebootste mappen: C:\... wordt TMP\C\...
+// Op Linux zet path.join schuine strepen en de catalogus backslashes; beide
 // moeten hier hetzelfde uitpakken.
 const naarNep = (p) => {
   const s = String(p)
+  // Wat al in de nagebootste map wijst (PATH, LOCALAPPDATA) blijft zoals het is.
+  // Op Windows begint TMP zélf met een echte schijfletter; zonder deze regel
+  // plakt de omleiding hieronder er nóg een keer TMP\C\ voor, en verdwijnen
+  // Cursor (LOCALAPPDATA) en Zed (PATH) uit de scan.
+  if (s.startsWith(TMP)) return null
   const m = s.replace(/\//g, '\\').match(/^([A-Z]):\\?(.*)$/)
   if (m) return path.join(TMP, m[1], ...m[2].split('\\').filter(Boolean))
   // paden uit de catalogus bevatten backslashes; hier zijn dat mapscheidingen

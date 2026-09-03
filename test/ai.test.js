@@ -13,6 +13,19 @@ const { maakAi, sseBlokken, sseData } = require('../ai-runtime')
 let ok = true
 const check = (l, c) => { console.log((c ? 'PASS  ' : 'FAIL  ') + l); if (!c) ok = false }
 
+// Haalt de regelset op die met précies deze selector begint. Zoeken op
+// `sel + ' {'` is niet genoeg: `.instel-uitleg {` zit óók in
+// `.account-acties .instel-uitleg {`, en dan lees je de override in plaats van
+// de basisregel. Een selector begint hier altijd aan het begin van een regel,
+// dus daarop ankeren we.
+const regelUitCss = (css, sel) => {
+  const veilig = sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const m = new RegExp('(?:^|\\n)\\s*' + veilig + '\\s*\\{').exec(css)
+  if (!m) return ''
+  const i = m.index + m[0].length - 1
+  return css.slice(i, css.indexOf('}', i) + 1)
+}
+
 // ── Register ──────────────────────────────────────────────────────────────────
 check('er staat minstens één dienst in', AI_PROVIDERS.length >= 1)
 check('elke dienst heeft id, label en url',
@@ -439,10 +452,7 @@ check('zonder systeemprompt blijft het veld weg',
   const bron = fs.readFileSync(path.join(REAL, 'renderer.js'), 'utf8')
   const css = fs.readFileSync(path.join(REAL, 'style.css'), 'utf8')
   const html = fs.readFileSync(path.join(REAL, 'index.html'), 'utf8')
-  const regel = (sel) => {
-    const i = css.indexOf(sel + ' {')
-    return i < 0 ? '' : css.slice(i, css.indexOf('}', i) + 1)
-  }
+  const regel = (sel) => regelUitCss(css, sel)
 
   check('de melding onthoudt bij welke weergave hij hoort',
     /statusMelding = \{ id: activeTermId/.test(bron))
@@ -543,10 +553,7 @@ check('zonder systeemprompt blijft het veld weg',
 // heen of loopt de rij van het scherm. Een flexrij past zich per rij aan.
 {
   const css = fs.readFileSync(path.join(REAL, 'style.css'), 'utf8')
-  const regel = (sel) => {
-    const i = css.indexOf(sel + ' {')
-    return i < 0 ? '' : css.slice(i, css.indexOf('}', i) + 1)
-  }
+  const regel = (sel) => regelUitCss(css, sel)
   check('instellingenrijen liggen niet meer op een vast raster',
     !/grid-template-columns/.test(regel('.editor-row')))
   check('en breken af in plaats van door te lopen',
