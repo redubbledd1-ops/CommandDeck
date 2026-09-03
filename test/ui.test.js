@@ -1074,6 +1074,64 @@ function startVraagAutomaat() {
     ($('.proj-header-name')?.textContent || '').includes('dd_crypto') &&
     $('.terminal-wrap').classList.contains('twee-projecten'))
 
+  $('#btn-nav-dict').click(); await tick(); await tick()
+  check('woordenboek mag naast een project als je het zelf opent',
+    $('#werk').classList.contains('gesplitst') &&
+    $('#dict-panel').style.display === 'flex')
+  check('die split wordt niet op het project bewaard',
+    !((settings.termSplits.p1 || {}).slots || []).some(s => s.view === 'dict'))
+  const projNaastDict = $$('.proj-item.in-split')[0] || $$('.proj-item')[0]
+  projNaastDict.click(); await tick(); await tick()
+  check('hetzelfde project opnieuw sluit het woordenboek',
+    $('#dict-panel').style.display !== 'flex' &&
+    !$('#werk').classList.contains('gesplitst'))
+
+  $('#btn-nav-dict').click(); await tick(); await tick()
+  $$('.proj-item')[1].click(); await tick(); await tick()
+  check('wissel naar een ander project sluit het woordenboek',
+    $('#dict-panel').style.display !== 'flex')
+  check('en opent geen tweede venster',
+    !$('#werk').classList.contains('gesplitst'))
+
+  settings.termSplits = {
+    ...(settings.termSplits || {}),
+    p1: { dir: 'right', first: 'output', slots: [
+      { view: 'project', projectId: 'p1', tab: 'output' },
+      { view: 'dict' },
+    ] },
+  }
+  $$('.proj-item')[0].click(); await tick(); await tick()
+  $$('.proj-item')[0].click(); await tick(); await tick()
+  check('een onthouden woordenboek-split komt niet terug bij de 2e keer',
+    $('#dict-panel').style.display !== 'flex' &&
+    !$('#werk').classList.contains('gesplitst'))
+
+  $('[data-tab="output"]').click(); await tick()
+  $('[data-split="right"]').click(); await tick(); await tick()
+  $$('.proj-item')[0].click(); await tick(); await tick()
+  check('het eerste andere project mag nog in het tweede vlak',
+    $('.terminal-wrap')?.classList.contains('twee-projecten'))
+  $('#btn-add-proj').click(); await tick()
+  vulNieuw($('#f-name'), 'derde app')
+  vulNieuw($$('#loc-list .field')[0], 'main')
+  vulNieuw($$('#loc-list .field')[1], 'C:\\drie')
+  $('#modal-proj-save').click(); await tick(); await tick()
+  const derdeIdx = [...$$('.proj-label')].findIndex(e => e.textContent === 'derde app')
+  $$('.proj-item')[derdeIdx].click(); await tick(); await tick()
+  check('een derde project vult het scherm, zonder woordenboek ernaast',
+    ($('.proj-header-name')?.textContent || '').includes('derde') &&
+    $('#dict-panel').style.display !== 'flex' &&
+    !$('#werk').classList.contains('gesplitst') &&
+    !$('.terminal-wrap')?.classList.contains('twee-projecten'))
+  const drieEdit = [...$$('.proj-label')].findIndex(e => e.textContent === 'derde app')
+  $$('.proj-edit')[drieEdit].click(); await tick()
+  $('#modal-proj .btn-delete').click(); await tick()
+  $('#del-confirm').click(); await tick(); await tick()
+  $('[data-tab="output"]').click(); await tick()
+  $('[data-split="right"]').click(); await tick(); await tick()
+  $$('.proj-item')[1].click(); await tick(); await tick()
+  $$('.proj-item')[0].click(); await tick(); await tick()
+
   $('[data-split="right"]').click(); await tick()
   const tweedeIdx = [...$$('.proj-label')].findIndex(e => e.textContent === 'tweede app')
   $$('.proj-edit')[tweedeIdx].click(); await tick()

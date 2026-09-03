@@ -884,6 +884,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   document.addEventListener('pointermove', noteerMuis, { passive: true })
   document.addEventListener('pointerdown', noteerMuis, { passive: true })
   wireWerkSplit()
+  wisGemengdeProjectSplits()
   restoreLastView()
   herstelWerkSplitNaStart()
   bedraadZijbalkBreedte()
@@ -2111,7 +2112,14 @@ function setView(v) {
     settingsEl.innerHTML = ''
   }
 
-  if (splitAan()) {
+  // Een project is een eigen pagina. Woordenboek ernaast mag alleen als je
+  // zelf op woordenboek klikt — niet omdat die split nog open of onthouden was.
+  if (v === 'project' && splitAan() && (
+    splitGemengd() ||
+    (splitTweeProjecten() && !werkSlots.some(s => s.projectId === activeId))
+  )) {
+    sluitSplitVoorView()
+  } else if (splitAan()) {
     plaatsInSplit(v)
     return
   }
@@ -2670,6 +2678,28 @@ function selectProject(id) {
     })
   }
 
+  // Een project in de zijbalk is één pagina, net als cmd. Het woordenboek
+  // ernaast mag alleen als je zelf op woordenboek klikt — niet omdat dit
+  // project eerder in een split stond, en niet bij de derde projectklik.
+  if (splitGemengd()) {
+    sluitSplitVoorView()
+    setView('project')
+    naOpenen()
+    return
+  }
+
+  if (splitTweeProjecten()) {
+    const erin = werkSlots.some(s => s.projectId === id)
+    if (erin) {
+      plaatsInSplit('project')
+    } else {
+      sluitSplitVoorView()
+      setView('project')
+    }
+    naOpenen()
+    return
+  }
+
   if (splitAan()) {
     plaatsInSplit('project')
     naOpenen()
@@ -2677,6 +2707,7 @@ function selectProject(id) {
   }
   // Al op het projectscherm: niet de andere panelen en de zijbalkboom slopen.
   if (view === 'project') {
+    toonPanelenVolledig('project')
     renderMain()
     updateSidebarActief()
     rememberView()
@@ -3701,6 +3732,26 @@ function splitAan() {
   return !!(termSplit && werkSlots && werkSlots.length === 2)
 }
 
+function isGemengdeSplit(rec) {
+  const slots = rec && rec.slots
+  if (!Array.isArray(slots) || slots.length !== 2) return false
+  return slots.some(s => s && s.view && s.view !== 'project')
+}
+
+function wisGemengdeProjectSplits() {
+  const next = { ...(settings.termSplits || {}) }
+  let veranderd = false
+  for (const [id, rec] of Object.entries(next)) {
+    if (id === WERK_SPLIT_ID) continue
+    if (!isGemengdeSplit(rec)) continue
+    delete next[id]
+    veranderd = true
+  }
+  if (!veranderd) return
+  settings.termSplits = next
+  window.api.saveSettings(settings)
+}
+
 function splitGemengd() {
   return splitAan() && !(
     werkSlots[0].view === 'project' && werkSlots[1].view === 'project'
@@ -4165,6 +4216,9 @@ function sluitSplitVoorView() {
   if (werk) werk.classList.remove('gesplitst', 'naast', 'onder')
   const vlak1 = document.getElementById('werk-vlak-1')
   if (vlak1) vlak1.hidden = true
+  // Anders blijven main en woordenboek allebei flex in hetzelfde vlak
+  // staan — dat ziet eruit als een tweede venster zonder split-klasse.
+  if (view && view !== 'settings') toonPanelenVolledig(view)
 }
 
 function plaatsInSplit(v) {
@@ -4174,6 +4228,11 @@ function plaatsInSplit(v) {
   const nieuw = nieuwSlot(v)
   const al = werkSlots.findIndex(s => zelfdeSlot(s, v))
   if (al >= 0) {
+    if (v === 'project' && werkSlots.some(s => s.view === 'dict')) {
+      sluitSplitVoorView()
+      setView('project')
+      return
+    }
     werkSlotFocus = al
     if (v === 'project') {
       termTab = werkSlots[al].tab || 'output'
@@ -4204,6 +4263,11 @@ function plaatsInSplit(v) {
     }
   }
   werkSlots[doel] = nieuw
+  if (v === 'project' && werkSlots.some(s => s.view === 'dict')) {
+    sluitSplitVoorView()
+    setView('project')
+    return
+  }
   werkSlotFocus = doel
   view = v
   if (v === 'cmd' || v === 'ps') lastShellView = v
@@ -4229,6 +4293,9 @@ function herstelWerkSplitNaStart() {
   if (!gelezen || !Array.isArray(raw?.slots) || raw.slots.length !== 2) return
   const slots = raw.slots.map(normaliseerSlot)
   if (slots[0].view === 'project' && slots[1].view === 'project') return
+  // Project + woordenboek niet terugzetten bij opstarten. Anders staat het
+  // woordenboek bij de eerste projectklik al als tweede venster klaar.
+  if (slots.some(s => s.view === 'project')) return
   if (!slots.some(s => s.view === view)) return
   const ok = slots.every(s => {
     if (s.view === 'project') return !!(s.projectId && projects.some(p => p.id === s.projectId))
@@ -4314,7 +4381,6 @@ function bewaarZichtbareUitvoer() {
 function bewaarTermSplit(extraId) {
   const ids = new Set([activeId, activeTermId, extraId].filter(Boolean))
   if (werkSlots) werkSlots.forEach(s => { if (s.projectId) ids.add(s.projectId) })
-  if (splitGemengd()) ids.add(WERK_SPLIT_ID)
   const next = { ...(settings.termSplits || {}) }
   if (!termSplit) {
     ids.forEach(id => { delete next[id] })
@@ -4330,7 +4396,15 @@ function bewaarTermSplit(extraId) {
       })),
       focus: werkSlotFocus,
     }
-    ids.forEach(id => { if (id) next[id] = rec })
+    if (splitGemengd()) {
+      // Woordenboek/cmd hoort bij dit werkvlak, niet bij elk project. Anders
+      // komt het woordenboek bij de volgende projectwissel als tweede venster terug.
+      ids.forEach(id => { if (id && isGemengdeSplit(next[id])) delete next[id] })
+      next[WERK_SPLIT_ID] = rec
+    } else {
+      ids.forEach(id => { if (id) next[id] = rec })
+      delete next[WERK_SPLIT_ID]
+    }
   }
   settings.termSplits = next
   window.api.saveSettings(settings)
@@ -4492,7 +4566,7 @@ function herstelTermSplit(ctx) {
   // die niet terugzetten.
   if (ctx?.id === CMD_CTX_ID || ctx?.id === PS_CTX_ID) return
   if (splitGemengd()) return
-  const raw = (settings.termSplits || {})[ctx?.id] || (settings.termSplits || {})[WERK_SPLIT_ID]
+  const raw = (settings.termSplits || {})[ctx?.id]
   const gelezen = leesTermSplit(raw)
   if (!gelezen) { termSplit = null; termSplitFirst = 'output'; werkSlots = null; werkSlotFocus = 0; return }
   termSplit = gelezen.dir
@@ -4504,14 +4578,28 @@ function herstelTermSplit(ctx) {
       if (s.view === 'project') return !!(s.projectId && (s.projectId === ctx?.id || projects.some(p => p.id === s.projectId)))
       return ['cmd', 'ps', 'dict', 'bat'].includes(s.view)
     })
+    // Gemengd (woordenboek/cmd ernaast) niet hier terugzetten: dat plakte het
+    // woordenboek op elk project dat je daarna opende.
     if (ok && gemengd) {
-      werkSlots = slots
-      const i = slots.findIndex(s => s.view === view || (s.view === 'project' && s.projectId === ctx?.id))
-      werkSlotFocus = i >= 0 ? i : (raw.focus === 1 ? 1 : 0)
-      if (slots[werkSlotFocus].view === 'project') termTab = slots[werkSlotFocus].tab
+      termSplit = null
+      termSplitFirst = 'output'
+      werkSlots = null
+      werkSlotFocus = termTab === 'browser' ? 1 : 0
+      document.getElementById('werk')?.classList.remove('gesplitst', 'naast', 'onder')
       return
     }
     if (ok && !gemengd && levend('.terminal-wrap.splitbaar')) {
+      const zelfdeProject = slots[0].projectId && slots[0].projectId === slots[1].projectId
+      if (!zelfdeProject) {
+        // Twee verschillende projecten niet terugzetten bij opnieuw openen:
+        // dat was de glitch bij "project voor de 2e keer" / derde project.
+        termSplit = null
+        termSplitFirst = 'output'
+        werkSlots = null
+        werkSlotFocus = termTab === 'browser' ? 1 : 0
+        document.getElementById('werk')?.classList.remove('gesplitst', 'naast', 'onder')
+        return
+      }
       werkSlots = slots
       const i = slots.findIndex(s => s.projectId === ctx?.id)
       werkSlotFocus = i >= 0 ? i : (raw.focus === 1 ? 1 : 0)
