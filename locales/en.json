@@ -698,7 +698,6 @@
   "ai.clearedScreenToast": "Screen cleared. The conversation still remembers {count} messages — /nieuw forgets them.",
   "ai.help.clear": "clear the screen; the conversation stays",
   "cmd.quickSettingsHint": "Tick what you want in this row. Long-press a button to start reordering.",
-  "cmd.quickAllHiddenHint": "Everything is off. Turn them back on with the button top right.",
   "dict.theme.searchPlaceholder": "search themes…",
   "dict.theme.noMatch": "No theme by that name.",
   "dict.theme.ownTitle": "Theme you created yourself",

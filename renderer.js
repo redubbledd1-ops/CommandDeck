@@ -5911,6 +5911,12 @@ function snelVolgorde(sectie) {
   return Knoppenrij.volgorde(snelRij(sectie))
 }
 
+// Heeft deze rij überhaupt knoppen? Mappen tellen niet mee -- die zijn geen
+// knop -- en verborgen knoppen wél: die zijn er, ze staan alleen even uit.
+function snelHeeftKnoppen(sectie) {
+  return snelVolgorde(sectie).some(id => !Knoppenrij.isMapId(id))
+}
+
 function snelZichtbaar(sectie, id) {
   return Knoppenrij.zichtbaar(snelRij(sectie), id)
 }
@@ -6118,7 +6124,10 @@ function renderCmdPanel() {
     : `<option value="">${esc(I18N.t('cmd.noFolderChosenOption'))}</option>`
 
   const snelGrid = cmdSnelGridHtml()
-  const heeftSnel = !!cmdSnelVolgorde().length
+  // Alleen als er echt niets is valt er iets uit te leggen. Staat er wél iets --
+  // ook al ligt het in een dichte map of staat het even uit -- dan is een regel
+  // tekst boven de rij alleen ruimte die de knoppen naar beneden duwt.
+  const heeftSnel = snelHeeftKnoppen(SNEL_SECTIE.cmd)
   const quickMarkup = `
     <div class="cmd-section" data-sectieblok="${SNEL_SECTIE.cmd}">
       <div class="cmd-section-label-row">
@@ -6127,7 +6136,7 @@ function renderCmdPanel() {
         ${kopActiesHtml(SNEL_SECTIE.cmd)}
       </div>
       <div class="cmd-grid ${cmdSnelSorteerModus ? 'cmd-sorteren' : ''}" id="cmd-snel-grid">${snelGrid}${cmdSnelSorteerModus ? '' : aiShellKnop(CMD_CTX_ID)}</div>
-      ${snelGrid ? '' : `<div class="hint-row">${esc(heeftSnel ? I18N.t('cmd.quickAllHiddenHint') : I18N.t('cmd.quickCmdsEmptyHint'))}</div>`}
+      ${heeftSnel ? '' : `<div class="hint-row">${esc(I18N.t('cmd.quickCmdsEmptyHint'))}</div>`}
     </div>`
 
   panel.innerHTML = `
@@ -6334,7 +6343,7 @@ function renderPsPanel() {
     : `<option value="">${esc(I18N.t('cmd.noFolderChosenOption'))}</option>`
 
   const snelGrid = psSnelGridHtml()
-  const heeftSnel = !!psSnelVolgorde().length
+  const heeftSnel = snelHeeftKnoppen(SNEL_SECTIE.ps)
   const quickMarkup = `
     <div class="cmd-section" data-sectieblok="${SNEL_SECTIE.ps}">
       <div class="cmd-section-label-row">
@@ -6343,7 +6352,7 @@ function renderPsPanel() {
         ${kopActiesHtml(SNEL_SECTIE.ps)}
       </div>
       <div class="cmd-grid ${psSnelSorteerModus ? 'cmd-sorteren' : ''}" id="ps-snel-grid">${snelGrid}${psSnelSorteerModus ? '' : aiShellKnop(PS_CTX_ID)}</div>
-      ${snelGrid ? '' : `<div class="hint-row">${esc(heeftSnel ? I18N.t('cmd.quickAllHiddenHint') : I18N.t('cmd.quickCmdsEmptyHint'))}</div>`}
+      ${heeftSnel ? '' : `<div class="hint-row">${esc(I18N.t('cmd.quickCmdsEmptyHint'))}</div>`}
     </div>`
 
   panel.innerHTML = `

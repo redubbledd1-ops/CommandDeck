@@ -698,7 +698,6 @@
   "ai.clearedScreenToast": "Scherm leeg. Het gesprek onthoudt nog {count} berichten — /nieuw wist die.",
   "ai.help.clear": "het scherm leegmaken; het gesprek blijft staan",
   "cmd.quickSettingsHint": "Vink aan wat je in deze rij wilt zien. Lang drukken op een knop zet de volgorde-modus aan.",
-  "cmd.quickAllHiddenHint": "Alles staat uit. Zet ze weer aan met het knopje rechtsboven.",
   "dict.theme.searchPlaceholder": "thema zoeken…",
   "dict.theme.noMatch": "Geen thema met die naam.",
   "dict.theme.ownTitle": "Thema dat je zelf hebt aangemaakt",

@@ -63,7 +63,10 @@ const naarNep = (p) => {
   // Op Windows begint TMP zélf met een echte schijfletter; zonder deze regel
   // plakt de omleiding hieronder er nóg een keer TMP\C\ voor, en verdwijnen
   // Cursor (LOCALAPPDATA) en Zed (PATH) uit de scan.
-  if (s.startsWith(TMP)) return null
+  // Op Windows zijn dit al bruikbare paden; op Linux staan er nog backslashes
+  // uit de catalogus in, en die zijn daar mapscheidingen -- zonder dat viel
+  // Cursor buiten de scan zodra de tests niet op Windows draaien.
+  if (s.startsWith(TMP)) return s.includes('\\') ? s.split('\\').join(path.sep) : null
   const m = s.replace(/\//g, '\\').match(/^([A-Z]):\\?(.*)$/)
   if (m) return path.join(TMP, m[1], ...m[2].split('\\').filter(Boolean))
   // paden uit de catalogus bevatten backslashes; hier zijn dat mapscheidingen

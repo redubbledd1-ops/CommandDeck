@@ -2413,14 +2413,17 @@ function startVraagAutomaat() {
   })
   zetTools(false)
   $('#modal-proj-save').click(); await tick(); await tick()
-  check('zonder knoppen verdwijnt de flutter-map uit de rij', !$('.cmd-map-kop'))
+  // Alleen over de flutter-map: een project met een repo heeft ook een git-map,
+  // en die hoort hier gewoon te blijven staan.
+  const flutterKop = () => $$('.cmd-map-kop').some(el => el.textContent.toLowerCase().includes('flutter'))
+  check('zonder knoppen verdwijnt de flutter-map uit de rij', !flutterKop())
   check('de rij zelf blijft, die heeft nog knoppen', !!$('[data-sectieblok="run"]'))
 
   // weer aanzetten via instellingen
   $$('.proj-edit')[0].click(); await tick()
   zetTools(true)
   $('#modal-proj-save').click(); await tick(); await tick()
-  check('knoppen terug → map ook terug', !!$('.cmd-map-kop'))
+  check('knoppen terug → map ook terug', flutterKop())
 
   // ── is dit wel een Flutter-project? ────────────────────────────────────────
   // Tools slaan alleen ergens op bij Flutter. Dat wordt één keer nagekeken, bij
@@ -4203,6 +4206,10 @@ function startVraagAutomaat() {
     $('#btn-nav-cmd').click(); await tick(); await tick()
     const blok = $('[data-sectieblok="snel"]')
     check('de cmd-snelrij is een gewoon knoppenblok', !!blok && !!blok.querySelector('.cmd-grid'))
+    // Zijn er knoppen -- ook als ze in een dichte map liggen of uit staan --
+    // dan hoort er geen regel tekst boven de rij te staan. Die duwde de
+    // knoppen alleen maar naar beneden.
+    check('en zonder uitlegregel erboven', !blok.querySelector('.hint-row'))
     check('en de knoppen dragen hun id, niet hun plek',
       !!blok.querySelector('.cmd-btn[data-volgorde-id]'))
 
@@ -4244,7 +4251,8 @@ function startVraagAutomaat() {
     // Powershell krijgt dezelfde rij, met zijn eigen bron. Daar is wél genoeg
     // van één soort om automatisch te mappen: de standaardknoppen.
     $('#btn-nav-ps').click(); await tick(); await tick()
-    check('de powershell-snelrij is hetzelfde blok', !!$('[data-sectieblok="ps-snel"]'))
+    const psBlok = $('[data-sectieblok="ps-snel"]')
+    check('de powershell-snelrij is hetzelfde blok', !!psBlok)
     W.__test.autoMappen(null, 'ps-snel')
     const psMap = (settings.ps.cmdFolders || []).find(x => x.auto === 'standaard')
     check('automatisch mappen maakt een map voor de standaardknoppen', !!psMap)
@@ -4252,6 +4260,15 @@ function startVraagAutomaat() {
     const erin = window.Knoppenrij.knoppenInMap(W.__test.snelRij('ps-snel'), psMap.id)
     check('er liggen alleen standaardknoppen in',
       erin.length > 1 && erin.every(id => id.indexOf('pscmd:') === 0))
+    // Alles ligt nu in mappen; het raster zelf is leeg. Ook dan geen uitleg.
+    $('#btn-nav-ps').click(); await tick(); await tick()
+    ;(settings.ps.cmdFolders || []).forEach(f => { f.open = false })
+    $('#btn-nav-ps').click(); await tick(); await tick()
+    const psNa = $('[data-sectieblok="ps-snel"]')
+    check('met alles in dichte mappen blijft de uitlegregel weg',
+      !!psNa && !psNa.querySelector('.hint-row'))
+    check('en de mappen staan als chips in de kop', !!psNa.querySelector('.cmd-kop-mappen'))
+
     check('en het project krijgt er niets van mee',
       (projects[0].cmdFolders || []).every(x => x.sectie === 'run' && x.auto !== 'standaard'))
   }
