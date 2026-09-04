@@ -85,9 +85,26 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // Site-preview: <webview> laadt http://127.0.0.1 betrouwbaarder dan een
+      // iframe onder file:// + CSP (wit scherm).
+      webviewTag: true,
     },
   })
   win.loadFile('index.html')
+
+  // Chromium LNA/permissions-policy mag loopback stil blokkeren. Deze app is
+  // lokaal en vertrouwd: lokale netwerktoegang (site-preview) mag altijd.
+  try {
+    win.webContents.session.setPermissionRequestHandler((_wc, permission, callback) => {
+      if (permission === 'local-network-access' || permission === 'loopback-network'
+          || permission === 'local-network') {
+        callback(true)
+        return
+      }
+      // Overige: toestaan — dit is een desktop-app, geen willekeurige website.
+      callback(true)
+    })
+  } catch {}
 
   // Afsluitcontrole. Het sluiten wordt één keer tegengehouden; de renderer
   // kijkt de projecten na, stelt per project een vraag en meldt zich terug.
@@ -342,6 +359,13 @@ const DEFAULT_SETTINGS = {
     claudeDesktop: { enabled: false, path: '' },
     custom:        { enabled: false, path: '', label: '' },
   },
+  // Per projectsoort: wat er gebeurt de eerste keer dat je het opent.
+  // Daarna wint de onthouden tab. Zie WebTools.PROJECT_OPEN_KEUZES.
+  projectOpenen: {
+    website: 'editor',   // editor | verkenner | site | windows | niets
+    flutter: 'output',   // output | verkenner | windows | niets
+    overig:  'output',
+  },
   // Eigen editors: zoveel als je wilt, elk met een eigen naam en pad
   customEditors: [],
   // Per project (en voor de cmd-sectie) of je output of de verkenner open had
@@ -434,6 +458,7 @@ function loadSettings() {
         bat:      { ...DEFAULT_SETTINGS.bat,      ...(s.bat      || {}) },
         git:      { ...DEFAULT_SETTINGS.git,      ...(s.git      || {}) },
         editors: { ...DEFAULT_SETTINGS.editors, ...(s.editors || {}) },
+        projectOpenen: { ...DEFAULT_SETTINGS.projectOpenen, ...(s.projectOpenen || {}) },
         customEditors: migreerEigenEditors(s),
         termTabs: { ...DEFAULT_SETTINGS.termTabs, ...(s.termTabs || {}) },
         termSplits: { ...DEFAULT_SETTINGS.termSplits, ...(s.termSplits || {}) },
@@ -1178,6 +1203,9 @@ ipcMain.handle('fs:projectSoort', (_, dir) => {
     }
 
     const heeft = (n) => { try { return fs.existsSync(path.join(dir, n)) } catch { return false } }
+    // html erbij: zo kan de renderer zonder tweede ipc beslissen of het een
+    // website-project is (zie WebTools.isWebsiteGok).
+    const html = zoekStartBestand(dir).length > 0
     return {
       ok: true,
       flutter,
@@ -1185,6 +1213,7 @@ ipcMain.handle('fs:projectSoort', (_, dir) => {
       node: heeft('package.json'),
       pubspec,
       git: heeft('.git'),
+      html,
     }
   } catch (e) {
     return { ok: false, reason: e.message }
@@ -1266,6 +1295,9 @@ ipcMain.handle('fs:schrijfTekst', (_, { pad, inhoud, bom, crlf } = {}) => {
     const tekst = WebTools.tekstVoorSchrijf(inhoud, { bom: !!bom, crlf: !!crlf })
     fs.writeFileSync(pad, tekst, 'utf8')
     const st = fs.statSync(pad)
+    // Als deze map als site draait: pagina verversen. fs.watch doet dat ook,
+    // maar op Windows mist die soms onze eigen write — dus hier expliciet.
+    seinSitesVoorPad(pad)
     return { ok: true, mtime: st.mtimeMs, bytes: st.size }
   } catch (e) {
     return { ok: false, reden: String((e && e.message) || 'onbekend') }
@@ -1278,14 +1310,30 @@ ipcMain.handle('fs:schrijfTekst', (_, { pad, inhoud, bom, crlf } = {}) => {
 // servertje: alleen op 127.0.0.1, alleen bestanden binnen de gekozen map, en
 // het gaat weer dicht zodra de app dat zegt of afsluit.
 const http = require('http')
-const sites = new Map()          // id -> { server, dir, url }
+const sites = new Map()          // id -> { server, dir, url, clients, watcher, seinTimer }
 let siteTeller = 0
 
 function stuurBestand(res, bestand) {
   fs.stat(bestand, (fout, st) => {
     if (fout || !st.isFile()) { res.writeHead(404, { 'Content-Type': 'text/plain' }); res.end('404'); return }
+    const type = WebTools.mimeVoor(bestand)
+    // Html krijgt het reload-script erbij. Alleen dan: css/js opnieuw injecteren
+    // zou ze kapot maken, en grote bestanden lezen we liever niet helemaal in.
+    if (/^text\/html/.test(type) && st.size <= WebTools.MAX_TEKST_BYTES) {
+      fs.readFile(bestand, (leesFout, buf) => {
+        if (leesFout) { res.writeHead(404, { 'Content-Type': 'text/plain' }); res.end('404'); return }
+        const uit = Buffer.from(WebTools.injecteerReload(buf.toString('utf8')), 'utf8')
+        res.writeHead(200, {
+          'Content-Type': type,
+          'Content-Length': uit.length,
+          'Cache-Control': 'no-store',
+        })
+        res.end(uit)
+      })
+      return
+    }
     res.writeHead(200, {
-      'Content-Type': WebTools.mimeVoor(bestand),
+      'Content-Type': type,
       'Content-Length': st.size,
       // Niets bewaren: je bent hier juist aan het sleutelen.
       'Cache-Control': 'no-store',
@@ -1294,16 +1342,74 @@ function stuurBestand(res, bestand) {
   })
 }
 
+// Alle open EventSources van één site een seintje geven. Debounce: Windows
+// stuurt bij één opslaan vaak meerdere watch-events achter elkaar.
+function seinSiteHerladen(id) {
+  const s = sites.get(id)
+  if (!s) return
+  clearTimeout(s.seinTimer)
+  s.seinTimer = setTimeout(() => {
+    for (const client of s.clients) {
+      try { client.write('data: reload\n\n') } catch { s.clients.delete(client) }
+    }
+  }, 80)
+}
+
+function seinSitesVoorPad(bestand) {
+  if (!bestand) return
+  const sep = path.sep
+  for (const [id, s] of sites) {
+    if (WebTools.binnenWortel(s.dir, bestand, sep)) seinSiteHerladen(id)
+  }
+}
+
+function sluitSite(id) {
+  const s = sites.get(id)
+  if (!s) return
+  clearTimeout(s.seinTimer)
+  if (s.watcher) { try { s.watcher.close() } catch {} }
+  for (const client of s.clients) { try { client.end() } catch {} }
+  s.clients.clear()
+  try { s.server.close() } catch {}
+  sites.delete(id)
+}
+
+function siteUrlVoor(poort, wortel, start) {
+  const relStart = start ? path.relative(wortel, start).replace(/\\/g, '/') : ''
+  return `http://127.0.0.1:${poort}/` + (relStart && !relStart.startsWith('..') ? relStart : '')
+}
+
 ipcMain.handle('web:start', (_, { dir, start } = {}) => {
   try {
     if (!dir || !fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
       return { ok: false, reden: 'geen map' }
     }
-    // Dezelfde map twee keer openen hoort geen tweede server te maken.
-    for (const [id, s] of sites) if (s.dir === dir) return { ok: true, id, url: s.url, hergebruikt: true }
-
     const wortel = fs.realpathSync(dir)
+    // Dezelfde map twee keer openen hoort geen tweede server te maken.
+    // Wel de url bijwerken: anders blijft de preview op het eerste startbestand.
+    for (const [id, s] of sites) {
+      if (s.dir !== wortel) continue
+      const url = siteUrlVoor(s.poort, wortel, start)
+      s.url = url
+      return { ok: true, id, url, hergebruikt: true }
+    }
+
+    const clients = new Set()
     const server = http.createServer((req, res) => {
+      // Live-reload-kanaal vóór elk bestandspad: anders zou iemand een
+      // bestand __cd_reload kunnen zetten en onze EventSource kapen.
+      if (WebTools.isReloadUrl(req.url)) {
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache',
+          Connection: 'keep-alive',
+        })
+        res.write(':\n\n')
+        clients.add(res)
+        req.on('close', () => clients.delete(res))
+        return
+      }
+
       const doel = WebTools.doelPad(wortel, req.url, path.sep)
       if (!doel) { res.writeHead(400, { 'Content-Type': 'text/plain' }); res.end('nee'); return }
 
@@ -1326,9 +1432,17 @@ ipcMain.handle('web:start', (_, { dir, start } = {}) => {
       server.listen(0, '127.0.0.1', () => {
         const poort = server.address().port
         const id = 'site' + (++siteTeller)
-        const relStart = start ? path.relative(wortel, start).replace(/\\/g, '/') : ''
-        const url = `http://127.0.0.1:${poort}/` + (relStart && !relStart.startsWith('..') ? relStart : '')
-        sites.set(id, { server, dir, url })
+        const url = siteUrlVoor(poort, wortel, start)
+
+        // recursive: op Windows sinds Node 20 bruikbaar. Faalt het (oude
+        // netwerkschijf), dan nog steeds het seintje bij ons eigen opslaan.
+        let watcher = null
+        try {
+          watcher = fs.watch(wortel, { recursive: true }, () => seinSiteHerladen(id))
+          watcher.on('error', () => { try { watcher.close() } catch {}; watcher = null })
+        } catch { watcher = null }
+
+        sites.set(id, { server, dir: wortel, url, poort, clients, watcher, seinTimer: null })
         resolve({ ok: true, id, url, poort })
       })
     })
@@ -1338,10 +1452,8 @@ ipcMain.handle('web:start', (_, { dir, start } = {}) => {
 })
 
 ipcMain.handle('web:stop', (_, id) => {
-  const s = sites.get(id)
-  if (!s) return { ok: true, alWeg: true }
-  try { s.server.close() } catch {}
-  sites.delete(id)
+  if (!sites.has(id)) return { ok: true, alWeg: true }
+  sluitSite(id)
   return { ok: true }
 })
 
@@ -1349,8 +1461,7 @@ ipcMain.handle('web:lijst', () => [...sites].map(([id, s]) => ({ id, dir: s.dir,
 
 // Niets laten luisteren nadat de app weg is.
 app.on('will-quit', () => {
-  for (const [, s] of sites) { try { s.server.close() } catch {} }
-  sites.clear()
+  for (const id of [...sites.keys()]) sluitSite(id)
 })
 
 // ── Git ───────────────────────────────────────────────────────────────────────

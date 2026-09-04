@@ -69,6 +69,30 @@
     return WEB_EXT.includes(extensieVan(naam))
   }
 
+  function isHtmlBestand(naam) {
+    const e = extensieVan(naam)
+    return e === 'html' || e === 'htm'
+  }
+
+  // Welk html-bestand openen in de browser? Huidige editor-html wint van
+  // index/home — dat is precies wat je wilt als je aan page-2.html zit.
+  function kiesSiteOpen(opties) {
+    const o = opties || {}
+    const sep = o.sep || '/'
+    const huidig = o.huidigPad || ''
+    const wortel = o.wortel || ''
+    if (huidig && isHtmlBestand(huidig) && binnenWortel(wortel, huidig, sep)) {
+      const w = String(wortel).replace(/[\\/]+$/, '')
+      const teken = sep
+      let relatief = huidig
+      if (huidig.length >= w.length && (huidig === w || huidig.startsWith(w + teken))) {
+        relatief = huidig.slice(w.length).replace(/^[\\/]+/, '') || huidig.split(/[\\/]/).pop()
+      }
+      return { pad: huidig, relatief: String(relatief).replace(/\\/g, '/') }
+    }
+    return besteStart(o.gevonden || [])
+  }
+
   // Grens voor wat we in beeld halen. Twee megabyte is ruim voor een html of
   // een css; daarboven wil je een editor, geen kijkvenster.
   const MAX_TEKST_BYTES = 2 * 1024 * 1024
@@ -196,10 +220,86 @@
     return hits
   }
 
+  // ── Live-reload (ronde 3.1) ────────────────────────────────────────────────
+  // Pad dat de server als EventSource aanbiedt. Mag nooit als bestandspad
+  // gelezen worden — anders zou iemand een bestand zo kunnen noemen.
+  const RELOAD_PAD = '/__cd_reload'
+
+  function isReloadUrl(url) {
+    const kaal = String(url || '').split('?')[0].split('#')[0]
+    return kaal === RELOAD_PAD
+  }
+
+  // Script dat de pagina zichzelf laat verversen. Bewust klein en zonder
+  // afhankelijkheden: dit gaat in élke html die we serveren.
+  const RELOAD_SCRIPT =
+    '<script>(function(){try{var e=new EventSource("' + RELOAD_PAD + '");' +
+    'e.onmessage=function(){location.reload()}}catch(x){}})();</script>'
+
+  // Vlak voor </body>, of anders aan het eind. Niet midden in de head: dan
+  // blokkeert het laden. Alleen injecteren als er nog geen eigen EventSource
+  // op ons pad staat — dubbel herladen is erger dan geen herladen.
+  function injecteerReload(html) {
+    const bron = String(html == null ? '' : html)
+    if (bron.includes(RELOAD_PAD)) return bron
+    const lager = bron.toLowerCase()
+    const i = lager.lastIndexOf('</body>')
+    if (i >= 0) return bron.slice(0, i) + RELOAD_SCRIPT + bron.slice(i)
+    return bron + RELOAD_SCRIPT
+  }
+
+  // ── Welk soort project is dit? ─────────────────────────────────────────────
+  // Flutter wint: een pubspec met Flutter erin is géén website-project, ook
+  // niet als er toevallig een index.html in docs/ staat. Zonder Flutter en mét
+  // een startpagina is de gok "website" — de gebruiker mag dat overrulen.
+  function isWebsiteGok(opties) {
+    const o = opties || {}
+    if (o.flutter) return false
+    return !!o.html
+  }
+
+  // ── Wat openen bij een project? ────────────────────────────────────────────
+  // Globale voorkeur: eerste keer dat je een project opent. Daarna wint de
+  // onthouden tab. website / flutter / overig hebben elk hun eigen keuzes.
+  const PROJECT_OPEN_STANDAARD = {
+    website: 'editor',
+    flutter: 'output',
+    overig:  'output',
+  }
+  const PROJECT_OPEN_KEUZES = {
+    website: ['editor', 'verkenner', 'site', 'windows', 'niets'],
+    flutter: ['output', 'verkenner', 'windows', 'niets'],
+    overig:  ['output', 'verkenner', 'windows', 'niets'],
+  }
+
+  function projectOpenSoort(opties) {
+    const o = opties || {}
+    if (o.flutter) return 'flutter'
+    if (o.website) return 'website'
+    return 'overig'
+  }
+
+  function projectOpenKeuze(instelling, soort) {
+    const sleutel = PROJECT_OPEN_KEUZES[soort] ? soort : 'overig'
+    const mag = PROJECT_OPEN_KEUZES[sleutel]
+    const standaard = PROJECT_OPEN_STANDAARD[sleutel]
+    const gekozen = instelling && instelling[sleutel]
+    return mag.includes(gekozen) ? gekozen : standaard
+  }
+
+  function termTabVoorOpenKeuze(keuze) {
+    if (keuze === 'editor') return 'editor'
+    if (keuze === 'verkenner') return 'browser'
+    return 'output'
+  }
+
   return {
     START_NAMEN, START_MAPPEN, startKandidaten, besteStart,
-    TEKST_EXT, WEB_EXT, extensieVan, isTekstBestand, isWebBestand,
+    TEKST_EXT, WEB_EXT, extensieVan, isTekstBestand, isWebBestand, isHtmlBestand,
     MAX_TEKST_BYTES, MIME, mimeVoor, padUitUrl, doelPad, binnenWortel,
-    tekstVoorSchrijf, isGeldigUtf8, zoekInTekst,
+    tekstVoorSchrijf, isGeldigUtf8, zoekInTekst, isWebsiteGok, kiesSiteOpen,
+    PROJECT_OPEN_STANDAARD, PROJECT_OPEN_KEUZES, projectOpenSoort,
+    projectOpenKeuze, termTabVoorOpenKeuze,
+    RELOAD_PAD, isReloadUrl, RELOAD_SCRIPT, injecteerReload,
   }
 })

@@ -37,15 +37,35 @@
    moeten onthouden. */
 [hidden] { display: none !important; }
 
-/* Het lees-/bewerkvenster voor html, css en js. Breed en hoog, want code
-   lezen in een smal vakje is geen lezen. Regelnummers zitten naast het vak;
-   zonder die kolom springt de tekst bij elke wijziging heen en weer. */
-.modal.modal-groot { width: min(1100px, 92vw); max-width: none; }
-.lezer-pad { font-size: 11px; color: var(--muted); margin: 0 0 8px; word-break: break-all; }
+/* Het lees-/bewerkvenster voor html, css en js — als tab in het terminalvlak
+   (1.5), niet meer als los modal. Regelnummers zitten naast het vak. */
+.lezer-term {
+  flex: 1; min-height: 0; display: flex; flex-direction: column;
+  padding: 8px 10px 10px; gap: 8px;
+}
+.lezer-term-kop { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.lezer-tabs { display: flex; flex-wrap: wrap; gap: 2px; min-width: 0; }
+.lezer-tabs:empty { display: none; }
+.lezer-tab {
+  display: inline-flex; align-items: center; gap: 4px; max-width: 180px;
+  padding: 3px 4px 3px 9px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--s1); color: var(--muted); font-size: 12px; cursor: pointer;
+  font-family: inherit;
+}
+.lezer-tab:hover { color: var(--text); background: var(--s2); }
+.lezer-tab.active { color: var(--accent); background: var(--accent-d); border-color: rgba(84,200,232,0.3); }
+.lezer-tab.vuil { color: var(--amber); }
+.lezer-tab-naam { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.lezer-tab-sluit {
+  flex-shrink: 0; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 3px;
+  background: transparent; color: inherit; opacity: 0.55; cursor: pointer; font-size: 14px; line-height: 1;
+}
+.lezer-tab-sluit:hover { opacity: 1; background: var(--s2); }
+.lezer-pad { font-size: 11px; color: var(--muted); margin: 0; word-break: break-all; }
 .lezer-zoek {
-  display: flex; align-items: center; gap: 6px; margin: 0 0 8px;
+  display: flex; align-items: center; gap: 6px;
   padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius);
-  background: var(--s1);
+  background: var(--s1); flex-shrink: 0;
 }
 .lezer-zoek[hidden] { display: none !important; }
 .lezer-zoek-invoer {
@@ -56,7 +76,7 @@
 .lezer-zoek-info { font-size: 11px; color: var(--muted); white-space: nowrap; }
 .lezer-vak {
   display: flex; border: 1px solid var(--border); border-radius: var(--radius);
-  background: var(--bg); max-height: 62vh; overflow: hidden;
+  background: var(--bg); flex: 1; min-height: 0; overflow: hidden;
 }
 .lezer-regels {
   margin: 0; padding: 12px 0; min-width: 3.2em; text-align: right;
@@ -65,14 +85,37 @@
   overflow: hidden; user-select: none; flex-shrink: 0;
 }
 .lezer-regels span { display: block; padding: 0 10px; }
+.lezer-inhoud-wrap {
+  position: relative; flex: 1; min-width: 0; min-height: 0; display: flex;
+}
 .lezer-inhoud {
   margin: 0; padding: 12px 14px; font-size: 12px; line-height: 1.5;
   color: var(--text); white-space: pre; tab-size: 2;
   flex: 1; min-width: 0; border: 0; outline: none; resize: none;
   background: transparent; overflow: auto; font-family: inherit;
 }
+.lezer-aanvul {
+  position: absolute; z-index: 40; min-width: 140px; max-width: 280px;
+  max-height: 220px; overflow-y: auto; overflow-x: hidden;
+  background: var(--s2); border: 1px solid var(--border2); border-radius: var(--radius);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+}
+.lezer-aanvul[hidden] { display: none !important; }
+.lezer-aanvul-item {
+  padding: 5px 10px; font-family: var(--mono); font-size: 12px;
+  color: var(--muted2); cursor: pointer; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.lezer-aanvul-item:hover, .lezer-aanvul-item.actief {
+  background: var(--s3); color: var(--text);
+}
+.lezer-aanvul-item .ac-match { color: var(--accent); }
+.lezer-term-voet {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex-shrink: 0;
+}
 .lezer-info { font-size: 11px; color: var(--muted); margin-right: auto; align-self: center; }
 .lezer-info.vuil { color: var(--amber); }
+.modal.modal-groot { width: min(1100px, 92vw); max-width: none; }
 
 /* ── Scrollbalken ──
    Overal dezelfde: de breedte van de standaardbalk (fijner om te pakken) maar
@@ -904,6 +947,27 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
   user-select: text; -webkit-user-select: text; cursor: text;
 }
 #terminal-andere[hidden] { display: none; }
+#terminal[hidden] { display: none !important; }
+
+/* Site-preview in plaats van output bij website-projecten */
+.site-preview {
+  flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column;
+  background: var(--bg);
+}
+.site-preview[hidden] { display: none !important; }
+.site-preview-balk {
+  display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+  padding: 6px 8px; border-bottom: 1px solid var(--border); background: var(--s1);
+}
+.site-preview-url {
+  flex: 1; min-width: 0; font-size: 11px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.site-preview-frame {
+  flex: 1; min-height: 0; width: 100%; border: 0; background: #fff;
+  /* webview is standaard inline; zonder flex vult hij het paneel niet. */
+  display: flex;
+}
 .t-cmd  { color: var(--accent); }
 .t-out  { color: #808080; }
 .t-ok   { color: var(--green); }

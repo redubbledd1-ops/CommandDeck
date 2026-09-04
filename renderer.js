@@ -114,6 +114,9 @@ const TOOLS_CMD_DEFS = [
   { id: 'build-windows', label: 'build windows',   icon: 'ti-box',                   cls: 'buildwin' },
 ]
 
+// Helpknoppen voor website-projecten (html/css/js). Definities in web-knoppen.js.
+const WEB_CMD_DEFS = (typeof WebKnoppen !== 'undefined' ? WebKnoppen.WEB_CMD_DEFS : [])
+
 // Knoppen die bestaan maar niet meteen in de weg staan. Een knop hier weglaten
 // is geen kleine keuze: wat er niet staat, bestaat voor de meeste mensen niet.
 // Daarom staan ze wél gewoon in de projectinstellingen, met "standaard uit"
@@ -484,23 +487,285 @@ function migreerAlleProjecten() {
   return veranderd
 }
 
-// Flutter-knoppen slaan alleen ergens op bij een Flutter-project. Dat kijken we
-// één keer na, en alleen als de gebruiker er zelf nog niets over gezegd heeft.
-// Geen Flutter? Dan gaat de map dicht -- zichtbaar dat hij bestaat, maar niet
-// in de weg.
+// Flutter-knoppen en website-gedrag hangen af van wat er in de map zit.
+// Tools (Flutter) leggen we vast tot de gebruiker ze overschrijft. Website
+// blijft automatisch meelopen — tenzij je het in het projectvenster zelf zet
+// (websiteHandmatig). Anders blijft een project met html per ongeluk "geen
+// website" omdat het vinkje bij aanmaken standaard uit stond.
 async function bepaalToolsVoorProject(p) {
-  if (!p || (p.secties && typeof p.secties.tools === 'boolean')) return false
+  if (!p) return false
   const loc = p.locations?.[p.activeLocation] || p.locations?.[0]
   if (!loc?.path) return false
 
   const r = await window.api.projectSoort(loc.path)
   if (!r || !r.ok) return false          // map even niet bereikbaar: later nog eens
 
-  p.secties = { ...(p.secties || {}), tools: !!r.flutter }
-  const f = flutterMap(p)
-  if (f) f.open = !!r.flutter
+  let hertekenen = false
+
+  if (!(p.secties && typeof p.secties.tools === 'boolean')) {
+    p.secties = { ...(p.secties || {}), tools: !!r.flutter }
+    const f = flutterMap(p)
+    if (f) f.open = !!r.flutter
+    hertekenen = !r.flutter
+  }
+
+  const gok = WebTools.isWebsiteGok({ flutter: !!r.flutter, html: !!r.html })
+  if (!p.websiteHandmatig && p.website !== gok) {
+    p.website = gok
+    hertekenen = true
+  }
+  // Website: Flutter-map altijd dicht, ook als tools ooit open stond.
+  if (p.website) {
+    const f = flutterMap(p)
+    if (f && f.open) { f.open = false; hertekenen = true }
+  }
+
   saveProjects()
-  return !r.flutter                      // true = we hebben iets ingeklapt
+  return hertekenen
+}
+
+function projectIsWebsite(p) {
+  return !!(p && p.website)
+}
+
+function projectIsFlutter(p) {
+  return !!(p && p.secties && p.secties.tools)
+}
+
+function openKeuzeVoorProject(p) {
+  const soort = WebTools.projectOpenSoort({
+    website: projectIsWebsite(p),
+    flutter: projectIsFlutter(p),
+  })
+  return WebTools.projectOpenKeuze(settings.projectOpenen, soort)
+}
+
+// Terminalbalk: bij een site horen copy/bat/stop weg, en Open erbij.
+// Verkenner-knoppen blijven aan de tab hangen (weergave/sorteren).
+function werkTermBarVoorProject(tab) {
+  const siteProject = projectIsWebsite(projects.find(x => x.id === activeId))
+  levenden('.alleen-site').forEach(b => { b.hidden = !siteProject })
+  levenden('.alleen-terminal').forEach(b => { b.hidden = !!siteProject })
+  if (tab !== undefined) {
+    levenden('.alleen-verkenner').forEach(b => { b.hidden = tab !== 'browser' })
+  }
+  pasTermTabLabelsAan(siteProject)
+}
+
+function pasTermTabLabelsAan(siteProject) {
+  const knop = document.querySelector('.term-tab[data-tab="output"]')
+  if (!knop) return
+  const label = siteProject ? I18N.t('term.tabSite') : I18N.t('term.tabOutput')
+  const icoon = siteProject ? 'ti-world' : 'ti-terminal-2'
+  knop.title = label
+  const tekst = knop.querySelector('.knop-tekst')
+  if (tekst) tekst.textContent = label
+  const i = knop.querySelector('i')
+  if (i) i.className = 'ti ' + icoon
+}
+
+// Preview i.p.v. kale output bij website-projecten. Git/commando's kunnen de
+// echte uitvoer even terugvragen via springNaarOutput → sitePreviewToonUitvoer.
+let sitePreview = { projectId: '', siteId: '', url: '' }
+let sitePreviewToonUitvoer = false
+
+function sitePreviewAan() {
+  const p = projects.find(x => x.id === activeId)
+  return projectIsWebsite(p) && view === 'project' && !sitePreviewToonUitvoer
+}
+
+function zorgVoorSitePreviewDom() {
+  const pane = document.querySelector('.term-pane[data-pane="output"]')
+  if (!pane || pane.querySelector('#site-preview')) return
+  pane.insertAdjacentHTML('afterbegin', `
+    <div class="site-preview" id="site-preview" hidden>
+      <div class="site-preview-balk">
+        <span class="site-preview-url mono" id="site-preview-url"></span>
+        <button type="button" class="term-btn" id="site-preview-herlaad" title="${esc(I18N.t('term.sitePreviewReload'))}"><i class="ti ti-refresh" style="font-size:13px"></i></button>
+        <button type="button" class="term-btn" id="site-preview-extern" title="${esc(I18N.t('term.siteOpenTitle'))}"><i class="ti ti-external-link" style="font-size:13px"></i></button>
+        <button type="button" class="term-btn" id="site-preview-uitvoer" title="${esc(I18N.t('term.sitePreviewShowOutput'))}"><i class="ti ti-terminal-2" style="font-size:13px"></i>${knopTekst(I18N.t('term.tabOutput'))}</button>
+      </div>
+      <webview class="site-preview-frame" id="site-preview-frame" title="${esc(I18N.t('term.tabSite'))}" allowpopups></webview>
+    </div>`)
+}
+
+function bedraadSitePreview() {
+  zorgVoorSitePreviewDom()
+  const herlaad = document.getElementById('site-preview-herlaad')
+  if (!herlaad || herlaad.dataset.bedraad === '1') return
+  herlaad.dataset.bedraad = '1'
+  herlaad.onclick = () => {
+    const frame = document.getElementById('site-preview-frame')
+    if (frame && sitePreview.url) zetSitePreviewUrl(frame, sitePreview.url, true)
+    else void verversSitePreview()
+  }
+  document.getElementById('site-preview-extern').onclick = () => {
+    if (sitePreview.url) window.api.openUrl(sitePreview.url)
+    else void openSiteVanProject()
+  }
+  document.getElementById('site-preview-uitvoer').onclick = () => {
+    sitePreviewToonUitvoer = true
+    pasTermSchermAan()
+  }
+}
+
+async function verversSitePreview() {
+  bedraadSitePreview()
+  const p = projects.find(x => x.id === activeId)
+  const preview = document.getElementById('site-preview')
+  const frame = document.getElementById('site-preview-frame')
+  const urlEl = document.getElementById('site-preview-url')
+  if (!preview || !frame) return
+  if (!projectIsWebsite(p)) {
+    preview.hidden = true
+    frame.src = 'about:blank'
+    sitePreview = { projectId: '', siteId: '', url: '' }
+    return
+  }
+
+  const loc = p.locations?.[p.activeLocation] || p.locations?.[0]
+  if (!loc?.path) {
+    if (urlEl) urlEl.textContent = I18N.t('term.siteGeenHtml')
+    return
+  }
+
+  const huidig = lezerHuidig()
+  const sep = (huidig && huidig.pad.includes('\\')) || loc.path.includes('\\') ? '\\' : '/'
+  const site = await window.api.zoekSite(loc.path).catch(() => null)
+  const gevonden = (site && site.ok && site.gevonden) || []
+  const keuze = WebTools.kiesSiteOpen({
+    huidigPad: huidig && huidig.pad, wortel: loc.path, gevonden, sep,
+  })
+  const r = await window.api.siteStart({
+    dir: loc.path, start: keuze && keuze.pad ? keuze.pad : '',
+  }).catch(() => null)
+  if (!r || !r.ok) {
+    if (urlEl) urlEl.textContent = I18N.t('sleep.siteMisluktTekst', { reden: (r && r.reden) || '' })
+    return
+  }
+  sitePreview = { projectId: p.id, siteId: r.id || '', url: r.url }
+  if (urlEl) urlEl.textContent = r.url
+  zetSitePreviewUrl(frame, r.url, false)
+}
+
+// webview/iframe naar de lokale server. Zelfde url opnieuw zetten doet Chromium
+// soms niet — dan blijft een wit scherm staan. Daarom about:blank ertussen bij
+// een herlaad, en anders gewoon src zetten.
+function zetSitePreviewUrl(frame, url, forceer) {
+  if (!frame || !url) return
+  const vorig = frame.getAttribute('data-cd-url') || ''
+  if (!forceer && vorig === url && frame.src && String(frame.src).startsWith('http')) return
+  frame.setAttribute('data-cd-url', url)
+  if (forceer && vorig === url) {
+    frame.src = 'about:blank'
+    requestAnimationFrame(() => { frame.src = url })
+    return
+  }
+  frame.src = url
+}
+
+function pasSitePreviewZicht(outputZichtbaar, editorAan, ptyZichtbaar) {
+  bedraadSitePreview()
+  const preview = document.getElementById('site-preview')
+  const term = document.getElementById('terminal')
+  const aan = sitePreviewAan() && outputZichtbaar && !editorAan && !ptyZichtbaar
+  if (preview) preview.hidden = !aan
+  // Terminal alleen als we géén preview tonen (of gebruiker vroeg om uitvoer).
+  if (term && aan) term.hidden = true
+  if (!aan && projectIsWebsite(projects.find(x => x.id === activeId)) && sitePreviewToonUitvoer && outputZichtbaar && !editorAan) {
+    zorgVoorSiteTerugBalk(true)
+  } else {
+    zorgVoorSiteTerugBalk(false)
+  }
+  if (aan) void verversSitePreview()
+}
+
+function zorgVoorSiteTerugBalk(aan) {
+  let balk = document.getElementById('site-preview-terug-balk')
+  if (!aan) {
+    if (balk) balk.hidden = true
+    return
+  }
+  const pane = document.querySelector('.term-pane[data-pane="output"]')
+  if (!pane) return
+  if (!balk) {
+    balk = document.createElement('div')
+    balk.id = 'site-preview-terug-balk'
+    balk.className = 'site-preview-balk'
+    balk.innerHTML = `<span class="site-preview-url">${esc(I18N.t('term.sitePreviewOutputMode'))}</span>
+      <button type="button" class="term-btn" id="site-preview-terug"><i class="ti ti-world" style="font-size:13px"></i>${knopTekst(I18N.t('term.tabSite'))}</button>`
+    const term = pane.querySelector('#terminal')
+    pane.insertBefore(balk, term)
+    balk.querySelector('#site-preview-terug').onclick = () => {
+      sitePreviewToonUitvoer = false
+      pasTermSchermAan()
+    }
+  }
+  balk.hidden = false
+  const knop = balk.querySelector('#site-preview-terug')
+  if (knop && knop.dataset.bedraad !== '1') {
+    knop.dataset.bedraad = '1'
+    knop.onclick = () => {
+      sitePreviewToonUitvoer = false
+      pasTermSchermAan()
+    }
+  }
+}
+
+// Bij een website-project hoort de editor vooraan — tenzij je zelf al een
+// tab hebt gekozen. Die keuze wint altijd van de gok. Zonder voorkeur volgt
+// de tab de globale instelling "project openen".
+function standaardTermTab(projectId) {
+  const bewaard = (settings.termTabs || {})[projectId]
+  if (bewaard === 'browser' || bewaard === 'editor' || bewaard === 'output') return bewaard
+  const p = projects.find(x => x.id === projectId)
+  return WebTools.termTabVoorOpenKeuze(openKeuzeVoorProject(p))
+}
+
+async function openWebsiteStart(p) {
+  if (!projectIsWebsite(p)) return
+  const loc = p.locations?.[p.activeLocation] || p.locations?.[0]
+  if (!loc?.path) { setTermTab('editor'); return }
+  const site = await window.api.zoekSite(loc.path).catch(() => null)
+  const start = WebTools.besteStart((site && site.gevonden) || [])
+  if (start && start.pad) await toonBestand(start.pad)
+  else setTermTab('editor')
+}
+
+// Eerste keer een project openen: doe wat de globale instelling zegt.
+// (Map in Windows, site in de browser, html in de editor, …)
+async function openProjectStart(p) {
+  if (!p) return
+  const keuze = openKeuzeVoorProject(p)
+  const loc = p.locations?.[p.activeLocation] || p.locations?.[0]
+  const pad = (loc && loc.path) || ''
+
+  if (keuze === 'niets') return
+
+  if (keuze === 'windows') {
+    if (pad) window.api.openFolder(pad)
+    return
+  }
+
+  if (keuze === 'verkenner') {
+    setTermTab('browser')
+    if (pad) await navigeerNaar(pad)
+    return
+  }
+
+  if (keuze === 'site') {
+    if (!pad) return
+    const site = await window.api.zoekSite(pad).catch(() => null)
+    await startSite(pad, (site && site.gevonden) || [])
+    return
+  }
+
+  if (keuze === 'editor') {
+    await openWebsiteStart(p)
+    return
+  }
+
+  setTermTab('output')
 }
 
 // Bij het opstarten en na een update: projecten die nog nooit gekeken zijn,
@@ -763,12 +1028,23 @@ function customCmdsOf(p) {
 function alleCmdKnopIds(bron, sectie) {
   const ids = []
   for (const def of RUN_CMD_DEFS) ids.push(def.id)
-  for (const e of eigenEditors()) ids.push('editor:custom:' + e.id)
+  const website = projectIsWebsite(bron)
+  // Website: geen Cursor/VS Code e.d. wél AI-programma's die bij bestanden
+  // kunnen (Claude Code, Codex, Gemini CLI) — die horen in programma's.
+  if (!website) {
+    for (const e of eigenEditors()) ids.push('editor:custom:' + e.id)
+  }
   // Een dienst die klaarstaat is net zo goed een knop als de rest: dus ook
   // per project uit te zetten en te verslepen. Programmaknoppen die al als
-  // editor in deze rij staan, niet nog eens.
-  for (const d of aiDienstenOpProject()) ids.push('ai:' + d.id)
-  for (const def of TOOLS_CMD_DEFS) ids.push(def.id)
+  // editor in deze rij staan, niet nog eens (behalve website: daar geen editors).
+  for (const d of aiDienstenOpProject(bron)) {
+    ids.push('ai:' + d.id)
+  }
+  if (!website) {
+    for (const def of TOOLS_CMD_DEFS) ids.push(def.id)
+  } else {
+    for (const def of WEB_CMD_DEFS) ids.push(def.id)
+  }
   for (const c of customCmdsOf(bron)) ids.push('custom:' + c.id)
   // Een map staat in dezelfde lijst als de knoppen. Zo houdt hij een plek in de
   // rij zonder dat er een tweede volgorde bijgehouden hoeft te worden.
@@ -797,7 +1073,7 @@ function projectRij(bron, sectie) {
     alle: () => alleCmdKnopIds(bron, sectie),
     standaardAan: cmdStandaardAan,
     zichtbaarheid: bron.cmdVisibility || pendingCmdVisibility,
-    toonbaar: (ids) => gitToonbaar(bron, ids),
+    toonbaar: (ids) => projectToonbaar(bron, ids),
     sorteert: sorteertSectie(sectie),
     autoSoorten: autoSoorten(),
     knopHtml: () => cmdKnopHtmlMap(bron),
@@ -825,6 +1101,50 @@ function gitToonbaar(bron, ids) {
   if (!ids.some(id => GitTools.isGitId(id))) return ids
   const toon = GitTools.zichtbareGitIds(gitStaatVan(bron))
   return ids.filter(id => !GitTools.isGitId(id) || toon.includes(id))
+}
+
+// Welke taal staat open in de editor? Bepaalt de web-helpknoppen.
+function actieveWebTaal() {
+  const t = lezerHuidig && lezerHuidig()
+  if (!t || !t.pad) return null
+  if (typeof LezerAanvul !== 'undefined') return LezerAanvul.taalVanPad(t.pad)
+  return WebTools.isHtmlBestand(t.pad) ? 'html'
+    : (WebTools.extensieVan(t.pad) === 'css' ? 'css'
+      : (['js', 'mjs', 'cjs'].includes(WebTools.extensieVan(t.pad)) ? 'js' : null))
+}
+
+// Website: geen Flutter, geen Cursor/VS Code. Wél git, web-help, en de
+// programma's-map met AI die bij bestanden kan (Claude Code, Codex, …).
+function projectToonbaar(bron, ids) {
+  let uit = gitToonbaar(bron, ids)
+  const website = projectIsWebsite(bron)
+  const taal = website ? actieveWebTaal() : null
+
+  return uit.filter(id => {
+    if (isMapId(id)) {
+      const f = folderOp(bron, mapIdVan(id))
+      if (!f) return false
+      if (website) {
+        if (f.auto === FLUTTER_MAP) return false
+        if (typeof WebKnoppen !== 'undefined' && WebKnoppen.isWebAuto(f.auto)) {
+          return !!(taal && f.auto.startsWith('web-' + taal + '-'))
+        }
+      } else if (typeof WebKnoppen !== 'undefined' && WebKnoppen.isWebAuto(f.auto)) {
+        return false
+      }
+      return true
+    }
+    if (typeof WebKnoppen !== 'undefined' && WebKnoppen.isWebId(id)) {
+      if (!website || !taal) return false
+      const def = WebKnoppen.defVan(id)
+      return !!(def && def.taal === taal)
+    }
+    if (website) {
+      if (TOOLS_CMD_DEFS.some(d => d.id === id)) return false
+      if (id.startsWith('editor:custom:')) return false
+    }
+    return true
+  })
 }
 
 function cmdZichtbaar(bron, id, zichtbaarMap = null) {
@@ -893,9 +1213,12 @@ function cmdKnopHtmlMap(p) {
     map[id] = `<button class="cmd-btn" data-editor="custom:${esc(e.id)}" data-volgorde-id="${esc(id)}"><i class="ti ${progIcoon(e)}"></i> ${esc(e.label || 'editor')}</button>`
   })
   const actiefAi = (aiSessies[p.id] && aiSessies[p.id].aan) ? aiSessies[p.id].providerId : ''
-  aiDienstenOpProject().forEach(d => { map['ai:' + d.id] = aiKnopHtml(d, actiefAi) })
+  aiDienstenOpProject(p).forEach(d => { map['ai:' + d.id] = aiKnopHtml(d, actiefAi) })
   for (const def of TOOLS_CMD_DEFS) {
     map[def.id] = `<button class="cmd-btn" data-cmd="${def.id}" data-volgorde-id="${def.id}"><i class="ti ${def.icon}"></i> ${esc(defLabel(def))}</button>`
+  }
+  for (const def of WEB_CMD_DEFS) {
+    map[def.id] = `<button class="cmd-btn" data-cmd="${def.id}" data-volgorde-id="${def.id}" title="${esc(I18N.t('web.knopTitel'))}"><i class="ti ${def.icon}"></i> ${esc(def.label)}</button>`
   }
   customCmdsOf(p).forEach(c => {
     const id = 'custom:' + c.id
@@ -1006,6 +1329,7 @@ function modalProjectCtx() {
     device: (document.getElementById('f-device')?.value || '').trim(),
     customCmds: pendingCustomCmds,
     cmdVolgorde: pendingCmdVolgorde,
+    website: !!document.getElementById('f-website')?.checked,
   }
 }
 
@@ -1016,7 +1340,7 @@ function cmdvisRijen(sectie) {
   const editors = eigenEditors().map((e, i) => ({
     id: 'editor:custom:' + e.id, label: e.label || 'editor', icon: progIcoon(e), kleurCls: progKleurCls(e, i),
   }))
-  const ai = aiDienstenOpProject().map(d => ({
+  const ai = aiDienstenOpProject(ctx).map(d => ({
     id: 'ai:' + d.id, label: d.label, icon: AI_KNOP_ICON[d.id] || aiKnopIcoon(d),
   }))
   const customs = pendingCustomCmds.map(c => ({
@@ -3060,19 +3384,29 @@ async function selectProject(id) {
   // als je van project wisselt — zelfde vraag als bij account/afsluiten.
   if (await controleerLezerWerk('wisselen') === 'blijven') return
 
+  // Vóór setView/wireTerminal: die schrijven al een tab weg. Anders lijkt
+  // "eerste keer" nooit waar en start openProjectStart nooit.
+  const eersteOpen = !Object.prototype.hasOwnProperty.call(settings.termTabs || {}, id)
+
   cmdSorteerModus = ''
   bergVerkennerOp()
   activeId = id
+  sitePreviewToonUitvoer = false
   // Stil kijken of de remote iets heeft wat jij niet hebt. Hoogstens eens per
   // tien minuten per map, en een mislukking blijft onzichtbaar.
   if (projects.some(x => x.id === id)) setTimeout(() => controleerAchterstand(), 400)
 
   const naOpenen = () => {
     const p = projects.find(x => x.id === id)
-    bepaalToolsVoorProject(p).then(verborgen => {
-      if (!verborgen) return
-      if (activeId === id) vraagProjectHertekenen()
-      showToast(I18N.t('project.notFlutterToast'))
+    bepaalToolsVoorProject(p).then(async verborgen => {
+      if (activeId !== id) return
+      if (verborgen) {
+        vraagProjectHertekenen()
+        showToast(I18N.t('project.notFlutterToast'))
+      }
+      // Eerste keer: globale "project openen"-keuze (editor, site, Windows, …).
+      // Had je zelf al een tab, dan laten we die staan.
+      if (eersteOpen) await openProjectStart(p)
     })
   }
 
@@ -3289,18 +3623,40 @@ function hefMappenOp(p, sectie, mapIds) {
 // Waar hoort een knop vanzelf thuis? Drie groepen, te herkennen aan het id.
 // Wat er niet in past blijft los staan: een map met een restje erin helpt
 // niemand aan overzicht.
+//
+// AI per soort (loop dit na bij een nieuwe dienst):
+//   API-chat (claude/openai/gemini/… + eigen server)  → map "ai"
+//   CLI-programma (ai:prog:claude/openai/gemini)      → map "programma's"
+//                                                     → anders bestaande "ai"
+//   Lokale app-chat (ollama, lmstudio)                → map "programma's"
+//                                                     → anders bestaande "ai"
 const TOOLS_IDS = new Set(TOOLS_CMD_DEFS.map(d => d.id))
+const AI_LOKAAL_BIJ_PROG = new Set(['ai:ollama', 'ai:lmstudio'])
 const AUTO_MAPPEN = [
   { auto: 'git',       sleutel: 'folder.autoGit',   toets: (id) => GitTools.isGitId(id) },
-  { auto: 'ai',        sleutel: 'folder.autoAi',    toets: (id) => id.startsWith('ai:') && !id.startsWith('ai:prog:') },
-  { auto: 'prog',      sleutel: 'folder.autoProgs', toets: (id) => id.startsWith('editor:custom:') || id.startsWith('ai:prog:') },
+  { auto: 'ai',        sleutel: 'folder.autoAi',    toets: (id) => id.startsWith('ai:') && !id.startsWith('ai:prog:') && !AI_LOKAAL_BIJ_PROG.has(id) },
+  { auto: 'prog',      sleutel: 'folder.autoProgs', fallbackAuto: 'ai',
+    toets: (id) => id.startsWith('editor:custom:') || id.startsWith('ai:prog:') || AI_LOKAAL_BIJ_PROG.has(id) },
   { auto: FLUTTER_MAP, sleutel: 'folder.flutter',   toets: (id) => TOOLS_IDS.has(id) },
+  ...((typeof WebKnoppen !== 'undefined' ? WebKnoppen.WEB_AUTO_MAPPEN : []).map(m => ({
+    auto: m.auto,
+    sleutel: m.sleutel,
+    toets: (id) => {
+      const d = WebKnoppen.defVan(id)
+      return !!(d && d.taal === m.taal && d.groep === m.groep)
+    },
+  }))),
 ]
 
 // De namen komen er hier pas bij: knoppenrij.js kent geen talen, dus die krijgt
 // het label mee in plaats van de sleutel.
 function autoSoorten() {
-  return AUTO_MAPPEN.map(s => ({ auto: s.auto, label: I18N.t(s.sleutel), toets: s.toets }))
+  return AUTO_MAPPEN.map(s => ({
+    auto: s.auto,
+    label: I18N.t(s.sleutel),
+    toets: s.toets,
+    fallbackAuto: s.fallbackAuto,
+  }))
 }
 
 function maakAutoMappen(p, sectie) {
@@ -3317,13 +3673,33 @@ function autoMappen(p, sectie) {
 
 // Een project begint geordend: git bij git, AI bij AI, programma's bij
 // programma's. Dat is wat je zelf ook meteen zou doen, en het scheelt iedereen
-// die de app voor het eerst opent een rij van dertig losse knoppen. Eenmalig --
-// wie zijn mappen daarna opheft, houdt ze opgeheven.
+// die de app voor het eerst opent een rij van dertig losse knoppen.
+// Daarna blijft maakAutoMappen meelopen: nieuwe AI-knoppen (Gemini CLI, Ollama)
+// die later verschijnen horen alsnog in de bestaande map, niet ernaast.
 function ordenProject(p) {
-  if (!p || p.knoppenGeordend) return false
+  if (!p) return false
+  const eerste = !p.knoppenGeordend
   p.knoppenGeordend = true
-  maakAutoMappen(p, 'run')
-  return true
+  const gedaan = maakAutoMappen(p, 'run')
+  return eerste || gedaan > 0
+}
+
+// Website-projecten: zorg dat de html/css/js-mappen er zijn. Of ze open of
+// dicht staan bepaalt de gebruiker — hier niet forceren, anders klapt elke
+// klik meteen weer open (renderMain roept dit bij elke tekening aan).
+function zorgVoorWebKnoppen(p) {
+  if (!projectIsWebsite(p) || typeof WebKnoppen === 'undefined') return false
+  const rij = projectRij(p, 'run')
+  return Knoppenrij.maakAutoMappen(rij) > 0
+}
+
+function hertekenWebKnoppen() {
+  const p = projects.find(x => x.id === activeId)
+  if (!projectIsWebsite(p) || view !== 'project') return
+  const focusTerug = document.activeElement === lezerInhoudEl()
+  if (zorgVoorWebKnoppen(p)) saveProjects()
+  renderMain()
+  if (focusTerug) requestAnimationFrame(() => lezerInhoudEl()?.focus())
 }
 
 // De mappen van deze rij, waar hij ook staat.
@@ -3694,6 +4070,10 @@ function renderMain() {
     return
   }
 
+  let knoppenOpslaan = ordenProject(p)
+  if (projectIsWebsite(p) && zorgVoorWebKnoppen(p)) knoppenOpslaan = true
+  if (knoppenOpslaan) saveProjects()
+
   const zelfdeProject = getekendProjectId === p.id
 
   const activeLoc  = p.locations[p.activeLocation] || p.locations[0]
@@ -3748,10 +4128,10 @@ function renderMain() {
   `
 
   const wrapBestaat = levend('#main .terminal-wrap.splitbaar')
-  const houdWerkvlak = wrapBestaat && (
-    splitTweeProjecten()
-    || (splitGemengd() && werkSlots.some(s => s.view === 'project' && s.projectId === activeId))
-  )
+  // Zelfde project: knoppenrij wél opnieuw, werkvlak (site-preview / editor /
+  // terminal) niet. Anders flitst bij elke mapklik de oude AI-uitvoer even door
+  // de preview ("Alles wat je nu typt…") en lijkt de selectie kapot.
+  const houdWerkvlak = !!wrapBestaat && zelfdeProject
   if (houdWerkvlak) {
     let chrome = document.querySelector('#main .proj-chrome')
     if (!chrome) {
@@ -3763,6 +4143,9 @@ function renderMain() {
       })
     }
     chrome.innerHTML = chromeHtml
+    // Oude wraps van vóór de editor-tab missen paneel en knop — bijplussen
+    // zonder het hele werkvlak te slopen (dat zou een open split weggooien).
+    zorgVoorEditorInWrap(wrapBestaat)
   } else {
     main.innerHTML = `
     <div class="proj-chrome">${chromeHtml}</div>
@@ -3862,7 +4245,11 @@ function renderMain() {
   if (houdWerkvlak) {
     activeTermId = p.id
     haalVerkennerOp(p.id)
-    termTab = werkSlots[werkSlotFocus].tab
+    // Alleen bij een actieve split de tab uit de slots; anders termTab laten
+    // (site/editor) — anders wis je de keuze bij elke mapklik.
+    if (termSplitAan() && werkSlots && werkSlots[werkSlotFocus]) {
+      termTab = werkSlots[werkSlotFocus].tab || termTab
+    }
     const loc = p.locations[p.activeLocation] || p.locations[0]
     updateTermPlaceholder(loc?.path || '')
     pasTermSchermAan()
@@ -3974,6 +4361,58 @@ function volgKrappeVlakken() {
 // ── Herbruikbare terminal ─────────────────────────────────────────────────────
 // Zowel de projectweergave als de losse CMD-sectie gebruiken deze; ze verschillen
 // alleen in welke context (map + id) de commando's krijgen.
+function lezerPaneelHtml() {
+  return `
+        <div class="term-pane" data-pane="editor" hidden>
+          <div class="lezer-term">
+            <div class="lezer-term-kop">
+              <div class="lezer-tabs" id="lezer-tabs" role="tablist"></div>
+              <div class="lezer-pad mono" id="lezer-pad"></div>
+            </div>
+            <div class="lezer-zoek" id="lezer-zoek" hidden>
+              <input class="lezer-zoek-invoer mono" id="lezer-zoek-invoer" type="text" data-i18n-placeholder="lezer.zoekPlaceholder" placeholder="zoeken…" autocomplete="off" spellcheck="false">
+              <span class="lezer-zoek-info" id="lezer-zoek-info"></span>
+              <button class="btn-ghost" id="lezer-zoek-vorige" data-i18n-title="lezer.zoekVorige" title="vorige"><i class="ti ti-chevron-up"></i></button>
+              <button class="btn-ghost" id="lezer-zoek-volgende" data-i18n-title="lezer.zoekVolgende" title="volgende"><i class="ti ti-chevron-down"></i></button>
+              <button class="btn-ghost" id="lezer-zoek-dicht" data-i18n-title="common.close" title="sluiten"><i class="ti ti-x"></i></button>
+            </div>
+            <div class="lezer-vak">
+              <pre class="lezer-regels mono" id="lezer-regels" aria-hidden="true"></pre>
+              <div class="lezer-inhoud-wrap">
+                <textarea class="lezer-inhoud mono" id="lezer-inhoud" spellcheck="false" wrap="off" placeholder=""></textarea>
+                <div class="lezer-aanvul" id="lezer-aanvul" hidden role="listbox"></div>
+              </div>
+            </div>
+            <div class="lezer-term-voet">
+              <span class="lezer-info" id="lezer-info"></span>
+              <button class="btn-ghost" id="lezer-zoek-knop" data-i18n="lezer.zoeken">zoeken</button>
+              <button class="btn-ghost" id="lezer-kopieer" data-i18n="lezer.kopieer">kopiëren</button>
+              <button class="btn-ghost" id="lezer-map" data-i18n="lezer.inMap">map openen</button>
+              <button class="btn-ghost" id="lezer-windows" data-i18n="lezer.metWindows">openen met Windows</button>
+              <button class="btn-primary" id="lezer-opslaan" data-i18n="common.save">opslaan</button>
+            </div>
+          </div>
+        </div>`
+}
+
+// Bestaande wraps van vóór de editor-tab missen knop en paneel.
+function zorgVoorEditorInWrap(wrap) {
+  if (!wrap) return
+  const tabs = wrap.querySelector('.term-tabs')
+  if (tabs && !tabs.querySelector('[data-tab="editor"]')) {
+    const knop = document.createElement('button')
+    knop.className = 'term-tab'
+    knop.dataset.tab = 'editor'
+    knop.title = I18N.t('term.tabEditor')
+    knop.innerHTML = `<i class="ti ti-file-code"></i>${knopTekst(I18N.t('term.tabEditor'))}`
+    tabs.appendChild(knop)
+  }
+  const stage = wrap.querySelector('.term-stage')
+  if (stage && !stage.querySelector('.term-pane[data-pane="editor"]')) {
+    stage.insertAdjacentHTML('beforeend', lezerPaneelHtml())
+  }
+}
+
 function terminalMarkup(opts = {}) {
   const splitbaar = opts.splitbaar === true
   const splitHits = splitbaar ? `
@@ -3988,22 +4427,33 @@ function terminalMarkup(opts = {}) {
         <div class="term-tabs">
           <button class="term-tab active" data-tab="output" title="${esc(I18N.t('term.tabOutput'))}"><i class="ti ti-terminal-2"></i>${knopTekst(I18N.t('term.tabOutput'))}<span class="pty-punt" id="pty-punt" hidden></span></button>
           <button class="term-tab" data-tab="browser" title="${esc(I18N.t('term.tabBrowser'))}"><i class="ti ti-folders"></i>${knopTekst(I18N.t('term.tabBrowser'))}</button>
+          <button class="term-tab" data-tab="editor" title="${esc(I18N.t('term.tabEditor'))}"><i class="ti ti-file-code"></i>${knopTekst(I18N.t('term.tabEditor'))}</button>
         </div>
         <div class="terminal-bar-btns">
+          <button class="term-btn alleen-site" id="btn-site-open" title="${esc(I18N.t('term.siteOpenTitle'))}" hidden><i class="ti ti-world" style="font-size:13px"></i>${knopTekst(I18N.t('term.siteOpenButton'))}</button>
           <button class="term-btn alleen-verkenner" id="br-weergave" title="${esc(I18N.t('term.viewTitle'))}" hidden><i class="ti ti-layout-grid" style="font-size:13px"></i>${knopTekst(I18N.t('term.viewButton'))}</button>
           <button class="term-btn alleen-verkenner" id="br-sorteer" title="${esc(I18N.t('term.sortTitle'))}" hidden><i class="ti ti-arrows-sort" style="font-size:13px"></i>${knopTekst(I18N.t('term.sortButton'))}</button>
-          <button class="term-btn" id="btn-copy-last" title="${esc(I18N.t('term.copyLastButton'))}"><i class="ti ti-copy" style="font-size:13px"></i>${knopTekst(I18N.t('term.copyLastButton'))}</button>
-          <button class="term-btn" id="btn-copy-all" title="${esc(I18N.t('term.copyAllButton'))}"><i class="ti ti-clipboard" style="font-size:13px"></i>${knopTekst(I18N.t('term.copyAllButton'))}</button>
-          <button class="term-btn bat" id="btn-bat" title="${esc(I18N.t('term.batButtonTitle'))}"><i class="ti ti-file-code" style="font-size:13px"></i>${knopTekst('bat')}</button>
-          <button class="term-btn stop" id="btn-kill" title="${esc(I18N.t('term.stopButton'))}"><i class="ti ti-player-stop" style="font-size:13px"></i>${knopTekst(I18N.t('term.stopButton'))}</button>
+          <button class="term-btn alleen-terminal" id="btn-copy-last" title="${esc(I18N.t('term.copyLastButton'))}"><i class="ti ti-copy" style="font-size:13px"></i>${knopTekst(I18N.t('term.copyLastButton'))}</button>
+          <button class="term-btn alleen-terminal" id="btn-copy-all" title="${esc(I18N.t('term.copyAllButton'))}"><i class="ti ti-clipboard" style="font-size:13px"></i>${knopTekst(I18N.t('term.copyAllButton'))}</button>
+          <button class="term-btn bat alleen-terminal" id="btn-bat" title="${esc(I18N.t('term.batButtonTitle'))}"><i class="ti ti-file-code" style="font-size:13px"></i>${knopTekst('bat')}</button>
+          <button class="term-btn stop alleen-terminal" id="btn-kill" title="${esc(I18N.t('term.stopButton'))}"><i class="ti ti-player-stop" style="font-size:13px"></i>${knopTekst(I18N.t('term.stopButton'))}</button>
           <button class="term-btn" id="btn-pty-sluit" title="${esc(I18N.t('term.closeSessionButton'))}" hidden><i class="ti ti-x" style="font-size:13px"></i>${knopTekst(I18N.t('term.closeSessionButton'))}</button>
-          <button class="term-btn" id="btn-clear" title="${esc(I18N.t('common.clear'))}"><i class="ti ti-trash" style="font-size:13px"></i>${knopTekst(I18N.t('common.clear'))}</button>
-          <button class="term-btn update" id="btn-relaunch" title="${esc(I18N.t('term.relaunchTitle'))}"><i class="ti ti-refresh" style="font-size:13px"></i>${knopTekst(I18N.t('term.relaunchButton'))}</button>
+          <button class="term-btn alleen-terminal" id="btn-clear" title="${esc(I18N.t('common.clear'))}"><i class="ti ti-trash" style="font-size:13px"></i>${knopTekst(I18N.t('common.clear'))}</button>
+          <button class="term-btn update alleen-terminal" id="btn-relaunch" title="${esc(I18N.t('term.relaunchTitle'))}"><i class="ti ti-refresh" style="font-size:13px"></i>${knopTekst(I18N.t('term.relaunchButton'))}</button>
         </div>
       </div>
       <div class="term-stage">
         <div class="term-pane" data-pane="output" data-slot="0">
           <div class="term-pane-naam"></div>
+          <div class="site-preview" id="site-preview" hidden>
+            <div class="site-preview-balk">
+              <span class="site-preview-url mono" id="site-preview-url"></span>
+              <button type="button" class="term-btn" id="site-preview-herlaad" title="${esc(I18N.t('term.sitePreviewReload'))}"><i class="ti ti-refresh" style="font-size:13px"></i></button>
+              <button type="button" class="term-btn" id="site-preview-extern" title="${esc(I18N.t('term.siteOpenTitle'))}"><i class="ti ti-external-link" style="font-size:13px"></i></button>
+              <button type="button" class="term-btn" id="site-preview-uitvoer" title="${esc(I18N.t('term.sitePreviewShowOutput'))}"><i class="ti ti-terminal-2" style="font-size:13px"></i>${knopTekst(I18N.t('term.tabOutput'))}</button>
+            </div>
+            <webview class="site-preview-frame" id="site-preview-frame" title="${esc(I18N.t('term.tabSite'))}" allowpopups></webview>
+          </div>
           <div id="terminal"><span class="t-cursor"></span></div>
           <div id="pty-host" hidden></div>
           ${splitbaar ? verkennerMarkup('-andere') : ''}
@@ -4014,6 +4464,7 @@ function terminalMarkup(opts = {}) {
           <div id="pty-host-andere" hidden></div>
           ${verkennerMarkup()}
         </div>
+        ${lezerPaneelHtml()}
         ${splitHits}
       </div>
       <div class="term-input-wrap">
@@ -4146,9 +4597,9 @@ const ARCHIEF_EXT = /\.(zip|jar|apk|aar|war|docx|xlsx|pptx|epub|whl|nupkg|vsix|r
 // Een pad ín een archief ziet eruit als  C:\map\archief.zip::submap/bestand
 function inArchief(p) { return String(p || '').includes('.') && /\.[a-z0-9]+::/i.test(p) }
 
-let termTab        = 'output'   // 'output' | 'browser'
+let termTab        = 'output'   // 'output' | 'browser' | 'editor'
 let termSplit      = null       // null | 'right' | 'bottom' — alleen in een project
-let termSplitFirst = 'output'   // welk paneel links/boven blijft staan
+let termSplitFirst = 'output'   // welk paneel links/boven blijft staan (nooit editor)
 let werkSlots      = null       // null | [{ view, projectId?, tab? }, { view, projectId?, tab? }]
 let werkSlotFocus  = 0          // 0 = output-paneel, 1 = verkenner-paneel
 let browserPath  = ''
@@ -4611,8 +5062,8 @@ function herstelBewaardPaneel(v) {
       const p = projects.find(x => x.id === activeId)
       const loc = p?.locations[p.activeLocation] || p?.locations[0]
       if (loc?.path) updateTermPlaceholder(loc.path)
-      const gewenst = (settings.termTabs || {})[activeTermId] === 'browser' ? 'browser' : 'output'
-      if (!termSplitAan()) termTab = gewenst
+      const gewenst = standaardTermTab(activeTermId)
+      if (!termSplitAan()) termTab = gewenst === 'editor' ? 'output' : gewenst
     }
     pasTermSchermAan()
     focusTerminalInput()
@@ -5242,7 +5693,13 @@ function springNaarOutput() {
   // Zelfde project gesplitst: uitvoer is al in beeld, verkenner blijft.
   // Twee projecten: een commando hoort in het gerichte vlak zichtbaar te zijn.
   if (termSplitAan() && !splitTweeProjecten()) return
-  if (termTab === 'browser') setTermTab('output')
+  // Website: de output-tab is de preview — bij een echt commando even de
+  // terminal laten zien, anders verdwijnt git-uitvoer achter de iframe.
+  if (projectIsWebsite(projects.find(x => x.id === activeId))) {
+    sitePreviewToonUitvoer = true
+  }
+  if (termTab !== 'output') setTermTab('output')
+  else pasTermSchermAan()
 }
 
 function leesTermSplit(v) {
@@ -5450,6 +5907,7 @@ function pasTermSchermAan() {
     })
     planSplitPlusVervers()
     keurStatusNa()
+    werkTermBarVoorProject(termTab)
     return
   }
 
@@ -5478,9 +5936,11 @@ function pasTermSchermAan() {
 
   const paneOut = wrap?.querySelector('.term-pane[data-pane="output"]')
   const paneBr  = wrap?.querySelector('.term-pane[data-pane="browser"]')
+  const paneEd  = wrap?.querySelector('.term-pane[data-pane="editor"]')
   const browserEerst = split && termSplitFirst === 'browser'
+  const editorAan = !split && tab === 'editor'
   if (paneOut) {
-    paneOut.hidden = twee ? false : !outputZichtbaar
+    paneOut.hidden = twee ? false : (editorAan || !outputZichtbaar)
     paneOut.classList.toggle('actief', split && (twee ? werkSlotFocus === 0 : tab === 'output'))
     paneOut.style.order = browserEerst ? '2' : '1'
     paneOut.classList.toggle('split-tweede', split && browserEerst)
@@ -5491,22 +5951,27 @@ function pasTermSchermAan() {
     paneBr.style.order = browserEerst ? '1' : '2'
     paneBr.classList.toggle('split-tweede', split && !browserEerst)
   }
+  if (paneEd) paneEd.hidden = !editorAan
 
   const brAndere = document.getElementById('browser-andere')
   if (twee && werkSlots) {
     // Per vlak terminal of verkenner; toonSlotInhoud doet dat via vulSplitPanelen.
   } else {
-    term.hidden = !outputZichtbaar || ptyZichtbaar
+    term.hidden = editorAan || !outputZichtbaar || ptyZichtbaar
     br.hidden = split ? false : tab !== 'browser'
     if (brAndere) brAndere.hidden = true
-    if (pty) pty.hidden = !ptyZichtbaar
+    if (pty) pty.hidden = editorAan || !ptyZichtbaar
   }
+  pasSitePreviewZicht(outputZichtbaar, editorAan, ptyZichtbaar)
   vulSplitPanelen()
   vulIdleVerkenner()
 
   const invoer = levend('.term-input-wrap')
   if (invoer) {
-    invoer.hidden = sessieLeeft
+    // Bij de editor hoort geen commandoregel onderin — die is voor de terminal.
+    // Bij de site-preview ook niet: daar typ je geen commando's.
+    const previewZonderUitvoer = sitePreviewAan() && tab === 'output' && !ptyZichtbaar
+    invoer.hidden = sessieLeeft || tab === 'editor' || previewZonderUitvoer
     if (sessieLeeft) {
       const ac = document.getElementById('term-autocomplete')
       if (ac) ac.hidden = true
@@ -5514,7 +5979,7 @@ function pasTermSchermAan() {
   }
   const sluit = document.getElementById('btn-pty-sluit')
   if (sluit) sluit.hidden = !sessieAanZet
-  levenden('.alleen-verkenner').forEach(b => { b.hidden = tab !== 'browser' })
+  werkTermBarVoorProject(tab)
   levenden('.term-tab').forEach(b => {
     b.classList.toggle('active', b.dataset.tab === tab)
   })
@@ -5616,12 +6081,17 @@ function wireTermSplit() {
 }
 
 function setTermTab(tab) {
-  if (tab !== 'output' && tab !== 'browser') return
+  if (tab !== 'output' && tab !== 'browser' && tab !== 'editor') return
+  // De split kent maar twee panelen (output/verkenner). Editor erbij zou een
+  // derde vlak vragen — dus split dicht vóór we naar de editor gaan.
+  if (tab === 'editor' && termSplitAan() && !splitTweeProjecten()) {
+    zetTermSplit(null)
+  }
   termTab = tab
-  if (splitAan() && werkSlots && zelfdeProjectSplit()) {
+  if (splitAan() && werkSlots && zelfdeProjectSplit() && tab !== 'editor') {
     werkSlotFocus = visueelSlotVoorTermPane(tab)
     if (termSplit) bewaarTermSplit()
-  } else if (werkSlots && werkSlots[werkSlotFocus]) {
+  } else if (werkSlots && werkSlots[werkSlotFocus] && tab !== 'editor') {
     werkSlots[werkSlotFocus].tab = tab
     if (termSplit) bewaarTermSplit()
   }
@@ -5644,6 +6114,11 @@ function setTermTab(tab) {
     // verkenner iets hebt aangewezen.
     if (document.activeElement === document.getElementById('term-input')) document.activeElement.blur()
     if (!browserItems.length) navigeerNaar(browserPath || cwdVoorProject(verkennerPid()))
+  }
+  if (tab === 'editor') {
+    if (document.activeElement === document.getElementById('term-input')) document.activeElement.blur()
+    syncLezerNaarDom()
+    requestAnimationFrame(() => lezerInhoudEl()?.focus())
   }
   if (tab === 'output' && !sessieLeeft) focusTerminalInput()
   navPush()
@@ -5858,7 +6333,12 @@ async function wireBrowser(ctx, opts = {}) {
   }
 
   const tabRoot = paneelVoorCtx(ctx.id) || document
-  tabRoot.querySelectorAll('.term-tab').forEach(b => b.onclick = () => setTermTab(b.dataset.tab))
+  tabRoot.querySelectorAll('.term-tab').forEach(b => b.onclick = () => {
+    // Handmatig naar "site"/output: terug naar de preview, niet de
+    // tijdelijke terminal van het laatste git-commando.
+    if (b.dataset.tab === 'output') sitePreviewToonUitvoer = false
+    setTermTab(b.dataset.tab)
+  })
 
   const weergave = document.getElementById('br-weergave')
   if (weergave) weergave.onclick = (e) => {
@@ -5875,8 +6355,10 @@ async function wireBrowser(ctx, opts = {}) {
   if (document.getElementById('browser-andere')) await bedraadVerkennerHost('-andere')
 
   if (splitTweeProjecten()) setTermTab(werkSlots[werkSlotFocus].tab)
-  else setTermTab((settings.termTabs || {})[ctx.id] === 'browser' ? 'browser' : 'output')
+  else setTermTab(standaardTermTab(ctx.id))
   ververPtyStatus()
+  bedraadLezer()
+  syncLezerNaarDom()
 }
 
 async function bedraadVerkennerHost(suffix) {
@@ -6035,6 +6517,8 @@ function wireTerminal(ctx, opts = {}) {
     const typed = $id('term-input')?.value || ''
     openBatView({ cmds: typed })
   }
+  const siteOpen = $id('btn-site-open')
+  if (siteOpen) siteOpen.onclick = () => { void openSiteVanProject() }
   $id('btn-relaunch').onclick = () => {
     vraagJaNee(I18N.t('term.relaunchConfirmTitle'), I18N.t('term.relaunchConfirmText'), I18N.t('term.relaunchConfirmButton'))
       .then(ja => { if (ja) window.api.relaunch() })
@@ -8253,26 +8737,97 @@ async function openBatUitSleep(bat) {
 }
 
 // ── Een bestand bekijken en bewerken ─────────────────────────────────────────
-// Snel iets aanpassen — een kleur, een zin — geen IDE. Opslaan houdt regeleindes
-// en BOM van het origineel; bat:save doet dat juist níét (die dwingt CRLF af).
+// Snel iets aanpassen — een kleur, een zin — geen IDE. Meerdere bestanden als
+// tabjes (3.2): heen en weer tussen html en css zonder de ander weg te gooien.
+// Opslaan houdt regeleindes en BOM; bat:save dwingt juist CRLF af.
+function leegLezerTab() {
+  return {
+    pad: '', naam: '', inhoud: '', concept: '', mtime: null,
+    bom: false, crlf: false, dirty: false, bytes: 0,
+    zoekHits: [], zoekIdx: -1, scrollTop: 0,
+  }
+}
+
 const lezerStaat = {
-  pad: '', naam: '', inhoud: '', mtime: null, bom: false, crlf: false,
-  dirty: false, bytes: 0,
-  zoekHits: [], zoekIdx: -1,
+  tabs: [],
+  actief: -1,
+}
+
+function lezerHuidig() {
+  if (lezerStaat.actief < 0) return null
+  return lezerStaat.tabs[lezerStaat.actief] || null
 }
 
 function lezerOpen() {
-  return !document.getElementById('modal-lezer').hidden
+  return termTab === 'editor' && lezerStaat.tabs.length > 0
 }
 
 function lezerInhoudEl() {
-  return document.getElementById('lezer-inhoud')
+  return levend('#lezer-inhoud')
+}
+
+function bewaarLezerUitDom() {
+  const t = lezerHuidig()
+  const vak = lezerInhoudEl()
+  if (!t || !vak) return
+  t.concept = vak.value
+  t.dirty = vak.value !== t.inhoud
+  t.scrollTop = vak.scrollTop
+}
+
+function tekenLezerTabs() {
+  const strip = document.getElementById('lezer-tabs')
+  if (!strip) return
+  strip.innerHTML = lezerStaat.tabs.map((t, i) => {
+    const actief = i === lezerStaat.actief ? ' active' : ''
+    const vuil = t.dirty ? ' vuil' : ''
+    const label = esc(t.naam) + (t.dirty ? ' •' : '')
+    return `<button type="button" class="lezer-tab${actief}${vuil}" data-idx="${i}" role="tab" aria-selected="${i === lezerStaat.actief}" title="${esc(t.pad)}">`
+      + `<span class="lezer-tab-naam">${label}</span>`
+      + `<span class="lezer-tab-sluit" data-sluit="${i}" title="${esc(I18N.t('lezer.tabSluiten'))}" aria-label="${esc(I18N.t('lezer.tabSluiten'))}">×</span>`
+      + `</button>`
+  }).join('')
 }
 
 function lezerTitelBijwerken() {
-  const t = document.getElementById('lezer-titel')
-  if (!t) return
-  t.textContent = (lezerStaat.naam || '') + (lezerStaat.dirty ? ' •' : '')
+  const strip = document.getElementById('lezer-tabs')
+  if (!strip) return
+  // Alleen labels/klassen — geen volledige rebuild bij elke toets.
+  strip.querySelectorAll('.lezer-tab').forEach((el) => {
+    const i = Number(el.dataset.idx)
+    const t = lezerStaat.tabs[i]
+    if (!t) return
+    el.classList.toggle('active', i === lezerStaat.actief)
+    el.classList.toggle('vuil', !!t.dirty)
+    el.setAttribute('aria-selected', i === lezerStaat.actief ? 'true' : 'false')
+    const naam = el.querySelector('.lezer-tab-naam')
+    if (naam) naam.textContent = t.naam + (t.dirty ? ' •' : '')
+  })
+}
+
+function syncLezerNaarDom() {
+  const vak = lezerInhoudEl()
+  if (!vak) return
+  const t = lezerHuidig()
+  const tekst = t
+    ? (t.dirty ? (t.concept || t.inhoud) : (t.inhoud || ''))
+    : ''
+  if (vak.value !== tekst) vak.value = tekst
+  vak.scrollTop = t ? (t.scrollTop || 0) : 0
+  const padEl = document.getElementById('lezer-pad')
+  if (padEl) padEl.textContent = t ? (t.pad || '') : ''
+  const regels = document.getElementById('lezer-regels')
+  if (regels) delete regels.dataset.regels
+  tekenLezerTabs()
+  lezerInfoBijwerken()
+  lezerRegelsBijwerken()
+  if (!t) {
+    const info = document.getElementById('lezer-info')
+    if (info) info.textContent = I18N.t('lezer.leeg')
+    vak.placeholder = I18N.t('lezer.leegPlaceholder')
+  } else {
+    vak.placeholder = ''
+  }
 }
 
 // Buffer bestaat in de renderer niet altijd; TextEncoder wel. Bytes kloppen
@@ -8287,12 +8842,18 @@ function lezerGrootteSchatting(tekst) {
 function lezerInfoBijwerken() {
   const el = document.getElementById('lezer-info')
   if (!el) return
-  const tekst = lezerInhoudEl()?.value ?? lezerStaat.inhoud
+  const t = lezerHuidig()
+  if (!t) {
+    el.textContent = I18N.t('lezer.leeg')
+    el.classList.remove('vuil')
+    return
+  }
+  const tekst = lezerInhoudEl()?.value ?? (t.dirty ? t.concept : t.inhoud)
   const regels = tekst ? tekst.split('\n').length : 0
-  const grootte = lezerStaat.dirty ? lezerGrootteSchatting(tekst) : (lezerStaat.bytes || 0)
+  const grootte = t.dirty ? lezerGrootteSchatting(tekst) : (t.bytes || 0)
   el.textContent = I18N.t('lezer.info', { regels, grootte: toonBytes(grootte) })
-    + (lezerStaat.dirty ? ' · ' + I18N.t('lezer.nietOpgeslagen') : '')
-  el.classList.toggle('vuil', !!lezerStaat.dirty)
+    + (t.dirty ? ' · ' + I18N.t('lezer.nietOpgeslagen') : '')
+  el.classList.toggle('vuil', !!t.dirty)
 }
 
 function lezerRegelsBijwerken() {
@@ -8315,26 +8876,69 @@ function lezerRegelsBijwerken() {
 
 function lezerMarkeerVuil() {
   const vak = lezerInhoudEl()
-  if (!vak) return
+  const t = lezerHuidig()
+  if (!vak || !t) return
   const nu = vak.value
-  lezerStaat.dirty = nu !== lezerStaat.inhoud
+  t.concept = nu
+  t.dirty = nu !== t.inhoud
   lezerTitelBijwerken()
   lezerInfoBijwerken()
   lezerRegelsBijwerken()
 }
 
+function kiesLezerTab(idx, { focus = true } = {}) {
+  if (idx < 0 || idx >= lezerStaat.tabs.length) return
+  if (idx === lezerStaat.actief) return
+  bewaarLezerUitDom()
+  lezerStaat.actief = idx
+  verbergLezerZoek()
+  verbergLezerAanvul()
+  syncLezerNaarDom()
+  hertekenWebKnoppen()
+  if (focus) {
+    const vak = lezerInhoudEl()
+    if (vak) requestAnimationFrame(() => vak.focus())
+  }
+}
+
+async function herlaadLezerTab(tab) {
+  if (!tab || !tab.pad) return false
+  const r = await window.api.leesTekst(tab.pad).catch(() => null)
+  if (!r || !r.ok) return false
+  tab.inhoud = r.inhoud
+  tab.concept = r.inhoud
+  tab.mtime = r.mtime ?? null
+  tab.bom = !!r.bom
+  tab.crlf = !!r.crlf
+  tab.bytes = r.bytes || 0
+  tab.dirty = false
+  tab.zoekHits = []
+  tab.zoekIdx = -1
+  tab.scrollTop = 0
+  if (lezerHuidig() === tab) {
+    verbergLezerZoek()
+    syncLezerNaarDom()
+  }
+  return true
+}
+
 async function toonBestand(pad) {
   if (!pad) return
-  // Ander bestand terwijl er nog iets openstaat: eerst dat wegzetten.
-  if (lezerOpen() && lezerStaat.pad && lezerStaat.pad !== pad) {
-    if (await controleerLezerWerk('bestand') === 'blijven') return
-  }
   const naam = String(pad).split(/[\\/]/).pop()
 
   if (!WebTools.isTekstBestand(pad)) {
     // Geen tekst: dan is Windows nog steeds het goede antwoord.
     window.api.openFolder(pad)
     showToast(I18N.t('browser.openedToast', { name: naam }))
+    return
+  }
+
+  // Al open: spring ernaartoe, niet opnieuw inlezen (vuile wijzigingen blijven).
+  const bestaand = lezerStaat.tabs.findIndex(t => t.pad === pad)
+  if (bestaand >= 0) {
+    if (view !== 'project' && activeId) setView('project')
+    setTermTab('editor')
+    kiesLezerTab(bestaand)
     return
   }
 
@@ -8349,48 +8953,67 @@ async function toonBestand(pad) {
     return
   }
 
-  lezerStaat.pad = pad
-  lezerStaat.naam = naam
-  lezerStaat.inhoud = r.inhoud
-  lezerStaat.mtime = r.mtime ?? null
-  lezerStaat.bom = !!r.bom
-  lezerStaat.crlf = !!r.crlf
-  lezerStaat.bytes = r.bytes || 0
-  lezerStaat.dirty = false
-  lezerStaat.zoekHits = []
-  lezerStaat.zoekIdx = -1
+  // Editor leeft in het project-terminalvlak. Zonder project geen plek.
+  if (view !== 'project' && activeId) setView('project')
+  if (!levend('#lezer-inhoud') && activeId) {
+    setView('project')
+  }
+  if (!levend('#lezer-inhoud')) {
+    await meldKort(I18N.t('lezer.nietGelukt'), I18N.t('lezer.geenProject'))
+    return
+  }
 
-  document.getElementById('lezer-pad').textContent = pad
-  const vak = lezerInhoudEl()
-  vak.value = r.inhoud
-  delete document.getElementById('lezer-regels').dataset.regels
-  lezerTitelBijwerken()
-  lezerInfoBijwerken()
-  lezerRegelsBijwerken()
+  bewaarLezerUitDom()
+  const tab = leegLezerTab()
+  tab.pad = pad
+  tab.naam = naam
+  tab.inhoud = r.inhoud
+  tab.concept = r.inhoud
+  tab.mtime = r.mtime ?? null
+  tab.bom = !!r.bom
+  tab.crlf = !!r.crlf
+  tab.bytes = r.bytes || 0
+  lezerStaat.tabs.push(tab)
+  lezerStaat.actief = lezerStaat.tabs.length - 1
+
+  setTermTab('editor')
   verbergLezerZoek()
-  vak.scrollTop = 0
-  document.getElementById('modal-lezer').hidden = false
-  // Focus na openen, anders blijft Tab naar de knoppen springen i.p.v. inspringen.
-  requestAnimationFrame(() => { vak.focus(); vak.setSelectionRange(0, 0) })
-}
-
-async function lezerVeranderdOpSchijf() {
-  if (!lezerStaat.pad || lezerStaat.mtime == null) return false
-  const st = await window.api.bestandInfo(lezerStaat.pad).catch(() => null)
-  return !!(st && st.ok && st.gewijzigd !== lezerStaat.mtime)
-}
-
-async function slaLezerOp({ negeerSchijf = false } = {}) {
-  if (!lezerStaat.pad) return false
+  syncLezerNaarDom()
+  hertekenWebKnoppen()
   const vak = lezerInhoudEl()
-  const inhoud = vak ? vak.value : lezerStaat.inhoud
+  if (vak) {
+    vak.scrollTop = 0
+    requestAnimationFrame(() => { vak.focus(); vak.setSelectionRange(0, 0) })
+  }
+}
+
+async function lezerVeranderdOpSchijf(tab) {
+  const t = tab || lezerHuidig()
+  if (!t || !t.pad || t.mtime == null) return false
+  const st = await window.api.bestandInfo(t.pad).catch(() => null)
+  return !!(st && st.ok && st.gewijzigd !== t.mtime)
+}
+
+async function slaLezerOp({ negeerSchijf = false, tab = null } = {}) {
+  const t = tab || lezerHuidig()
+  if (!t || !t.pad) return false
+  // Actieve tab: tekst uit het vak; achtergrondtab: uit het concept.
+  const actief = t === lezerHuidig()
+  if (actief) bewaarLezerUitDom()
+  const inhoud = actief && lezerInhoudEl()
+    ? lezerInhoudEl().value
+    : (t.dirty ? t.concept : t.inhoud)
 
   // Elders bijgewerkt terwijl je hier zat: niet stilletjes overschrijven.
   // Twee keuzes — overschrijven óf opnieuw inlezen — want alleen "toch opslaan"
   // (zoals bij bat) laat je zonder weg terug naar wat er op schijf stond.
-  if (!negeerSchijf && await lezerVeranderdOpSchijf()) {
+  if (!negeerSchijf && await lezerVeranderdOpSchijf(t)) {
+    if (actief === false) {
+      const idx = lezerStaat.tabs.indexOf(t)
+      if (idx >= 0) kiesLezerTab(idx)
+    }
     const keuze = await vraagKeuze({
-      titel: I18N.t('lezer.eldersTitel', { naam: lezerStaat.naam }),
+      titel: I18N.t('lezer.eldersTitel', { naam: t.naam }),
       tekst: I18N.t('lezer.eldersTekst'),
       knoppen: [
         { label: I18N.t('common.cancel'), waarde: '' },
@@ -8399,18 +9022,18 @@ async function slaLezerOp({ negeerSchijf = false } = {}) {
       ],
     })
     if (keuze === 'herladen') {
-      lezerStaat.dirty = false
-      await toonBestand(lezerStaat.pad)
+      t.dirty = false
+      await herlaadLezerTab(t)
       return false
     }
     if (keuze !== 'overschrijven') return false
   }
 
   const r = await window.api.schrijfTekst({
-    pad: lezerStaat.pad,
+    pad: t.pad,
     inhoud,
-    bom: lezerStaat.bom,
-    crlf: lezerStaat.crlf,
+    bom: t.bom,
+    crlf: t.crlf,
   }).catch(() => null)
   if (!r || !r.ok) {
     await meldKort(I18N.t('lezer.opslaanMislukt'), I18N.t('lezer.opslaanMisluktTekst', {
@@ -8419,23 +9042,23 @@ async function slaLezerOp({ negeerSchijf = false } = {}) {
     return false
   }
 
-  lezerStaat.inhoud = inhoud
-  lezerStaat.mtime = r.mtime ?? null
-  lezerStaat.bytes = r.bytes || lezerGrootteSchatting(inhoud)
-  lezerStaat.dirty = false
+  t.inhoud = inhoud
+  t.concept = inhoud
+  t.mtime = r.mtime ?? null
+  t.bytes = r.bytes || lezerGrootteSchatting(inhoud)
+  t.dirty = false
   lezerTitelBijwerken()
-  lezerInfoBijwerken()
-  showToast(I18N.t('lezer.opgeslagen', { naam: lezerStaat.naam }))
+  if (t === lezerHuidig()) lezerInfoBijwerken()
+  showToast(I18N.t('lezer.opgeslagen', { naam: t.naam }))
   return true
 }
 
-// Geeft 'door' of 'blijven'. Zelfde vorm als de git-afsluitcontrole, zodat
-// accountwisselen en afsluiten er één haak voor hebben in plaats van twee.
-async function controleerLezerWerk(reden) {
-  if (!lezerStaat.dirty) return 'door'
+// Eén tab: 'door' of 'blijven'. Gebruikt bij sluiten van één tabblad.
+async function controleerEenLezerTab(tab, reden) {
+  if (!tab || !tab.dirty) return 'door'
   const prefix = reden === 'afsluiten' ? 'lezer.afsluit' : 'lezer.wissel'
   const keuze = await vraagKeuze({
-    titel: I18N.t(prefix + 'Titel', { naam: lezerStaat.naam || I18N.t('lezer.bestand') }),
+    titel: I18N.t(prefix + 'Titel', { naam: tab.naam || I18N.t('lezer.bestand') }),
     tekst: I18N.t(prefix + 'Tekst'),
     knoppen: [
       { label: I18N.t('common.cancel'), waarde: 'blijven' },
@@ -8445,19 +9068,40 @@ async function controleerLezerWerk(reden) {
   })
   if (!keuze || keuze === 'blijven') return 'blijven'
   if (keuze === 'opslaan') {
-    const ok = await slaLezerOp()
+    const ok = await slaLezerOp({ tab })
     return ok ? 'door' : 'blijven'
   }
-  // Weggooien: dirty uit, anders vraagt de volgende haak het opnieuw.
-  lezerStaat.dirty = false
+  tab.dirty = false
+  tab.concept = tab.inhoud
+  return 'door'
+}
+
+// Geeft 'door' of 'blijven'. Zelfde vorm als de git-afsluitcontrole, zodat
+// accountwisselen en afsluiten er één haak voor hebben in plaats van twee.
+// Bij wisselen/afsluiten: elk vuil tabblad apart — anders verdwijnt css stil
+// terwijl je alleen over html gevraagd bent.
+async function controleerLezerWerk(reden) {
+  bewaarLezerUitDom()
+  if (reden === 'sluiten') {
+    return controleerEenLezerTab(lezerHuidig(), reden)
+  }
+  const vuil = lezerStaat.tabs.filter(t => t.dirty)
+  for (const tab of vuil) {
+    const idx = lezerStaat.tabs.indexOf(tab)
+    if (idx >= 0 && idx !== lezerStaat.actief) kiesLezerTab(idx, { focus: false })
+    if (await controleerEenLezerTab(tab, reden) === 'blijven') return 'blijven'
+  }
   return 'door'
 }
 
 function verbergLezerZoek() {
   const balk = document.getElementById('lezer-zoek')
   if (balk) balk.hidden = true
-  lezerStaat.zoekHits = []
-  lezerStaat.zoekIdx = -1
+  const t = lezerHuidig()
+  if (t) {
+    t.zoekHits = []
+    t.zoekIdx = -1
+  }
   const info = document.getElementById('lezer-zoek-info')
   if (info) info.textContent = ''
 }
@@ -8475,24 +9119,27 @@ function toonLezerZoek() {
 function voerLezerZoekUit() {
   const naald = document.getElementById('lezer-zoek-invoer')?.value || ''
   const vak = lezerInhoudEl()
+  const t = lezerHuidig()
   const info = document.getElementById('lezer-zoek-info')
-  if (!vak) return
-  lezerStaat.zoekHits = WebTools.zoekInTekst(vak.value, naald)
-  lezerStaat.zoekIdx = lezerStaat.zoekHits.length ? 0 : -1
+  if (!vak || !t) return
+  t.zoekHits = WebTools.zoekInTekst(vak.value, naald)
+  t.zoekIdx = t.zoekHits.length ? 0 : -1
   if (info) {
     info.textContent = !naald ? ''
-      : lezerStaat.zoekHits.length
-        ? I18N.t('lezer.zoekTreffers', { n: lezerStaat.zoekIdx + 1, totaal: lezerStaat.zoekHits.length })
+      : t.zoekHits.length
+        ? I18N.t('lezer.zoekTreffers', { n: t.zoekIdx + 1, totaal: t.zoekHits.length })
         : I18N.t('lezer.zoekNiets')
   }
-  if (lezerStaat.zoekIdx >= 0) selecteerLezerZoekHit()
+  if (t.zoekIdx >= 0) selecteerLezerZoekHit()
 }
 
 function selecteerLezerZoekHit() {
   const vak = lezerInhoudEl()
+  const t = lezerHuidig()
   const naald = document.getElementById('lezer-zoek-invoer')?.value || ''
-  const start = lezerStaat.zoekHits[lezerStaat.zoekIdx]
-  if (!vak || start == null) return
+  if (!vak || !t) return
+  const start = t.zoekHits[t.zoekIdx]
+  if (start == null) return
   vak.focus()
   vak.setSelectionRange(start, start + naald.length)
   // In beeld brengen: selectie alleen is niet genoeg in een lang bestand.
@@ -8504,57 +9151,212 @@ function selecteerLezerZoekHit() {
   const info = document.getElementById('lezer-zoek-info')
   if (info) {
     info.textContent = I18N.t('lezer.zoekTreffers', {
-      n: lezerStaat.zoekIdx + 1, totaal: lezerStaat.zoekHits.length,
+      n: t.zoekIdx + 1, totaal: t.zoekHits.length,
     })
   }
 }
 
 function lezerZoekStap(delta) {
-  if (!lezerStaat.zoekHits.length) { voerLezerZoekUit(); return }
-  const n = lezerStaat.zoekHits.length
-  lezerStaat.zoekIdx = (lezerStaat.zoekIdx + delta + n) % n
+  const t = lezerHuidig()
+  if (!t) return
+  if (!t.zoekHits.length) { voerLezerZoekUit(); return }
+  const n = t.zoekHits.length
+  t.zoekIdx = (t.zoekIdx + delta + n) % n
   selecteerLezerZoekHit()
 }
 
+// ── Lichte aanvulling (html/css/js) ──────────────────────────────────────────
+// Geen parser, geen IDE: prefix → scrollbare lijst → Tab/Enter plakt.
+const lezerAanvulStaat = { open: false, idx: 0, lijst: [], ctx: null, taal: '' }
+
+function lezerAanvulEl() {
+  return document.getElementById('lezer-aanvul')
+}
+
+function lezerAanvulOpen() {
+  const el = lezerAanvulEl()
+  return !!(el && !el.hidden && lezerAanvulStaat.open)
+}
+
+function verbergLezerAanvul() {
+  lezerAanvulStaat.open = false
+  lezerAanvulStaat.idx = 0
+  lezerAanvulStaat.lijst = []
+  lezerAanvulStaat.ctx = null
+  lezerAanvulStaat.taal = ''
+  const el = lezerAanvulEl()
+  if (el) { el.hidden = true; el.innerHTML = '' }
+}
+
+function lezerAanvulCaretPos(vak) {
+  // Mono-tekstvak: regel × regelhoogte + kolom × tekenbreedte. Goed genoeg
+  // om de lijst bij de cursor te plakken zonder een mirror-div.
+  const cs = getComputedStyle(vak)
+  const lh = parseFloat(cs.lineHeight) || 18
+  const fs = parseFloat(cs.fontSize) || 12
+  const padT = parseFloat(cs.paddingTop) || 0
+  const padL = parseFloat(cs.paddingLeft) || 0
+  const voor = vak.value.slice(0, vak.selectionStart)
+  const regel = (voor.match(/\n/g) || []).length
+  const kolom = voor.length - (voor.lastIndexOf('\n') + 1)
+  const ch = fs * 0.62
+  return {
+    top: padT + (regel + 1) * lh - vak.scrollTop + 2,
+    left: Math.max(4, padL + kolom * ch - vak.scrollLeft),
+  }
+}
+
+function tekenLezerAanvul() {
+  const el = lezerAanvulEl()
+  const vak = lezerInhoudEl()
+  if (!el || !vak || !lezerAanvulStaat.lijst.length) { verbergLezerAanvul(); return }
+  const prefix = (lezerAanvulStaat.ctx && lezerAanvulStaat.ctx.prefix) || ''
+  el.innerHTML = lezerAanvulStaat.lijst.map((woord, i) => {
+    const actief = i === lezerAanvulStaat.idx ? ' actief' : ''
+    const lager = woord.toLowerCase()
+    const p = prefix.toLowerCase()
+    const at = lager.indexOf(p)
+    let label = esc(woord)
+    if (at >= 0 && p) {
+      label = esc(woord.slice(0, at))
+        + '<span class="ac-match">' + esc(woord.slice(at, at + p.length)) + '</span>'
+        + esc(woord.slice(at + p.length))
+    }
+    return `<div class="lezer-aanvul-item${actief}" data-idx="${i}" role="option">${label}</div>`
+  }).join('')
+  el.hidden = false
+  lezerAanvulStaat.open = true
+  const pos = lezerAanvulCaretPos(vak)
+  const wrap = vak.parentElement
+  const maxL = Math.max(8, (wrap?.clientWidth || 280) - 160)
+  el.style.top = Math.min(pos.top, (wrap?.clientHeight || 200) - 40) + 'px'
+  el.style.left = Math.min(pos.left, maxL) + 'px'
+  const actief = el.querySelector('.lezer-aanvul-item.actief')
+  if (actief) actief.scrollIntoView({ block: 'nearest' })
+}
+
+function verversLezerAanvul() {
+  const vak = lezerInhoudEl()
+  const t = lezerHuidig()
+  if (!vak || !t || typeof LezerAanvul === 'undefined') { verbergLezerAanvul(); return }
+  const r = LezerAanvul.voorstellenBijCursor(vak.value, vak.selectionStart, t.pad)
+  if (!r) { verbergLezerAanvul(); return }
+  lezerAanvulStaat.lijst = r.lijst
+  lezerAanvulStaat.ctx = r.ctx
+  lezerAanvulStaat.taal = r.taal
+  lezerAanvulStaat.idx = 0
+  tekenLezerAanvul()
+}
+
+function kiesLezerAanvul(delta) {
+  if (!lezerAanvulOpen()) return
+  const n = lezerAanvulStaat.lijst.length
+  if (!n) return
+  lezerAanvulStaat.idx = (lezerAanvulStaat.idx + delta + n) % n
+  tekenLezerAanvul()
+}
+
+function pasLezerAanvulToe(idx) {
+  const vak = lezerInhoudEl()
+  if (!vak || !lezerAanvulOpen()) return false
+  const i = idx == null ? lezerAanvulStaat.idx : idx
+  const keuze = lezerAanvulStaat.lijst[i]
+  const ctx = lezerAanvulStaat.ctx
+  const taal = lezerAanvulStaat.taal
+  if (!keuze || !ctx || typeof LezerAanvul === 'undefined') return false
+  const inv = LezerAanvul.invoegTekst(taal, keuze, ctx)
+  const voor = vak.value.slice(0, ctx.van)
+  const na = vak.value.slice(ctx.tot)
+  vak.value = voor + inv.tekst + na
+  const cursor = voor.length + inv.cursorIn
+  vak.selectionStart = vak.selectionEnd = cursor
+  verbergLezerAanvul()
+  lezerMarkeerVuil()
+  vak.focus()
+  return true
+}
+
+async function sluitLezerTab(idx) {
+  if (idx < 0 || idx >= lezerStaat.tabs.length) return
+  bewaarLezerUitDom()
+  const tab = lezerStaat.tabs[idx]
+  if (idx !== lezerStaat.actief) kiesLezerTab(idx, { focus: false })
+  if (await controleerEenLezerTab(tab, 'sluiten') === 'blijven') return
+  lezerStaat.tabs.splice(idx, 1)
+  verbergLezerZoek()
+  verbergLezerAanvul()
+  if (!lezerStaat.tabs.length) {
+    lezerStaat.actief = -1
+    syncLezerNaarDom()
+    hertekenWebKnoppen()
+    if (termTab === 'editor') setTermTab('output')
+    else focusTerminalInput()
+    return
+  }
+  lezerStaat.actief = Math.min(idx, lezerStaat.tabs.length - 1)
+  syncLezerNaarDom()
+  hertekenWebKnoppen()
+  lezerInhoudEl()?.focus()
+}
+
 async function sluitLezer() {
-  if (await controleerLezerWerk('sluiten') === 'blijven') return
-  sluitLezerStil()
-  focusTerminalInput()
+  // Escape / sluiten: alleen het actieve tabblad, niet alles tegelijk.
+  if (lezerStaat.actief < 0) {
+    if (termTab === 'editor') setTermTab('output')
+    return
+  }
+  await sluitLezerTab(lezerStaat.actief)
 }
 
 function sluitLezerStil() {
   verbergLezerZoek()
-  document.getElementById('modal-lezer').hidden = true
-  lezerStaat.pad = ''
-  lezerStaat.naam = ''
-  lezerStaat.inhoud = ''
-  lezerStaat.mtime = null
-  lezerStaat.dirty = false
-  const vak = lezerInhoudEl()
-  if (vak) vak.value = ''
+  verbergLezerAanvul()
+  lezerStaat.tabs = []
+  lezerStaat.actief = -1
+  syncLezerNaarDom()
 }
 
 function bedraadLezer() {
-  const sluit = document.getElementById('lezer-sluit')
-  if (!sluit) return
-  sluit.onclick = () => { void sluitLezer() }
-  document.getElementById('lezer-opslaan').onclick = () => { void slaLezerOp() }
+  const opslaan = document.getElementById('lezer-opslaan')
+  if (!opslaan || opslaan.dataset.bedraad === '1') return
+  opslaan.dataset.bedraad = '1'
+  opslaan.onclick = () => { void slaLezerOp() }
   document.getElementById('lezer-kopieer').onclick = () => {
     kopieer(lezerInhoudEl()?.value || '', I18N.t('lezer.gekopieerd'))
   }
   document.getElementById('lezer-map').onclick = async () => {
-    if (await controleerLezerWerk('sluiten') === 'blijven') return
-    const pad = lezerStaat.pad
-    sluitLezerStil()
+    const t = lezerHuidig()
+    if (!t) return
+    if (await controleerEenLezerTab(t, 'sluiten') === 'blijven') return
+    const pad = t.pad
+    const idx = lezerStaat.actief
+    lezerStaat.tabs.splice(idx, 1)
+    if (!lezerStaat.tabs.length) {
+      lezerStaat.actief = -1
+      syncLezerNaarDom()
+      if (termTab === 'editor') setTermTab('browser')
+    } else {
+      lezerStaat.actief = Math.min(idx, lezerStaat.tabs.length - 1)
+      syncLezerNaarDom()
+    }
     if (pad) openInVerkenner(ouderVan(pad), pad)
-    focusTerminalInput()
   }
   document.getElementById('lezer-windows').onclick = async () => {
-    if (await controleerLezerWerk('sluiten') === 'blijven') return
-    const pad = lezerStaat.pad
-    sluitLezerStil()
+    const t = lezerHuidig()
+    if (!t) return
+    if (await controleerEenLezerTab(t, 'sluiten') === 'blijven') return
+    const pad = t.pad
+    const idx = lezerStaat.actief
+    lezerStaat.tabs.splice(idx, 1)
+    if (!lezerStaat.tabs.length) {
+      lezerStaat.actief = -1
+      syncLezerNaarDom()
+      if (termTab === 'editor') setTermTab('output')
+    } else {
+      lezerStaat.actief = Math.min(idx, lezerStaat.tabs.length - 1)
+      syncLezerNaarDom()
+    }
     if (pad) window.api.openFolder(pad)
-    focusTerminalInput()
   }
   document.getElementById('lezer-zoek-knop').onclick = () => toonLezerZoek()
   document.getElementById('lezer-zoek-dicht').onclick = () => {
@@ -8577,15 +9379,70 @@ function bedraadLezer() {
     }
   })
 
+  const strip = document.getElementById('lezer-tabs')
+  if (strip && strip.dataset.bedraad !== '1') {
+    strip.dataset.bedraad = '1'
+    strip.addEventListener('click', (e) => {
+      const sluit = e.target.closest('[data-sluit]')
+      if (sluit) {
+        e.preventDefault()
+        e.stopPropagation()
+        void sluitLezerTab(Number(sluit.dataset.sluit))
+        return
+      }
+      const knop = e.target.closest('.lezer-tab')
+      if (!knop) return
+      kiesLezerTab(Number(knop.dataset.idx))
+    })
+    strip.addEventListener('auxclick', (e) => {
+      if (e.button !== 1) return
+      const knop = e.target.closest('.lezer-tab')
+      if (!knop) return
+      e.preventDefault()
+      void sluitLezerTab(Number(knop.dataset.idx))
+    })
+  }
+
   const vak = lezerInhoudEl()
-  vak.addEventListener('input', () => lezerMarkeerVuil())
+  if (!vak) return
+  vak.addEventListener('input', () => {
+    lezerMarkeerVuil()
+    verversLezerAanvul()
+  })
   vak.addEventListener('scroll', () => {
     const kolom = document.getElementById('lezer-regels')
     if (kolom) kolom.scrollTop = vak.scrollTop
+    if (lezerAanvulOpen()) tekenLezerAanvul()
   })
+  const aanvul = lezerAanvulEl()
+  if (aanvul && aanvul.dataset.bedraad !== '1') {
+    aanvul.dataset.bedraad = '1'
+    aanvul.addEventListener('mousedown', (e) => {
+      const item = e.target.closest('[data-idx]')
+      if (!item) return
+      e.preventDefault()
+      pasLezerAanvulToe(Number(item.dataset.idx))
+    })
+  }
   // Tab hoort in te springen, niet naar de volgende knop te springen — anders
-  // is dit een formulier en geen editor.
+  // is dit een formulier en geen editor. Staat de aanvulling open, dan is Tab
+  // de bevestiging (pijltjes om te kiezen).
   vak.addEventListener('keydown', (e) => {
+    if (lezerAanvulOpen()) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); kiesLezerAanvul(1); return }
+      if (e.key === 'ArrowUp') { e.preventDefault(); kiesLezerAanvul(-1); return }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        pasLezerAanvulToe()
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
+        verbergLezerAanvul()
+        return
+      }
+    }
     if (e.key === 'Tab') {
       e.preventDefault()
       const start = vak.selectionStart, end = vak.selectionEnd
@@ -8593,6 +9450,7 @@ function bedraadLezer() {
       vak.value = v.slice(0, start) + '\t' + v.slice(end)
       vak.selectionStart = vak.selectionEnd = start + 1
       lezerMarkeerVuil()
+      verbergLezerAanvul()
       return
     }
     if (e.ctrlKey && (e.key === 's' || e.key === 'S')) {
@@ -8600,16 +9458,30 @@ function bedraadLezer() {
       void slaLezerOp()
       return
     }
+    if (e.ctrlKey && (e.key === 'w' || e.key === 'W')) {
+      e.preventDefault()
+      void sluitLezer()
+      return
+    }
     if (e.ctrlKey && (e.key === 'f' || e.key === 'F')) {
       e.preventDefault()
+      verbergLezerAanvul()
       toonLezerZoek()
     }
   })
+  vak.addEventListener('blur', () => {
+    // Klik op een suggestie komt ná blur; kort uitstellen zodat mousedown wint.
+    setTimeout(() => {
+      if (document.activeElement === vak) return
+      verbergLezerAanvul()
+    }, 120)
+  })
 
-  // Ctrl+S / Ctrl+F ook als de focus op een knop in het venster staat.
-  document.getElementById('modal-lezer').addEventListener('keydown', (e) => {
+  const pane = document.querySelector('.term-pane[data-pane="editor"]')
+  pane?.addEventListener('keydown', (e) => {
     if (!e.ctrlKey) return
     if (e.key === 's' || e.key === 'S') { e.preventDefault(); void slaLezerOp() }
+    if (e.key === 'w' || e.key === 'W') { e.preventDefault(); void sluitLezer() }
     if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toonLezerZoek() }
   })
 }
@@ -8660,19 +9532,55 @@ function zelfdePad(a, b) {
 
 // Het projectvenster met het pad er al in. Zelf typen wat je net hebt
 // versleept is werk dat de app hoort te doen.
-function openNieuwProjectMet(pad, naam) {
+async function openNieuwProjectMet(pad, naam) {
   openNewModal()
   pendingLocs = [{ label: 'main', path: pad }]
   refreshLocList()
   const naamVeld = document.getElementById('f-name')
   if (naamVeld && !naamVeld.value.trim()) naamVeld.value = naam
   updateCloneDoelPreview()
+  // Map met html → website-vinkje aan, zodat je niet handmatig hoeft te zoeken.
+  const r = await window.api.projectSoort(pad).catch(() => null)
+  if (r && r.ok && WebTools.isWebsiteGok({ flutter: !!r.flutter, html: !!r.html })) {
+    const vak = document.getElementById('f-website')
+    if (vak) vak.checked = true
+  }
 }
 
 // ── De site openen ───────────────────────────────────────────────────────────
 // Via een eigen servertje, niet via file://. Zie TODO-web.md 1.3: met file://
 // weigert de browser fetch, laden ES-modules niet en wijst /style.css naar de
 // wortel van je schijf.
+
+// Knop in de terminalbalk bij website-projecten: huidige html (als die open
+// staat), anders index/home via zoekSite.
+async function openSiteVanProject() {
+  const p = projects.find(x => x.id === activeId)
+  if (!projectIsWebsite(p)) return
+  const loc = p.locations?.[p.activeLocation] || p.locations?.[0]
+  if (!loc?.path) return
+
+  const huidig = lezerHuidig()
+  const sep = (huidig && huidig.pad.includes('\\')) || loc.path.includes('\\') ? '\\' : '/'
+  let gevonden = []
+  const site = await window.api.zoekSite(loc.path).catch(() => null)
+  if (site && site.ok) gevonden = site.gevonden || []
+
+  const keuze = WebTools.kiesSiteOpen({
+    huidigPad: huidig && huidig.pad,
+    wortel: loc.path,
+    gevonden,
+    sep,
+  })
+  if (!keuze || !keuze.pad) {
+    await meldKort(I18N.t('sleep.siteMisluktTitel'), I18N.t('term.siteGeenHtml'))
+    return
+  }
+  // Eén kandidaat: startSite vraagt anders bij meerdere starts. Huidige html
+  // of de beste start mag meteen door.
+  await startSite(loc.path, [keuze])
+}
+
 async function startSite(dir, gevonden) {
   let start = gevonden && gevonden.length ? gevonden[0] : null
 
@@ -9657,6 +10565,20 @@ function renderSettingsPanel() {
   const panel = document.getElementById('settings-panel')
   if (settingsSubPage === 'talen') { renderTalenSubPage(panel); return }
   const hist  = settings.history || {}
+  const openen = { ...WebTools.PROJECT_OPEN_STANDAARD, ...(settings.projectOpenen || {}) }
+
+  function projectOpenRijHtml(soort, icoon) {
+    const opties = WebTools.PROJECT_OPEN_KEUZES[soort] || []
+    const nu = openen[soort]
+    return `
+        <div class="instel-rij">
+          <div class="editor-row-name"><i class="ti ${icoon}"></i> ${I18N.t('settings.projectOpen.' + soort)}</div>
+          <select class="loc-select" id="set-open-${soort}">
+            ${opties.map(k => `
+              <option value="${k}" ${nu === k ? 'selected' : ''}>${esc(I18N.t('settings.projectOpen.opt.' + k))}</option>`).join('')}
+          </select>
+        </div>`
+  }
 
   const projRows = projects.map(p => {
     const locs = p.locations.map(l => l.path).join('  •  ')
@@ -9764,6 +10686,15 @@ function renderSettingsPanel() {
             ${I18N.t('settings.explorer.folderSizesDesc')}
           </div>
         </div>
+      </div>
+      <div>
+        <div class="settings-section-title">${I18N.t('settings.section.projectOpenTitle')}</div>
+        <div class="instel-rij">
+          <span class="instel-uitleg">${I18N.t('settings.projectOpen.desc')}</span>
+        </div>
+        ${projectOpenRijHtml('website', 'ti-world')}
+        ${projectOpenRijHtml('flutter', 'ti-brand-flutter')}
+        ${projectOpenRijHtml('overig', 'ti-folder')}
       </div>
       <div>
         <div class="settings-section-title">${I18N.t('settings.section.historyTitle')}</div>
@@ -10031,6 +10962,18 @@ function renderSettingsPanel() {
     window.api.saveSettings(settings)
     if (settings.mapGroottes) startMapGroottes()
   }
+  ;['website', 'flutter', 'overig'].forEach(soort => {
+    const sel = document.getElementById('set-open-' + soort)
+    if (!sel) return
+    sel.onchange = () => {
+      settings.projectOpenen = {
+        ...WebTools.PROJECT_OPEN_STANDAARD,
+        ...(settings.projectOpenen || {}),
+        [soort]: sel.value,
+      }
+      window.api.saveSettings(settings)
+    }
+  })
   document.getElementById('hist-seed').onclick = async () => {
     const r = await window.api.seedDefaults()
     if (r && r.history) history = r.history
@@ -12727,12 +13670,15 @@ function aiKlaarDiensten() {
 
 // In de projectrij al een editor-knop voor hetzelfde programma? Dan geen
 // extra AI-programmaknop ernaast. In de cmd-sectie blijven ze wel, want
-// daar staan geen editor-knoppen.
-function aiDienstenOpProject() {
+// daar staan geen editor-knoppen. Op een website staan juist géén editors,
+// dus daar moeten Claude Code / Codex / Gemini CLI wél als AI-knop blijven.
+function aiDienstenOpProject(bron) {
+  const website = projectIsWebsite(bron)
   const cats = new Set(eigenEditors().map(e => e.catalogId).filter(Boolean))
   const stammen = new Set(eigenEditors().map(e => padStam(e.path)).filter(Boolean))
   return aiKlaarDiensten().filter(d => {
     if (!d.programma) return true
+    if (website) return true
     if (d.programma.catalogId && cats.has(d.programma.catalogId)) return false
     const cmd = padStam(d.programma.cmd)
     if (cmd && stammen.has(cmd)) return false
@@ -13709,7 +14655,7 @@ async function controleerOnveiligWerk(reden) {
   if (await controleerLezerWerk(reden) === 'blijven') return 'blijven'
   // Bij wisselen/afsluiten hoort het venster dicht: het pad hing aan het
   // vorige moment, en bij "niet opslaan" stond er nog vuile tekst in beeld.
-  if ((reden === 'wisselen' || reden === 'afsluiten') && lezerOpen()) sluitLezerStil()
+  if ((reden === 'wisselen' || reden === 'afsluiten') && lezerStaat.tabs.length) sluitLezerStil()
 
   await ververesAlleGitStaten(true)
 
@@ -15033,6 +15979,12 @@ async function runCmd(project, cmdKey) {
   // de knoppenrij er anders uitzien dan ervoor.
   if (GitTools.isGitId(cmdKey)) { await runGitCmd(project, cmdKey); return }
 
+  // Website-help: stukje code in de editor, geen terminalcommando.
+  if (typeof WebKnoppen !== 'undefined' && WebKnoppen.isWebId(cmdKey)) {
+    voegWebSnippetToe(cmdKey)
+    return
+  }
+
   const releaseFlag = project.release === true ? ' --release' : ''
 
   // Meerdere telefoons/emulators tegelijk aangesloten? Dan is 'de' Android-
@@ -15051,13 +16003,42 @@ async function runCmd(project, cmdKey) {
     'pub-get':       'flutter pub get',
     'clean':         'flutter clean',
     'doctor':        'flutter doctor',
-    'build-apk':     'flutter build apk --release',
+    'build-apk':     `flutter build apk --release`,
     'build-web':     'flutter build web',
     'build-windows': 'flutter build windows',
   }
   const cmd = cmdMap[cmdKey]
   if (!cmd) return
   executeCmd(project, cmd, cmdKey)
+}
+
+// Helpknop → snippet in het open tekstbestand. Zonder open html/css/js eerst
+// naar de editor; zonder bestand een korte melding.
+function voegWebSnippetToe(cmdKey) {
+  const def = typeof WebKnoppen !== 'undefined' ? WebKnoppen.defVan(cmdKey) : null
+  if (!def) return
+  if (termTab !== 'editor') setTermTab('editor')
+  const vak = lezerInhoudEl()
+  const tab = lezerHuidig()
+  if (!vak || !tab) {
+    showToast(I18N.t('web.knopGeenBestand'))
+    return
+  }
+  const taal = actieveWebTaal()
+  if (taal && taal !== def.taal) {
+    showToast(I18N.t('web.knopVerkeerdeTaal', { taal: def.taal }))
+    return
+  }
+  const inv = WebKnoppen.snippetInvoeg(def.snippet)
+  const start = vak.selectionStart
+  const end = vak.selectionEnd
+  const voor = vak.value.slice(0, start)
+  const na = vak.value.slice(end)
+  vak.value = voor + inv.tekst + na
+  const cursor = start + inv.cursor
+  vak.selectionStart = vak.selectionEnd = cursor
+  lezerMarkeerVuil()
+  vak.focus()
 }
 
 // Geeft het gekozen device-id terug, of null bij annuleren/geen apparaat.
@@ -15463,10 +16444,12 @@ function setupModalEvents() {
     if (e.key !== 'Escape') return
     if (!document.getElementById('modal-cmdset').hidden)   { e.preventDefault(); sluitCmdInstellingen(); return }
     if (!document.getElementById('modal-psset').hidden)    { e.preventDefault(); sluitPsInstellingen(); return }
-    if (!document.getElementById('modal-lezer').hidden) {
+    if (termTab === 'editor' && view === 'project') {
       e.preventDefault()
-      // Zoekbalk eerst dicht; anders verdwijnt het hele venster met Ctrl+F-werk.
-      if (!document.getElementById('lezer-zoek').hidden) {
+      // Aanvulling eerst, dan zoekbalk, anders verdwijnt de editor te vroeg.
+      if (lezerAanvulOpen()) { verbergLezerAanvul(); return }
+      const zoek = document.getElementById('lezer-zoek')
+      if (zoek && !zoek.hidden) {
         verbergLezerZoek()
         lezerInhoudEl()?.focus()
         return
@@ -15862,6 +16845,7 @@ function openNewModal() {
   document.getElementById('modal-title').textContent = I18N.t('modal.project.title')
   document.getElementById('f-name').value   = ''
   document.getElementById('f-device').value = ''
+  document.getElementById('f-website').checked = false
   pendingLocs = [{ label: 'main', path: '' }]
   pendingCmdVisibility = {}
   pendingSecties = {}
@@ -15883,6 +16867,7 @@ function openEditModal(id) {
   document.getElementById('modal-title').textContent = I18N.t('modal.project.editTitle')
   document.getElementById('f-name').value   = p.name
   document.getElementById('f-device').value = p.device || ''
+  document.getElementById('f-website').checked = !!p.website
   pendingLocs = p.locations.map(l => ({ ...l }))
   pendingCmdVisibility = { ...(p.cmdVisibility || {}) }
   pendingSecties = { ...(p.secties || {}) }
@@ -16190,8 +17175,10 @@ async function saveProjectModal() {
       tools: [...(pendingCmdVolgorde.tools || [])],
     }
     if (p.activeLocation >= locs.length) p.activeLocation = 0
+    p.website = !!document.getElementById('f-website').checked
+    p.websiteHandmatig = true
   } else {
-    const vers = { id: 'proj_' + Date.now(), name, icon: selEmoji, device, gitProfiel: profielId, locations: locs, activeLocation: 0, release: false, cmdVisibility: { ...pendingCmdVisibility }, secties: { ...pendingSecties }, customCmds: pendingCustomCmds.map(c => ({ ...c })), cmdVolgorde: { run: [...(pendingCmdVolgorde.run || [])], tools: [...(pendingCmdVolgorde.tools || [])] } }
+    const vers = { id: 'proj_' + Date.now(), name, icon: selEmoji, device, gitProfiel: profielId, locations: locs, activeLocation: 0, release: false, website: !!document.getElementById('f-website').checked, websiteHandmatig: true, cmdVisibility: { ...pendingCmdVisibility }, secties: { ...pendingSecties }, customCmds: pendingCustomCmds.map(c => ({ ...c })), cmdVolgorde: { run: [...(pendingCmdVolgorde.run || [])], tools: [...(pendingCmdVolgorde.tools || [])] } }
     // Ook een vers project krijgt zijn mappen: dan staat elk project er
     // hetzelfde bij, ongeacht wanneer het is aangemaakt.
     migreerToolsNaarMap(vers)

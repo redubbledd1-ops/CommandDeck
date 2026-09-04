@@ -92,10 +92,16 @@
 
   // De map die bij de soort van deze knop hoort, als die map er is. Bestaat hij
   // niet, dan blijft de knop gewoon los staan -- er wordt hier niets gemaakt.
+  // `fallbackAuto` (optioneel op de soort): tweede kans, bv. een AI-programma
+  // dat bij "programma's" hoort maar in de AI-map mag als die er wél is.
   function autoMapVoor(rij, id) {
     const soort = soortenVan(rij).find(x => x.toets(id))
     if (!soort) return null
-    return mappenVan(rij.bron, rij.sectie).find(f => f.auto === soort.auto) || null
+    const hier = mappenVan(rij.bron, rij.sectie)
+    const exact = hier.find(f => f.auto === soort.auto)
+    if (exact) return exact
+    if (soort.fallbackAuto) return hier.find(f => f.auto === soort.fallbackAuto) || null
+    return null
   }
 
   // In welke map hoort deze knop? Drie antwoorden, in deze volgorde:
@@ -271,14 +277,25 @@
   // Ook knoppen die nu niet in beeld staan gaan mee. Een git-knop die pas
   // verschijnt zodra er een remote is hoort in dezelfde map als de rest, anders
   // staat hij er later alsnog los naast.
+  //
+  // Nieuwe map: pas bij twee of meer losse knoppen van die soort (één knop in
+  // een eigen map is lawaai). Bestaande auto-map: ook één losse knop erin —
+  // anders blijven Gemini/Ollama eeuwig ernaast staan als de map er al is.
+  // Expres losgehaalde knoppen (cmdFolderVan === '') blijven los.
   function maakAutoMappen(rij) {
-    const losse = volgorde(rij).filter(id => !isMapId(id) && !mapVanKnop(rij, id))
+    const van = rij.bron.cmdFolderVan || {}
+    const losse = volgorde(rij).filter(id => {
+      if (isMapId(id)) return false
+      if (van[id] === '') return false
+      return !mapVanKnop(rij, id)
+    })
     let gedaan = 0
     for (const soort of soortenVan(rij)) {
       const hoort = losse.filter(soort.toets)
-      if (hoort.length < 2) continue
+      if (!hoort.length) continue
       let f = mappenVan(rij.bron, rij.sectie).find(x => x.auto === soort.auto)
       if (!f) {
+        if (hoort.length < 2) continue
         f = { id: nieuwMapId(), sectie: rij.sectie, label: soort.label, open: true, auto: soort.auto }
         rij.bron.cmdFolders = [...(rij.bron.cmdFolders || []), f]
       }

@@ -138,7 +138,9 @@ function rij(b, ids, extra) {
   const b = bron()
   const soorten = [
     { auto: 'git', label: 'git', toets: (id) => id.startsWith('git-') },
-    { auto: 'ai', label: 'ai', toets: (id) => id.startsWith('ai:') },
+    { auto: 'ai', label: 'ai', toets: (id) => id.startsWith('ai:') && !id.startsWith('ai:prog:') },
+    { auto: 'prog', label: 'programma\'s', fallbackAuto: 'ai',
+      toets: (id) => id.startsWith('ai:prog:') || id === 'ai:ollama' },
   ]
   const r = rij(b, ['git-status', 'git-push', 'ai:claude', 'los'], { autoSoorten: soorten })
   const gedaan = K.maakAutoMappen(r)
@@ -155,6 +157,47 @@ function rij(b, ids, extra) {
   t('de map is weg', K.mappenVan(b, 'run').length === 0)
   t('maar de knoppen staan er nog', K.volgorde(r).includes('git-status'))
   t('en de soort trekt ze niet opnieuw naar binnen', K.mapVanKnop(r, 'git-status') === null)
+}
+
+{
+  // Bestaande auto-map: ook één nieuwe knop erin, anders blijft Gemini/Ollama los.
+  const b = bron({
+    cmdFolders: [{ id: 'ai1', sectie: 'run', label: 'ai', open: true, auto: 'ai' }],
+    cmdFolderVan: { 'ai:claude': 'ai1' },
+    cmdVolgorde: { run: ['map:ai1', 'ai:claude', 'ai:ollama'] },
+  })
+  const soorten = [
+    { auto: 'ai', label: 'ai', toets: (id) => id.startsWith('ai:') && !id.startsWith('ai:prog:') && id !== 'ai:ollama' },
+    { auto: 'prog', label: 'programma\'s', fallbackAuto: 'ai',
+      toets: (id) => id.startsWith('ai:prog:') || id === 'ai:ollama' },
+  ]
+  const r = rij(b, ['ai:claude', 'ai:ollama', 'ai:prog:gemini'], { autoSoorten: soorten })
+  t('ollama valt in bestaande ai-map als programma\'s ontbreekt',
+    (K.mapVanKnop(r, 'ai:ollama') || {}).id === 'ai1')
+  t('gemini-cli ook via fallback naar ai',
+    (K.mapVanKnop(r, 'ai:prog:gemini') || {}).id === 'ai1')
+  t('claude blijft in de ai-map', (K.mapVanKnop(r, 'ai:claude') || {}).id === 'ai1')
+
+  b.cmdFolders.push({ id: 'p1', sectie: 'run', label: 'programma\'s', open: true, auto: 'prog' })
+  t('met programma\'s-map gaat ollama daarheen',
+    (K.mapVanKnop(r, 'ai:ollama') || {}).id === 'p1')
+  t('en gemini-cli ook', (K.mapVanKnop(r, 'ai:prog:gemini') || {}).id === 'p1')
+  t('claude blijft bij ai', (K.mapVanKnop(r, 'ai:claude') || {}).id === 'ai1')
+
+  // Expres eruit: auto-mappen mag hem niet terugzuigen.
+  K.zetInMap(b, 'ai:ollama', '')
+  t('eruit gehaald staat los', K.mapVanKnop(r, 'ai:ollama') === null)
+  t('en blijft los na auto-mappen', K.maakAutoMappen(r) === 0 && K.mapVanKnop(r, 'ai:ollama') === null)
+
+  // Wel: een knop die nog nooit was toegewezen, bij bestaande prog-map.
+  delete b.cmdFolderVan['ai:prog:gemini']
+  // Zonder toewijzing valt hij al via autoMapVoor in p1; maakAutoMappen hoeft
+  // niets te doen. Losse AI zonder map-match wél: simuleer stale verwijzing.
+  b.cmdFolderVan['ai:prog:gemini'] = 'weg-map'
+  t('stale map-verwijzing telt als los', K.mapVanKnop(r, 'ai:prog:gemini') === null)
+  const gezogen = K.maakAutoMappen(r)
+  t('bestaande map vangt stale knop op', gezogen >= 1)
+  t('gemini zit weer in programma\'s', (K.mapVanKnop(r, 'ai:prog:gemini') || {}).id === 'p1')
 }
 
 // ── Twee rijen in dezelfde bron ──────────────────────────────────────────────

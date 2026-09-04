@@ -99,6 +99,98 @@ t('lege naald geeft niets', W.zoekInTekst('abc', '').length === 0)
 t('hoofdlettergevoelig kan aan',
   W.zoekInTekst('Abc abc', 'ABC', { hoofdlettergevoelig: true }).length === 0)
 
+t('html zonder flutter is een website-gok',
+  W.isWebsiteGok({ flutter: false, html: true }) === true)
+t('flutter wint van html',
+  W.isWebsiteGok({ flutter: true, html: true }) === false)
+t('zonder html geen website',
+  W.isWebsiteGok({ flutter: false, html: false }) === false)
+
+t('html-bestand wordt herkend', W.isHtmlBestand('x/Page.HTML') && !W.isHtmlBestand('x.css'))
+t('open kiest de html die je bewerkt',
+  W.kiesSiteOpen({
+    huidigPad: 'C:\\site\\about.html', wortel: 'C:\\site', sep: '\\',
+    gevonden: [{ pad: 'C:\\site\\index.html', relatief: 'index.html' }],
+  }).relatief === 'about.html')
+t('zonder open html valt open terug op index',
+  W.kiesSiteOpen({
+    huidigPad: 'C:\\site\\stijl.css', wortel: 'C:\\site', sep: '\\',
+    gevonden: [{ pad: 'C:\\site\\index.html', relatief: 'index.html' }],
+  }).relatief === 'index.html')
+t('buiten de map telt de huidige html niet',
+  W.kiesSiteOpen({
+    huidigPad: 'C:\\anders\\x.html', wortel: 'C:\\site', sep: '\\',
+    gevonden: [{ pad: 'C:\\site\\home.html', relatief: 'home.html' }],
+  }).relatief === 'home.html')
+
+// ── Lichte aanvulling ────────────────────────────────────────────────────────
+const A = require('../lezer-aanvul')
+t('taal volgt de extensie',
+  A.taalVanPad('a/b.html') === 'html'
+  && A.taalVanPad('x.CSS') === 'css'
+  && A.taalVanPad('app.mjs') === 'js')
+t('html: m na < geeft main',
+  A.voorstellen('html', 'm').includes('main')
+  && A.voorstellen('html', 'h').includes('h1'))
+t('html-context pikt de tag-prefix',
+  A.contextBijCursor('<div><m', 8, 'html').prefix === 'm')
+t('html-invoeg zet sluit-tag erbij',
+  A.invoegTekst('html', 'main', { soort: 'tag', sluit: false }).tekst === 'main></main>')
+t('sluit-tag alleen de naam',
+  A.invoegTekst('html', 'main', { soort: 'tag', sluit: true }).tekst === 'main')
+t('css: t geeft text-opties',
+  A.voorstellen('css', 't').includes('text-align')
+  && A.voorstellen('css', 't').includes('text-decoration'))
+t('css-invoeg zet dubbele punt',
+  A.invoegTekst('css', 'color', { soort: 'prop' }).tekst === 'color: ')
+t('js: q geeft querySelector',
+  A.voorstellen('js', 'q').includes('querySelector'))
+t('lijst is begrensd en scrollbaar bedoeld',
+  A.voorstellen('html', 'a').length <= A.MAX_VOORSTELLEN)
+t('bij cursor in html komt een lijst',
+  !!A.voorstellenBijCursor('<h', 2, 'index.html')
+  && A.voorstellenBijCursor('<h', 2, 'index.html').lijst.includes('h1'))
+
+t('website-open-standaard is de editor',
+  W.projectOpenKeuze({}, 'website') === 'editor')
+t('flutter-open-standaard is uitvoer',
+  W.projectOpenKeuze({}, 'flutter') === 'output')
+t('ongeldige open-keuze valt terug',
+  W.projectOpenKeuze({ website: 'xyz' }, 'website') === 'editor')
+t('site-keuze blijft site',
+  W.projectOpenKeuze({ website: 'site' }, 'website') === 'site')
+t('flutter wint van website bij soort',
+  W.projectOpenSoort({ flutter: true, website: true }) === 'flutter')
+t('open-keuze editor → termTab editor',
+  W.termTabVoorOpenKeuze('editor') === 'editor'
+  && W.termTabVoorOpenKeuze('verkenner') === 'browser'
+  && W.termTabVoorOpenKeuze('site') === 'output')
+
+// ── Website-helpknoppen ──────────────────────────────────────────────────────
+const WK = require('../web-knoppen')
+t('elke web-knop heeft een snippet',
+  WK.WEB_CMD_DEFS.every(d => d.snippet && d.taal && d.groep))
+t('html/css/js hebben elk meerdere groepen',
+  new Set(WK.WEB_CMD_DEFS.filter(d => d.taal === 'html').map(d => d.groep)).size >= 3
+  && new Set(WK.WEB_CMD_DEFS.filter(d => d.taal === 'css').map(d => d.groep)).size >= 3
+  && new Set(WK.WEB_CMD_DEFS.filter(d => d.taal === 'js').map(d => d.groep)).size >= 3)
+t('snippet $0 wordt cursor',
+  WK.snippetInvoeg('<div>$0</div>').tekst === '<div></div>'
+  && WK.snippetInvoeg('<div>$0</div>').cursor === 5)
+t('negen uitklap-mappen voor web',
+  WK.WEB_AUTO_MAPPEN.length === 9)
+
+t('reload-pad is herkenbaar', W.isReloadUrl('/__cd_reload') && W.isReloadUrl('/__cd_reload?x=1'))
+t('gewoon pad is geen reload', !W.isReloadUrl('/index.html'))
+t('reload-script komt vóór </body>',
+  W.injecteerReload('<html><body>x</body></html>').includes('</body>')
+  && W.injecteerReload('<html><body>x</body></html>').indexOf('EventSource')
+    < W.injecteerReload('<html><body>x</body></html>').indexOf('</body>'))
+t('dubbel injecteren doet niets',
+  (() => { const een = W.injecteerReload('<body></body>'); return W.injecteerReload(een) === een })())
+t('zonder body komt het script achteraan',
+  W.injecteerReload('<p>x</p>').endsWith(W.RELOAD_SCRIPT))
+
 // ── De bedrading ─────────────────────────────────────────────────────────────
 const main = fs.readFileSync(path.join(APP, 'main.js'), 'utf8')
 const pre = fs.readFileSync(path.join(APP, 'preload.js'), 'utf8')
@@ -118,11 +210,18 @@ t('lezen weigert niet-utf8', /'geen-utf8'/.test(main))
 t('de server luistert alleen op deze pc',
   /server\.listen\(0, '127\.0\.0\.1'/.test(main))
 t('en gaat dicht als de app weg is',
-  /app\.on\('will-quit'[\s\S]{0,240}sites\.clear\(\)/.test(main))
+  /app\.on\('will-quit'[\s\S]{0,240}sluitSite\(/.test(main))
 t('dezelfde map twee keer openen geeft geen tweede server',
-  /if \(s\.dir === dir\) return \{ ok: true/.test(main))
+  /if \(s\.dir !== wortel\) continue/.test(main)
+  && /hergebruikt: true/.test(main)
+  && /siteUrlVoor\(/.test(main))
 t('elke aanvraag wordt op insluiting getoetst',
   /WebTools\.binnenWortel\(wortel, echt, path\.sep\)/.test(main))
+t('live-reload hangt aan EventSource en watch',
+  /isReloadUrl\(req\.url\)/.test(main)
+  && /fs\.watch\(wortel/.test(main)
+  && /injecteerReload/.test(main)
+  && /seinSitesVoorPad\(pad\)/.test(main))
 t('groot en binair worden geweigerd bij het lezen',
   /'te-groot'/.test(main) && /'binair'/.test(main))
 t('preload geeft de nieuwe wegen door',
@@ -132,18 +231,79 @@ t('preload geeft de nieuwe wegen door',
 t('index.html laadt web-tools.js vóór renderer.js',
   html.includes('src="web-tools.js"')
   && html.indexOf('src="web-tools.js"') < html.indexOf('src="renderer.js"'))
+t('CSP laat de site-preview-iframe toe op 127.0.0.1',
+  /frame-src[^"]*127\.0\.0\.1/.test(html))
+t('site-preview gebruikt webview i.p.v. iframe (Electron)',
+  /<webview[^>]*id="site-preview-frame"/.test(ren)
+  && /webviewTag:\s*true/.test(main))
+t('en lezer-aanvul.js vóór renderer.js',
+  html.includes('src="lezer-aanvul.js"')
+  && html.indexOf('src="lezer-aanvul.js"') < html.indexOf('src="renderer.js"'))
+t('en web-knoppen.js vóór renderer.js',
+  html.includes('src="web-knoppen.js"')
+  && html.indexOf('src="web-knoppen.js"') < html.indexOf('src="renderer.js"'))
 t('en heeft een bewerkbaar leesvenster',
-  /id="modal-lezer"/.test(html)
-  && /id="lezer-inhoud"/.test(html)
-  && /<textarea[^>]*id="lezer-inhoud"/.test(html)
-  && /id="lezer-opslaan"/.test(html)
-  && /id="lezer-regels"/.test(html)
-  && /id="lezer-zoek"/.test(html))
-t('met opmaak voor regels en zoeken',
+  /data-pane="editor"/.test(ren)
+  && /data-tab="editor"/.test(ren)
+  && /id="lezer-inhoud"/.test(ren)
+  && /id="lezer-opslaan"/.test(ren)
+  && /id="lezer-regels"/.test(ren)
+  && /id="lezer-zoek"/.test(ren)
+  && /id="lezer-tabs"/.test(ren))
+t('met opmaak voor regels, zoeken en bestandstabjes',
   css.includes('.lezer-inhoud {')
   && css.includes('.lezer-regels')
   && css.includes('.lezer-zoek')
-  && css.includes('.modal.modal-groot {'))
+  && css.includes('.lezer-term')
+  && css.includes('.lezer-tab'))
+t('editor is een derde termTab',
+  /'output' \| 'browser' \| 'editor'/.test(ren)
+  && /function setTermTab\(tab\)/.test(ren)
+  && /tab !== 'editor'/.test(ren)
+  && /function standaardTermTab\(/.test(ren)
+  && /function openWebsiteStart\(/.test(ren))
+t('meerdere bestanden openen als tabjes',
+  /lezerStaat\.tabs/.test(ren)
+  && /function kiesLezerTab\(/.test(ren)
+  && /function sluitLezerTab\(/.test(ren)
+  && /function tekenLezerTabs\(/.test(ren))
+t('website-projecten krijgen een open-knop i.p.v. terminal-knoppen',
+  /id="btn-site-open"/.test(ren)
+  && /alleen-site/.test(ren)
+  && /alleen-terminal/.test(ren)
+  && /function openSiteVanProject\(/.test(ren)
+  && /function werkTermBarVoorProject\(/.test(ren))
+t('project-openen is globaal in te stellen',
+  /projectOpenen:/.test(main)
+  && /function openProjectStart\(/.test(ren)
+  && /set-open-\$\{soort\}/.test(ren)
+  && /settings\.section\.projectOpenTitle/.test(JSON.stringify(nl)))
+t('website-projecten hebben helpknoppen per taal, zonder flutter',
+  /WEB_CMD_DEFS/.test(ren)
+  && /function projectToonbaar\(/.test(ren)
+  && /function voegWebSnippetToe\(/.test(ren)
+  && /zorgVoorWebKnoppen/.test(ren)
+  && /f\.auto === FLUTTER_MAP/.test(ren)
+  && /aiDienstenOpProject\(bron\)/.test(ren)
+  && !/website && d\.programma/.test(ren))
+t('website toont AI-programma\'s (Claude Code e.d.) in programma\'s-map',
+  /aiDienstenOpProject\(bron\)/.test(ren) && /if \(website\) return true/.test(ren))
+t('mapklik sloopt het werkvlak niet bij hetzelfde project',
+  /houdWerkvlak = !!wrapBestaat && zelfdeProject/.test(ren))
+t('output is site-preview bij website-projecten',
+  /id="site-preview"/.test(ren)
+  && /function verversSitePreview\(/.test(ren)
+  && /function sitePreviewAan\(/.test(ren)
+  && /sitePreviewToonUitvoer/.test(ren)
+  && css.includes('.site-preview-frame'))
+t('lichte aanvulling in de editor',
+  /id="lezer-aanvul"/.test(ren)
+  && /function verversLezerAanvul\(/.test(ren)
+  && /pasLezerAanvulToe/.test(ren)
+  && css.includes('.lezer-aanvul')
+  && css.includes('max-height: 220px'))
+t('springNaarOutput haalt ook de editor weg',
+  /termTab !== 'output'\) setTermTab\('output'\)/.test(ren))
 
 t('slepen gaat langs één plek die kijkt wat het is',
   /async function verwerkGesleept\(/.test(ren))
@@ -157,7 +317,7 @@ t('een map die al een project is wordt herkend',
 t('het projectvenster krijgt het pad al ingevuld',
   /function openNieuwProjectMet\(/.test(ren))
 t('escape sluit het leesvenster',
-  /modal-lezer'\)\.hidden\)[\s\S]{0,280}sluitLezer\(/.test(ren))
+  /termTab === 'editor' && view === 'project'[\s\S]{0,500}sluitLezer\(/.test(ren))
 t('niet-opgeslagen werk hangt aan de bestaande haak',
   /controleerOnveiligWerk[\s\S]{0,200}controleerLezerWerk/.test(ren)
   && /async function selectProject\(/.test(ren)
@@ -174,13 +334,28 @@ for (const sleutel of ['sleep.titel', 'sleep.tekst', 'sleep.tekstBestaand', 'sle
                        'lezer.kopieer', 'lezer.inMap', 'lezer.metWindows', 'lezer.gekopieerd',
                        'lezer.info', 'lezer.nietGelukt', 'lezer.teGroot', 'lezer.binair',
                        'lezer.onleesbaar', 'lezer.geenUtf8', 'lezer.nietOpgeslagen',
-                       'lezer.bestand', 'lezer.opgeslagen', 'lezer.opslaanMislukt',
+                       'lezer.bestand', 'lezer.leeg', 'lezer.leegPlaceholder', 'lezer.geenProject',
+                       'lezer.opgeslagen', 'lezer.opslaanMislukt',
                        'lezer.opslaanMisluktTekst', 'lezer.eldersTitel', 'lezer.eldersTekst',
                        'lezer.opnieuwInlezen', 'lezer.overschrijven', 'lezer.wisselTitel',
                        'lezer.wisselTekst', 'lezer.afsluitTitel', 'lezer.afsluitTekst',
                        'lezer.nietOpslaan', 'lezer.zoeken', 'lezer.zoekPlaceholder',
                        'lezer.zoekVorige', 'lezer.zoekVolgende',
-                       'lezer.zoekTreffers', 'lezer.zoekNiets']) {
+                       'lezer.zoekTreffers', 'lezer.zoekNiets', 'lezer.tabSluiten',
+                       'term.tabEditor', 'term.tabSite', 'term.sitePreviewReload',
+                       'term.sitePreviewShowOutput', 'term.sitePreviewOutputMode',
+                       'term.siteOpenButton', 'term.siteOpenTitle',
+                       'term.siteGeenHtml', 'modal.project.websiteLabel',
+                       'settings.section.projectOpenTitle', 'settings.projectOpen.desc',
+                       'settings.projectOpen.website', 'settings.projectOpen.flutter',
+                       'settings.projectOpen.overig', 'settings.projectOpen.opt.editor',
+                       'settings.projectOpen.opt.verkenner', 'settings.projectOpen.opt.site',
+                       'settings.projectOpen.opt.windows', 'settings.projectOpen.opt.output',
+                       'settings.projectOpen.opt.niets',
+                       'folder.webHtmlStruct', 'folder.webHtmlTekst', 'folder.webHtmlMedia',
+                       'folder.webCssLayout', 'folder.webCssTekst', 'folder.webCssLook',
+                       'folder.webJsDom', 'folder.webJsEvents', 'folder.webJsData',
+                       'web.knopTitel', 'web.knopGeenBestand', 'web.knopVerkeerdeTaal']) {
   t('tekst ' + sleutel + ' bestaat in nl en en', !!nl[sleutel] && !!en[sleutel])
 }
 t('de sleep-overlay noemt niet meer alleen bat',

@@ -4592,14 +4592,15 @@ function startVraagAutomaat() {
     check('en met een naam die uit de map komt', $('#f-name').value === 'site')
     $('#modal-proj-cancel').click(); await tick()
 
-    // Een tekstbestand gaat naar het leesvenster.
+    // Een tekstbestand gaat naar de editor-tab (niet meer een los modal).
     webMappen = []
     webTekst = { 'C:\\site\\stijl.css': 'body { color: red }\nh1 { }' }
     webTekstMtime = { 'C:\\site\\stijl.css': 1 }
     webTekstGeschreven = []
     await sleep(['C:\\site\\stijl.css'])
-    check('een gesleept bestand komt in het leesvenster',
-      $('#modal-lezer').hidden === false
+    check('een gesleept bestand komt in de editor-tab',
+      !!$('.term-tab[data-tab="editor"].active')
+      && $('#lezer-inhoud')
       && $('#lezer-inhoud').value.includes('color: red'))
     check('met het pad en de grootte erbij',
       $('#lezer-pad').textContent === 'C:\\site\\stijl.css'
@@ -4613,7 +4614,7 @@ function startVraagAutomaat() {
     $('#lezer-inhoud').dispatchEvent(new window.Event('input', { bubbles: true }))
     await tick()
     check('typen markeert als niet-opgeslagen',
-      $('#lezer-titel').textContent.includes('•')
+      !!$('.lezer-tab.active.vuil')
       && $('#lezer-info').textContent.includes('niet opgeslagen'))
     $('#lezer-opslaan').click(); await tick(); await tick()
     check('opslaan schrijft via fs:schrijfTekst',
@@ -4621,7 +4622,20 @@ function startVraagAutomaat() {
       && webTekstGeschreven[0].pad === 'C:\\site\\stijl.css'
       && webTekstGeschreven[0].inhoud.includes('color: blue'))
     check('en wist de vuile markering',
-      !$('#lezer-titel').textContent.includes('•'))
+      !$('.lezer-tab.active.vuil'))
+
+    // Tweede bestand: tab erbij, eerste blijft open.
+    webTekst['C:\\site\\index.html'] = '<p>hallo</p>'
+    webTekstMtime['C:\\site\\index.html'] = 1
+    await sleep(['C:\\site\\index.html'])
+    check('tweede bestand opent als tweede tab',
+      $$('.lezer-tab').length === 2
+      && $('#lezer-pad').textContent === 'C:\\site\\index.html')
+    $$('.lezer-tab')[0].click(); await tick()
+    check('terug naar de eerste tab bewaart de inhoud',
+      $('#lezer-pad').textContent === 'C:\\site\\stijl.css'
+      && $('#lezer-inhoud').value.includes('color: blue'))
+    $$('.lezer-tab')[1].click(); await tick()
 
     // Tab springt in, niet naar de volgende knop.
     const vak = $('#lezer-inhoud')
@@ -4636,24 +4650,36 @@ function startVraagAutomaat() {
     // Zoeken binnen het bestand.
     $('#lezer-zoek-knop').click(); await tick()
     check('zoeken opent de balk', $('#lezer-zoek').hidden === false)
-    $('#lezer-zoek-invoer').value = 'blue'
+    $('#lezer-zoek-invoer').value = 'hallo'
     $('#lezer-zoek-invoer').dispatchEvent(new window.Event('input', { bubbles: true }))
     await tick()
     check('zoeken vindt de treffer',
       $('#lezer-zoek-info').textContent.includes('1')
       && vak.selectionStart >= 0
-      && vak.value.slice(vak.selectionStart, vak.selectionEnd).toLowerCase() === 'blue')
+      && vak.value.slice(vak.selectionStart, vak.selectionEnd).toLowerCase() === 'hallo')
 
-    // Tab heeft het bestand weer vuil gemaakt — weggooien en dicht.
+    // Escape sluit één tab; de andere blijft. Daarna nog eens → output.
     kiesKnop('niet opslaan')
-    $('#lezer-sluit').click(); await tick(); await tick()
-    check('en het gaat weer dicht', $('#modal-lezer').hidden === true)
+    window.document.dispatchEvent(new window.KeyboardEvent('keydown', {
+      key: 'Escape', bubbles: true, cancelable: true,
+    }))
+    await tick(); await tick()
+    check('escape sluit alleen het actieve tabblad',
+      $$('.lezer-tab').length === 1
+      && !!$('.term-tab[data-tab="editor"].active')
+      && $('#lezer-pad').textContent === 'C:\\site\\stijl.css')
+    window.document.dispatchEvent(new window.KeyboardEvent('keydown', {
+      key: 'Escape', bubbles: true, cancelable: true,
+    }))
+    await tick(); await tick()
+    check('escape op het laatste tabblad gaat naar output',
+      !!$('.term-tab[data-tab="output"].active'))
 
     // Iets waar niets mee kan zegt dat, in plaats van stil te blijven.
     webTekst = {}
     await sleep(['C:\\site\\plaatje.png'])
-    check('een plaatje levert een melding op, geen leeg venster',
-      $('#modal-lezer').hidden === true)
+    check('een plaatje opent geen editor',
+      !$('.term-tab[data-tab="editor"].active') || !$('#lezer-inhoud')?.value)
 
     // Niet-opgeslagen werk bij sluiten: de vraag verschijnt.
     webTekst = { 'C:\\site\\a.html': '<p>hallo</p>' }
@@ -4664,13 +4690,21 @@ function startVraagAutomaat() {
     await tick()
     laatsteVraag = null
     kiesKnop('annuleren')
-    $('#lezer-sluit').click(); await tick(); await tick()
+    window.document.dispatchEvent(new window.KeyboardEvent('keydown', {
+      key: 'Escape', bubbles: true, cancelable: true,
+    }))
+    await tick(); await tick()
     check('sluiten met vuil werk vraagt eerst',
       !!laatsteVraag && laatsteVraag.titel.includes('niet opgeslagen'))
-    check('en annuleren laat het venster open', $('#modal-lezer').hidden === false)
+    check('en annuleren laat de editor open',
+      !!$('.term-tab[data-tab="editor"].active'))
     kiesKnop('niet opslaan')
-    $('#lezer-sluit').click(); await tick(); await tick()
-    check('niet opslaan gooit weg en sluit', $('#modal-lezer').hidden === true)
+    window.document.dispatchEvent(new window.KeyboardEvent('keydown', {
+      key: 'Escape', bubbles: true, cancelable: true,
+    }))
+    await tick(); await tick()
+    check('niet opslaan gooit weg en sluit',
+      !!$('.term-tab[data-tab="output"].active'))
 
     api.getFilePath = echtePad
   }

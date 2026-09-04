@@ -115,7 +115,7 @@ Grenzen meteen inbouwen: niets boven ongeveer 2 MB, en niets wat binair blijkt
 (een nulbyte in de eerste kilobyte is een goede test). Een tekstvak met een
 video erin is een vastgelopen app.
 
-### 1.5 Bij een website-project staat de editor voorop — *nog niet, en duurder dan gedacht*
+### 1.5 Bij een website-project staat de editor voorop — **gedaan**
 
 Bij een Flutter-project is de uitvoer het hart: je drukt op run en kijkt wat de
 terminal zegt. Bij een map met html en css is dat andersom — daar is de
@@ -128,32 +128,16 @@ Dus: bij zo'n project hoort de editor de plek van de uitvoer over te nemen.
 dat, en dan mis je het precies op het moment dat er iets misgaat.
 
 Wel door hem naar achteren te zetten. Op die plek zit al een tabstrip
-(`termTab`, nu `output` en `browser`), dus de editor wordt daar een derde
-tabblad, en bij een website-project is dát het tabblad dat opengaat. De uitvoer
-staat er nog, één klik verderop, en springt vanzelf naar voren zodra er iets
-draait — dat doet `springNaarOutput()` al.
+(`termTab`, nu `output`, `browser` en `editor`), dus de editor is daar een
+derde tabblad, en bij een website-project is dát het tabblad dat opengaat. De
+uitvoer staat er nog, één klik verderop, en springt vanzelf naar voren zodra er
+iets draait — dat doet `springNaarOutput()` al.
 
-Herkennen welk soort project het is kan met hetzelfde patroon als nu voor
-Flutter: `bepaalToolsVoorProject()` kijkt naar `pubspec.yaml` en verbergt de
-tools-sectie als het geen Flutter is. Daar komt bij: is er html gevonden (1.2)
-en geen `pubspec.yaml`, dan is het een website-project. Bewaren bij het project
-zelf, naast `secties`, zodat je het per project kunt overrulen — de gok van de
-app hoort nooit de laatste zijn.
+Herkennen: html gevonden en geen Flutter → `p.website = true`, te overrulen in
+het projectvenster. Startbestand: de gevonden `index.html` (besteStart).
 
-**Waarom dit is blijven staan.** `termTab` staat op ruim veertig plekken in
-`renderer.js` en is verweven met de gesplitste weergave: `werkSlots`,
-`termSplitFirst`, `visueelSlotVoorTermPane`, het meten van de pty. Overal staat
-`tab === 'browser' ? 'browser' : 'output'` — twee waarden, hard aangenomen. Een
-derde erbij is geen toevoeging maar een verbouwing van het hart van de app, en
-dat is niet iets om aan het eind van een avond te doen naast vier andere
-dingen. Het leesvenster staat daarom nu als eigen venster; als het bewerken er
-in ronde 2 bij komt is dat het natuurlijke moment om die verbouwing apart en
-met rust te doen.
-
-Openstaande vraag voor als het zover is: welk bestand staat er open als je het
-project opent? Het gevonden `index.html` is de logische gok; onthouden wat je
-het laatst open had is waarschijnlijk beter. Beginnen met de gok, en pas
-onthouden zodra het irritant wordt.
+De split blijft twee panelen (output/verkenner); naar de editor gaan zet een
+open split eerst dicht.
 
 ---
 
@@ -189,21 +173,26 @@ editor maar een formulier.
 
 ---
 
-## Ronde 3 — pas als ronde 1 en 2 staan
+## Ronde 3 — pas als ronde 1 en 2 staan — **gedaan** (3.3 overgeslagen)
 
-### 3.1 Herladen bij opslaan
+### 3.1 Herladen bij opslaan — **gedaan**
 
 Sla je op terwijl de site openstaat, dan hoort de pagina zichzelf te
 verversen. Met een eigen server is dat goedkoop: een `EventSource` op de
 pagina en een `fs.watch` op de map. Dit is het moment waarop het geheel meer
 wordt dan de som — bewerken en meteen zien.
 
-### 3.2 Meerdere bestanden tegelijk
+Gedaan als: script in elke geserveerde html, SSE op `/__cd_reload`, watch op
+de sitemap, plus een expliciet seintje bij `fs:schrijfTekst` (Windows mist
+anders soms de eigen write).
 
-Tabjes boven het paneel. Pas zinvol als je merkt dat je heen en weer springt
-tussen html en css; eerder is het complexiteit zonder aanleiding.
+### 3.2 Meerdere bestanden tegelijk — **gedaan**
 
-### 3.3 Kleuren in de code — misschien nooit
+Tabjes boven het paneel. Openen van een tweede bestand (html ↔ css) houdt het
+eerste open; Escape / × / Ctrl+W sluit alleen het actieve tabblad. Bij
+projectwisselen of afsluiten wordt elk vuil tabblad apart gevraagd.
+
+### 3.3 Kleuren in de code — overgeslagen
 
 Twee wegen en allebei kosten iets. Een echte editorcomponent (CodeMirror,
 Monaco) doet het goed maar is een afhankelijkheid van honderden kilobytes in
@@ -213,14 +202,39 @@ nét verkeerd bij een apostrof in een comment of een template-string.
 Voorstel: overslaan tot je merkt dat je het mist. Zwarte tekst in een net
 lettertype leest prima voor het soort aanpassing waar dit paneel voor is.
 
+### Extra — lichte aanvulling bij typen — **gedaan**
+
+Geen IDE-aanvulling: alleen tags (html), eigenschappen (css) en veelgebruikte
+woorden (js). Typen toont een scrollbare lijst; Tab/Enter/pijltjes bevestigen.
+Zit in `lezer-aanvul.js`, los van de verboden IDE-lijst hieronder.
+
+### Extra — wat openen bij een project — **gedaan**
+
+In de globale instellingen, per soort (website / Flutter / overig): editor,
+verkenner, site in de browser, Windows Verkenner, of niets. Alleen de eerste
+keer; daarna wint de onthouden tab.
+
+### Extra — helpknoppen per taal — **gedaan**
+
+Bij website-projecten: geen Flutter, geen programma-knoppen; wél git. Per
+open html/css/js-bestand uitklapmenu's met snelle stukjes code
+(`web-knoppen.js`). Wisselen van tab wisselt de knoppenrij.
+
+### Extra — output = site-preview — **gedaan**
+
+Bij website-projecten wordt de output-tab een iframe met de lokale site
+(live-reload blijft werken). Git of een commando springt tijdelijk naar de
+echte terminal; daarna terug via de knop.
+
 ---
 
 ## Wat er bewust niet in komt
 
-Aanvulling, foutmarkering, refactoring, extensies, git-diff in de editor,
-meerdere cursors, een bestandsboom binnen de editor. Dat is de lijst die van
-een launcher een slecht IDE maakt. De grens bewaken is hier belangrijker dan
-de lijst afwerken — net als bij de git-functie.
+Volledige IDE-aanvulling, foutmarkering, refactoring, extensies, git-diff in de
+editor, meerdere cursors, een bestandsboom binnen de editor. Dat is de lijst
+die van een launcher een slecht IDE maakt. De grens bewaken is hier
+belangrijker dan de lijst afwerken — net als bij de git-functie. Lichte
+tag/eigenschap-aanvulling (zie hierboven) hoort wél bij "snel iets bouwen".
 
 ## Vallen om te onthouden
 
