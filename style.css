@@ -1984,6 +1984,9 @@ button.thema-regel.wis:hover .thema-aantal { color: var(--red); }
 .cmd-section-label-row { flex-wrap: wrap; }
 
 .cmd-map-inhoud { display: flex; flex-wrap: wrap; gap: 7px; }
+/* Dwingt een regeleinde in de knoppenrij: de open mappen staan bovenaan, de
+   losse knoppen horen eronder te beginnen en niet naast de laatste map. */
+.cmd-rij-breek { flex: 0 0 100%; height: 0; margin: 0; }
 /* Kopregel van een open map: de naam, en wat er verder bij die map hoort (bij
    Flutter is dat --release). */
 .cmd-map-regelrij { display: flex; align-items: center; gap: 10px; }

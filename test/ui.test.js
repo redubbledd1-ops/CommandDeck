@@ -384,6 +384,7 @@ Object.defineProperty(window.navigator, 'clipboard', { value: { writeText: () =>
 window.Element.prototype.scrollIntoView = function (o) { inBeeldGehaald.push(this) }
 window.eval(fs.readFileSync(path.join(APP, 'i18n.js'), 'utf8') + '\nglobalThis.I18N = I18N;')
 window.eval(fs.readFileSync(path.join(APP, 'git-tools.js'), 'utf8'))
+window.eval(fs.readFileSync(path.join(APP, 'knoppenrij.js'), 'utf8'))
 window.eval(fs.readFileSync(path.join(APP, 'accounts.js'), 'utf8'))
 // Een handvat om iets in de projecten van de renderer te zetten. Elke
 // window.eval krijgt in jsdom zijn eigen scope, dus zonder dit komen we niet
@@ -4143,9 +4144,8 @@ function startVraagAutomaat() {
   }
 
   // ── Volgorde in beeld ────────────────────────────────────────
-  // Een open map is een blok over de hele breedte; die horen onderaan. Dichte
-  // mappen zijn chips en horen naast de knoppen te passen, niet erboven of
-  // eronder op een eigen regel.
+  // Open mappen staan bovenaan, met de losse knoppen eronder. Dichte mappen
+  // zijn chips in de kopregel en horen daar vooraan te blijven staan.
   {
     const PAD = 'C:/volgorde2'
     const proj = {
@@ -4170,10 +4170,21 @@ function startVraagAutomaat() {
 
     mappen[0].open = true
     const gemengd = W.__test.rijVolgorde(proj, 'run')
-    check('een open map zakt naar onderen',
-      gemengd[gemengd.length - 1] === 'map:' + mappen[0].id)
+    const openPlek = gemengd.indexOf('map:' + mappen[0].id)
+    const eersteLos = gemengd.findIndex(id => id.indexOf('map:') !== 0)
+    check('een open map staat boven de losse knoppen',
+      openPlek >= 0 && (eersteLos === -1 || openPlek < eersteLos))
     check('en de dichte mappen blijven vooraan staan',
       gemengd[0].indexOf('map:') === 0 && gemengd[0] !== 'map:' + mappen[0].id)
+
+    // De rij breekt niet uit zichzelf af, dus zonder het lege blok schuift de
+    // eerste losse knop naast de laatste map.
+    mappen.forEach(f => { f.open = true })
+    const rijHtml = W.__test.cmdGridHtml(proj, 'run')
+    const laatsteGroep = rijHtml.lastIndexOf('cmd-map-groep')
+    const breek = rijHtml.indexOf('cmd-rij-breek')
+    check('er staat een regelbreek na de open mappen', breek > laatsteGroep)
+    check('en de losse knoppen komen daarna', rijHtml.indexOf('cmd-btn', breek) > breek)
   }
 
   console.log(ok ? '\n✓ ALLE UI-TESTS GESLAAGD' : '\n✗ ER ZIJN TESTS GEFAALD')
