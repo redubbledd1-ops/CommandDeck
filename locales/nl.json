@@ -1262,5 +1262,19 @@
   "gitset.identFixTekst": "In deze map staat {van} ingesteld als auteur van commits. Je account in de app is {naar}. Commits die je hier maakt komen dus op de andere naam te staan, en koppelen mogelijk niet aan je GitHub-account.\n\nDit kan met opzet zijn — een klantproject bijvoorbeeld. Wil je dat niet, dan zet de knop hieronder deze map op je account.",
   "gitset.identFixKnop": "deze map op mijn account zetten",
   "gitset.nietsDoen": "zo laten",
-  "accounts.activerenMislukt": "Git-account instellen mislukte: {stappen}"
+  "accounts.activerenMislukt": "Git-account instellen mislukte: {stappen}",
+  "settings.section.logTitle": "logboek",
+  "settings.log.uitleg": "Schrijft op wat de app achter de schermen doet, zodat een probleem later na te lopen is. Wachtwoorden en tokens worden weggelaten.",
+  "settings.log.soort.git": "git",
+  "settings.log.soort.commando": "commando's",
+  "settings.log.soort.bestanden": "bestanden",
+  "settings.log.soort.ai": "ai",
+  "settings.log.soort.app": "app",
+  "settings.log.zoek": "zoeken in het logboek",
+  "settings.log.ververs": "verversen",
+  "settings.log.kopieer": "kopiëren",
+  "settings.log.map": "map openen",
+  "settings.log.wis": "wissen",
+  "settings.log.leeg": "Nog niets opgeschreven. Zet hierboven aan wat je wilt volgen en doe daarna waar het misgaat.",
+  "settings.log.gekopieerd": "Logboek gekopieerd"
 }

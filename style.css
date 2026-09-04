@@ -1963,6 +1963,23 @@ button.thema-regel.wis:hover .thema-aantal { color: var(--red); }
 /* Dichte mappen in de kopregel, naast de schakelaar. Ze mogen doorlopen naar
    de volgende regel als het niet past, maar ze horen niet uit zichzelf onder
    de knoppen te gaan staan. */
+/* Logboek in de instellingen. Klein lettertype en strak op elkaar: je zoekt
+   hier een naald, dus er moet zoveel mogelijk hooi tegelijk in beeld passen. */
+.log-lijst {
+  max-height: 320px; overflow: auto; margin-top: 8px;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--s1);
+  font-family: var(--mono); font-size: 11px; line-height: 1.5;
+}
+.log-regel { display: flex; gap: 8px; padding: 3px 8px; border-bottom: 1px solid var(--border); }
+.log-regel:last-child { border-bottom: 0; }
+.log-regel.stuk { background: var(--red-d); }
+.log-tijd { color: var(--muted); flex-shrink: 0; }
+.log-soort { color: var(--accent); flex-shrink: 0; min-width: 62px; }
+.log-tekst { color: var(--text); word-break: break-word; }
+.log-extra { display: block; color: var(--muted2); }
+.log-leeg { padding: 12px; color: var(--muted); font-size: 12px; }
+.log-zoek { max-width: 220px; }
+
 .cmd-kop-mappen { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; min-width: 0; }
 .cmd-section-label-row { flex-wrap: wrap; }
 

@@ -161,6 +161,14 @@ const api = {
   listLanguages: async () => [{ code: 'nl', label: 'Nederlands' }, { code: 'en', label: 'English' }],
   detectLanguage: async () => 'nl',
   loadSettings: async () => settings,
+  logLees: async () => ({
+    regels: [{ t: Date.now(), soort: 'git', bericht: 'git push — MISLUKT', extra: { code: 128 } }],
+    totaal: 1, aan: { git: true, commando: true, bestanden: false, ai: false, app: true },
+    soorten: ['git', 'commando', 'bestanden', 'ai', 'app'], pad: 'C:\logboek.txt',
+  }),
+  logZet: async (o) => ({ aan: o }),
+  logWis: async () => ({ ok: true }),
+  logMap: async () => ({ ok: true }),
   saveSettings: async (s) => {
     const kopie = JSON.parse(JSON.stringify(s))
     for (const k of Object.keys(settings)) delete settings[k]
@@ -470,6 +478,32 @@ function startVraagAutomaat() {
   check('niet smaller dan het minimum', settings.zijbalkBreedte === 140)
   zijGreep.dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true }))
   await tick()
+
+  // ── Logboek in de instellingen ────────────────────────────────────────
+  // Zonder logboek was er van de push die stukliep niets terug te vinden: de
+  // app gooide juist de foutregels weg. Dit hoort aan en uit te kunnen per soort.
+  $('#btn-settings').click(); await tick(); await tick()
+  check('er is een logboek-sectie met een schakelaar per soort',
+    $$('[data-log-soort]').length === 5)
+  check('git staat standaard aan', $('[data-log-soort="git"]').checked === true)
+  check('en de opgeschreven regels staan erin',
+    ($('.log-lijst')?.textContent || '').includes('git push'))
+  check('een mislukking valt op', !!$('.log-regel.stuk'))
+  $('[data-log-soort="bestanden"]').checked = true
+  $('[data-log-soort="bestanden"]').dispatchEvent(new window.Event('change'))
+  await tick(); await tick()
+  check('een soort aanzetten wordt bewaard', settings.logboek.bestanden === true)
+
+  // ── Verwijderknop bij het bewerken van een project ────────────────────
+  // De knop wordt onderaan het venster bijgeprikt. Loopt er iets stuk in de
+  // git-sectie erboven, dan komt de code die hem toevoegt niet meer aan de
+  // beurt en is de knop stilletjes weg -- precies wat er gebeurde.
+  $$('.proj-edit')[0].click(); await tick(); await tick()
+  check('een project bewerken toont de verwijderknop',
+    !!$('#modal-proj .btn-delete'))
+  check('en de git-sectie eronder is ook getekend',
+    !!$('#git-sectie') && $('#git-sectie').innerHTML.length > 0)
+  $('#modal-proj-cancel').click(); await tick()
 
   // ── CMD-sectie ─────────────────────────────────────────────────────────────
   $('#btn-nav-cmd').click(); await tick()

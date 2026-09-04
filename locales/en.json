@@ -1262,5 +1262,19 @@
   "gitset.identFixTekst": "This folder has {van} set as the author of commits. Your account in the app is {naar}. Commits you make here will carry the other name, and may not link to your GitHub account.\n\nThis can be deliberate — a client project, say. If it is not, the button below puts this folder on your account.",
   "gitset.identFixKnop": "put this folder on my account",
   "gitset.nietsDoen": "leave as is",
-  "accounts.activerenMislukt": "Setting the git account failed: {stappen}"
+  "accounts.activerenMislukt": "Setting the git account failed: {stappen}",
+  "settings.section.logTitle": "log",
+  "settings.log.uitleg": "Records what the app does behind the scenes, so a problem can be traced afterwards. Passwords and tokens are left out.",
+  "settings.log.soort.git": "git",
+  "settings.log.soort.commando": "commands",
+  "settings.log.soort.bestanden": "files",
+  "settings.log.soort.ai": "ai",
+  "settings.log.soort.app": "app",
+  "settings.log.zoek": "search the log",
+  "settings.log.ververs": "refresh",
+  "settings.log.kopieer": "copy",
+  "settings.log.map": "open folder",
+  "settings.log.wis": "clear",
+  "settings.log.leeg": "Nothing recorded yet. Switch on what you want to follow above, then do the thing that goes wrong.",
+  "settings.log.gekopieerd": "Log copied"
 }

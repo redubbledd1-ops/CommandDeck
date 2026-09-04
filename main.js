@@ -1189,17 +1189,110 @@ ipcMain.handle('fs:projectSoort', (_, dir) => {
 
 // Kort en met een harde tijdslimiet: dit draait tijdens het renderen en mag
 // het venster nooit laten wachten. Geeft null terug als git zelf ontbreekt.
-function gitUit(dir, args) {
+// ── Logboek ──────────────────────────────────────────────────────────────────
+// Dit bestaat omdat er dagen verloren zijn aan een push die stukliep zonder dat
+// iemand kon zien waarom. De app deed precies de dingen weg die het antwoord
+// waren: welk commando er draaide, in welke map, en wat er terugkwam. Elke
+// stille catch is een vraag die later niemand meer kan beantwoorden.
+//
+// Twee kanten: een ring in het geheugen voor het venster, en een bestand op
+// schijf zodat een vastloper zijn eigen aanloop niet wist.
+const LOG_SOORTEN = ['git', 'commando', 'bestanden', 'ai', 'app']
+const LOG_RING_MAX = 1500
+const LOG_BESTAND_MAX = 2 * 1024 * 1024
+
+let logRing = []
+let logAan = { git: true, commando: true, bestanden: false, ai: false, app: true }
+
+function logPad() {
+  return path.join(app.getPath('userData'), 'logboek.txt')
+}
+
+function zetLogSoorten(keuzes) {
+  if (!keuzes || typeof keuzes !== 'object') return logAan
+  for (const soort of LOG_SOORTEN) {
+    if (typeof keuzes[soort] === 'boolean') logAan[soort] = keuzes[soort]
+  }
+  return logAan
+}
+
+// `extra` mag alles bevatten wat je later nodig hebt om het na te spelen:
+// argumenten, map, afloop, foutregels. Nooit een wachtwoord of token -- daar
+// staat maskeerGeheim voor.
+function logSchrijf(soort, bericht, extra = null) {
+  if (!LOG_SOORTEN.includes(soort) || !logAan[soort]) return
+  const regel = { t: Date.now(), soort, bericht: String(bericht || '').slice(0, 400), extra: extra || undefined }
+  logRing.push(regel)
+  if (logRing.length > LOG_RING_MAX) logRing = logRing.slice(-LOG_RING_MAX)
+
   try {
-    return execFileSync('git', args, {
+    const pad = logPad()
+    // Omrollen in plaats van eindeloos groeien: een logboek dat de schijf
+    // volzet is een tweede probleem in plaats van een oplossing voor het eerste.
+    try {
+      if (fs.existsSync(pad) && fs.statSync(pad).size > LOG_BESTAND_MAX) {
+        fs.renameSync(pad, pad.replace(/\.txt$/, '-vorige.txt'))
+      }
+    } catch {}
+    const tijd = new Date(regel.t).toISOString().replace('T', ' ').slice(0, 19)
+    const staart = extra ? '  ' + JSON.stringify(extra) : ''
+    fs.appendFileSync(pad, `${tijd} [${soort}] ${regel.bericht}${staart}${os.EOL}`)
+  } catch {}
+}
+
+// Een token in een logboek is een token dat gelekt is. Alles wat op een sleutel
+// lijkt gaat eruit vóór het wordt opgeschreven.
+function maskeerGeheim(tekst) {
+  return String(tekst || '')
+    .replace(/gh[pousr]_[A-Za-z0-9]{10,}/g, 'gh?_***')
+    .replace(/(password=)[^\r\n]*/gi, '$1***')
+    .replace(/(https:\/\/)[^@\s/]+:[^@\s/]+@/g, '$1***:***@')
+}
+
+ipcMain.handle('log:lees', (_, opties) => {
+  const o = opties || {}
+  const soorten = Array.isArray(o.soorten) && o.soorten.length ? o.soorten : LOG_SOORTEN
+  const zoek = String(o.zoek || '').toLowerCase()
+  const regels = logRing
+    .filter(r => soorten.includes(r.soort))
+    .filter(r => !zoek || r.bericht.toLowerCase().includes(zoek)
+      || JSON.stringify(r.extra || '').toLowerCase().includes(zoek))
+  const n = Math.max(1, Math.min(1000, o.aantal || 300))
+  return { regels: regels.slice(-n), totaal: logRing.length, aan: { ...logAan }, soorten: LOG_SOORTEN, pad: logPad() }
+})
+
+ipcMain.handle('log:zet', (_, keuzes) => ({ aan: { ...zetLogSoorten(keuzes) } }))
+
+ipcMain.handle('log:wis', () => {
+  logRing = []
+  try { fs.writeFileSync(logPad(), '') } catch {}
+  return { ok: true }
+})
+
+ipcMain.handle('log:map', () => {
+  try { shell.showItemInFolder(logPad()); return { ok: true } } catch { return { ok: false } }
+})
+
+function gitUit(dir, args) {
+  const start = Date.now()
+  try {
+    const uit = execFileSync('git', args, {
       cwd: dir, encoding: 'utf8', timeout: 4000, windowsHide: true,
       // childEnv leest PATH vers uit het register. Zonder dat vindt de app een
       // net geïnstalleerde git of gh pas na een herstart van CommandDeck, en
       // dan lijkt de installatie mislukt terwijl hij gelukt is.
       env: childEnv(),
-      stdio: ['ignore', 'pipe', 'ignore'],
+      stdio: ['ignore', 'pipe', 'pipe'],
     })
+    logSchrijf('git', 'git ' + args.join(' '), { map: dir, ms: Date.now() - start, uit: maskeerGeheim(String(uit || '')).slice(0, 200) })
+    return uit
   } catch (e) {
+    // Ook een mislukking opschrijven, met de reden erbij. Juist die werd hier
+    // weggegooid, en dat is precies wat er later niet te achterhalen viel.
+    logSchrijf('git', 'git ' + args.join(' ') + ' — MISLUKT', {
+      map: dir, ms: Date.now() - start, code: (e && e.status) != null ? e.status : (e && e.code) || '?',
+      fout: maskeerGeheim(String((e && e.stderr) || (e && e.message) || '')).slice(0, 300),
+    })
     // ENOENT = git staat niet in PATH. Al het andere is een gewone git-fout
     // (geen repo, geen commits) en betekent alleen 'geen antwoord'.
     if (e && e.code === 'ENOENT') return null
@@ -1691,12 +1784,18 @@ ipcMain.handle('git:accountActiveren', (_, profiel) => {
         })
       }
       gedaan.push(stap.soort)
+      logSchrijf('git', 'account activeren: ' + stap.soort + ' gelukt',
+        { opdrachten: stap.opdrachten.map(o => o.prog + ' ' + o.args.join(' ')) })
     } catch (e) {
       // De reden bewaren en niet weggooien. Dat dit stil mislukte is precies
       // waarom niemand jarenlang zag dat de app een account toonde dat git
       // nooit had gekregen.
       mislukt.push(stap.soort)
       fouten[stap.soort] = String((e && e.stderr) || (e && e.message) || '').trim().slice(0, 300)
+      logSchrijf('git', 'account activeren: ' + stap.soort + ' MISLUKT', {
+        opdrachten: stap.opdrachten.map(o => o.prog + ' ' + o.args.join(' ')),
+        fout: maskeerGeheim(fouten[stap.soort]),
+      })
     }
   }
   return { ok: !!gedaan.length, gedaan, mislukt, fouten }

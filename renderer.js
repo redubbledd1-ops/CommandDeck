@@ -1112,6 +1112,11 @@ window.addEventListener('DOMContentLoaded', async () => {
   await I18N.init(settings.language)
   // Pas na I18N: de Flutter-map krijgt een naam uit de taalbestanden.
   migreerAlleProjecten()
+
+  // Wat je de vorige keer aan had staan blijft aan. Het logboek zelf leeft in
+  // het hoofdproces, dus dat moet het weten voordat er iets te loggen valt.
+  if (settings.logboek) logKeuze = { ...logKeuze, ...settings.logboek }
+  try { window.api.logZet(logKeuze) } catch {}
   try {
     [LANGUAGES, detectedLanguageCode] = await Promise.all([
       window.api.listLanguages(),
@@ -8913,6 +8918,94 @@ function gitAfsluitWijze() {
   return GitTools.afsluitInstelling((settings.git || {}).afsluiten)
 }
 
+// ── Logboek ──────────────────────────────────────────────────────────────────
+// Aanzetten wat je nodig hebt, niet alles altijd. Git staat standaard aan: dat
+// is waar de meeste tijd in verdwijnt, en een git-commando is kort. De rest kun
+// je erbij zetten als je een probleem zoekt en weer uitzetten als je het hebt.
+const LOG_SOORTEN = ['git', 'commando', 'bestanden', 'ai', 'app']
+let logKeuze = { git: true, commando: true, bestanden: false, ai: false, app: true }
+let logRegels = []
+let logZoek = ''
+
+function logSettingsMarkup() {
+  const rijen = logRegels.length
+    ? logRegels.map(r => {
+        const tijd = new Date(r.t).toLocaleTimeString()
+        const extra = r.extra ? JSON.stringify(r.extra) : ''
+        const stuk = /MISLUKT|fout|error/i.test(r.bericht) ? ' stuk' : ''
+        return `<div class="log-regel${stuk}">
+          <span class="log-tijd">${esc(tijd)}</span>
+          <span class="log-soort">${esc(r.soort)}</span>
+          <span class="log-tekst">${esc(r.bericht)}${extra ? `<span class="log-extra">${esc(extra)}</span>` : ''}</span>
+        </div>`
+      }).join('')
+    : `<div class="log-leeg">${esc(I18N.t('settings.log.leeg'))}</div>`
+
+  return `
+      <div>
+        <div class="settings-section-title">${I18N.t('settings.section.logTitle')}</div>
+        <div class="instel-rij">
+          <span class="instel-uitleg">${I18N.t('settings.log.uitleg')}</span>
+        </div>
+        <div class="instel-rij">
+          ${LOG_SOORTEN.map(soort => `
+          <label class="bat-opt">
+            <input type="checkbox" data-log-soort="${soort}" ${logKeuze[soort] ? 'checked' : ''} />
+            ${esc(I18N.t('settings.log.soort.' + soort))}
+          </label>`).join('')}
+        </div>
+        <div class="instel-rij">
+          <input class="field log-zoek" id="log-zoek" placeholder="${esc(I18N.t('settings.log.zoek'))}" value="${esc(logZoek)}" />
+          <button class="term-btn" id="log-ververs"><i class="ti ti-refresh" style="font-size:13px"></i> ${esc(I18N.t('settings.log.ververs'))}</button>
+          <button class="term-btn" id="log-kopieer"><i class="ti ti-copy" style="font-size:13px"></i> ${esc(I18N.t('settings.log.kopieer'))}</button>
+          <button class="term-btn" id="log-map"><i class="ti ti-folder-open" style="font-size:13px"></i> ${esc(I18N.t('settings.log.map'))}</button>
+          <button class="term-btn" id="log-wis"><i class="ti ti-trash" style="font-size:13px"></i> ${esc(I18N.t('settings.log.wis'))}</button>
+        </div>
+        <div class="log-lijst">${rijen}</div>
+      </div>`
+}
+
+async function ververesLog() {
+  try {
+    const r = await window.api.logLees({ soorten: LOG_SOORTEN.filter(x => logKeuze[x]), zoek: logZoek, aantal: 300 })
+    if (!r) return
+    logRegels = r.regels || []
+    if (r.aan) logKeuze = { ...logKeuze, ...r.aan }
+  } catch { logRegels = [] }
+  renderSettingsPanel()
+}
+
+let logOpgehaald = false
+
+function bedraadLogSectie() {
+  // Eén keer zelf ophalen bij het openen; daarna alleen op verzoek. Anders
+  // roept ververesLog() het tekenen aan dat weer ververesLog() aanroept.
+  if (!logOpgehaald) { logOpgehaald = true; ververesLog() }
+  document.querySelectorAll('[data-log-soort]').forEach(chk => {
+    chk.onchange = async () => {
+      logKeuze[chk.dataset.logSoort] = chk.checked
+      settings.logboek = { ...logKeuze }
+      window.api.saveSettings(settings)
+      try { await window.api.logZet(logKeuze) } catch {}
+      ververesLog()
+    }
+  })
+  const zoek = document.getElementById('log-zoek')
+  if (zoek) zoek.onchange = () => { logZoek = zoek.value.trim(); ververesLog() }
+  const ververs = document.getElementById('log-ververs')
+  if (ververs) ververs.onclick = () => ververesLog()
+  const map = document.getElementById('log-map')
+  if (map) map.onclick = () => window.api.logMap()
+  const wis = document.getElementById('log-wis')
+  if (wis) wis.onclick = async () => { await window.api.logWis(); ververesLog() }
+  const kop = document.getElementById('log-kopieer')
+  if (kop) kop.onclick = async () => {
+    const tekst = logRegels.map(r => new Date(r.t).toISOString().slice(0, 19).replace('T', ' ')
+      + ' [' + r.soort + '] ' + r.bericht + (r.extra ? '  ' + JSON.stringify(r.extra) : '')).join('\n')
+    try { await navigator.clipboard.writeText(tekst); showToast(I18N.t('settings.log.gekopieerd')) } catch {}
+  }
+}
+
 function renderSettingsPanel() {
   const panel = document.getElementById('settings-panel')
   if (settingsSubPage === 'talen') { renderTalenSubPage(panel); return }
@@ -9071,6 +9164,7 @@ function renderSettingsPanel() {
           </button>` : ''}
         </div>
       </div>
+      ${logSettingsMarkup()}
       ${aiSettingsMarkup()}
       <div>
         <div class="settings-section-title">${I18N.t('settings.section.languageTitle')}</div>
@@ -9099,6 +9193,7 @@ function renderSettingsPanel() {
 
   renderCustomEditors()
   bedraadAiSettings()
+  bedraadLogSectie()
   document.getElementById('btn-scan-editors').onclick = async () => {
     showToast(I18N.t('common.searching'))
     await zoekEditors({ stil: false })
@@ -14970,10 +15065,10 @@ function tekenGitSectie() {
     </div>`)
 
   doel.innerHTML = delen.join('')
-  bindGitSectie(p, pad, staat)
+  bindGitSectie(p, pad, staat, koppelProblemen)
 }
 
-function bindGitSectie(p, pad, staat) {
+function bindGitSectie(p, pad, staat, koppelProblemen = []) {
   const doel = document.getElementById('git-sectie')
   if (!doel) return
 
