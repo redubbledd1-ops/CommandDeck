@@ -381,7 +381,12 @@ window.eval(fs.readFileSync(path.join(APP, 'accounts.js'), 'utf8'))
 // window.eval krijgt in jsdom zijn eigen scope, dus zonder dit komen we niet
 // bij zijn `projects` — en dan is niet te testen of opslaan iets laat staan.
 window.eval(fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8')
-  + '\nglobalThis.__test = { zetProjectProfiel: (i, id) => { projects[i].gitProfiel = id } };')
+  + '\nglobalThis.__test = { zetProjectProfiel: (i, id) => { projects[i].gitProfiel = id },'
+  + '\n  zetGitStaat: (pad, staat) => { gitStaten[pad] = staat },'
+  + '\n  cmdIdsInBeeld, verplaatsCmdVolgorde, cmdGridHtml, knoppenInMap,'
+  + '\n  autoMappen, hefMappenOp, legInMap, verplaatsKnopId,'
+  + '\n  rijVolgorde, ordenProject, zetKnopInMap, folderVanKnop,'
+  + '\n  verwijderMap, folderOp };')
 startVraagAutomaat()
 const W = window
 const inBevrorenPaneel = (el) => {
@@ -2183,43 +2188,45 @@ function startVraagAutomaat() {
   delete window.FitAddon
   $$('.proj-item')[0].click(); await tick(); await tick()
 
-  // ── secties aan en uit per project ─────────────────────────────────────────
+  // ── een rij, met de Flutter-knoppen in een map ─────────────────────────────────────────
   $$('.proj-item')[0].click(); await tick(); await tick()
-  check('beide secties staan er als ze inhoud hebben',
-    !!$('[data-sectieblok="run"]') && !!$('[data-sectieblok="tools"]'))
-  check('flutter-run staat onder tools',
-    !!$('[data-sectieblok="tools"] [data-cmd="run-android"]') &&
-    !!$('[data-sectieblok="tools"] [data-cmd="run-windows"]') &&
-    !!$('[data-sectieblok="tools"] [data-cmd="run-chrome"]'))
-  check('en niet meer onder uitvoeren',
-    !$('[data-sectieblok="run"] [data-cmd="run-android"]'))
-  check('en staan standaard aan',
-    $('#toggle-sectie-run').checked === true && $('#toggle-sectie-tools').checked === true)
+  // Tools was nooit een tweede soort knop, alleen een tweede rij. Er is nu nog
+  // een sectie, en wat daar stond zit in de map 'flutter'.
+  check('er is nog maar een knoppensectie',
+    !!$('[data-sectieblok="run"]') && !$('[data-sectieblok="tools"]'))
+  check('de flutter-knoppen zitten in een map',
+    !!$('[data-map-groep] [data-cmd="run-android"]') &&
+    !!$('[data-map-groep] [data-cmd="run-windows"]') &&
+    !!$('[data-map-groep] [data-cmd="run-chrome"]'))
+  check('en staan niet los in de rij',
+    !$('.cmd-grid > .cmd-btn[data-cmd="run-android"]'))
+  check('--release staat op de kop van die map',
+    !!$('[data-map-groep] #toggle-release'))
+  check('en de rij staat standaard aan', $('#toggle-sectie-run').checked === true)
   check('de knoppen zijn zichtbaar', $$('.cmd-section.sectie-uit').length === 0)
 
-  $('#toggle-sectie-tools').checked = false
-  $('#toggle-sectie-tools').dispatchEvent(new window.Event('change')); await tick()
-  check('tools uitzetten klapt in, haalt de sectie niet weg',
-    !!$('[data-sectieblok="tools"]') && $('[data-sectieblok="tools"]').classList.contains('sectie-uit'))
-  check('maar de schakelaar blijft staan', !!$('#toggle-sectie-tools'))
-  check('en het wordt bewaard bij het project', projects[0].secties.tools === false)
-
-  $('#toggle-sectie-tools').checked = true
-  $('#toggle-sectie-tools').dispatchEvent(new window.Event('change')); await tick()
-  check('weer aanzetten kan ook', $$('.cmd-section.sectie-uit').length === 0)
+  // Een map dichtklappen doet wat de tools-schakelaar deed: de knoppen uit het
+  // zicht, zonder ze weg te gooien.
+  $('.cmd-map-kop').click(); await tick()
+  check('een map dichtklappen haalt zijn knoppen uit beeld',
+    !$('[data-cmd="run-android"]') && !!$('.cmd-map-kop.dicht'))
+  check('en --release gaat mee, want dat hoort bij die knoppen', !$('#toggle-release'))
+  check('het wordt bewaard bij het project',
+    (projects[0].cmdFolders || []).some(f => f.auto === 'flutter' && f.open === false))
+  $('.cmd-map-kop').click(); await tick()
+  check('weer openklappen zet ze terug', !!$('[data-map-groep] [data-cmd="run-android"]'))
 
   $('#toggle-sectie-run').checked = false
   $('#toggle-sectie-run').dispatchEvent(new window.Event('change')); await tick()
-  check('uitvoeren kan net zo goed inklappen',
+  check('de hele rij kan ook inklappen',
     $('[data-sectieblok="run"]').classList.contains('sectie-uit') && projects[0].secties.run === false)
   $('#toggle-sectie-run').checked = true
   $('#toggle-sectie-run').dispatchEvent(new window.Event('change')); await tick()
-  check('uitvoeren weer aanzetten klapt uit', !$('[data-sectieblok="run"]').classList.contains('sectie-uit'))
+  check('en weer uitklappen', !$('[data-sectieblok="run"]').classList.contains('sectie-uit'))
 
   // ook in de projectinstellingen
   $$('.proj-edit')[0].click(); await tick()
-  check('de instellingen hebben per groep een hoofdschakelaar',
-    $$('[data-sectie]').length === 2)
+  check('de instellingen hebben een hoofdschakelaar', $$('[data-sectie]').length === 1)
 
   // ── knoppen die standaard uit staan ────────────────────────────────────────
   // Het verschil dat telt: ze bestaan wél in de lijst (anders weet niemand dat
@@ -2252,43 +2259,37 @@ function startVraagAutomaat() {
 
   $$('.proj-edit')[0].click(); await tick()
   const sectieVink = (naam) => $(`[data-sectie="${naam}"]`)
-  sectieVink('tools').checked = false
-  sectieVink('tools').dispatchEvent(new window.Event('change')); await tick()
+  sectieVink('run').checked = false
+  sectieVink('run').dispatchEvent(new window.Event('change')); await tick()
   check('uitgezette groep wordt grijs', !!$('.cmdvis-group.uit'))
   $('#modal-proj-save').click(); await tick(); await tick()
-  check('opslaan zet de sectie uit', projects[0].secties.tools === false)
-  check('en dat zie je meteen als ingeklapt', $('[data-sectieblok="tools"]').classList.contains('sectie-uit'))
+  check('opslaan zet de sectie uit', projects[0].secties.run === false)
+  check('en dat zie je meteen als ingeklapt', $('[data-sectieblok="run"]').classList.contains('sectie-uit'))
 
   $$('.proj-edit')[0].click(); await tick()
-  sectieVink('tools').checked = true
-  sectieVink('tools').dispatchEvent(new window.Event('change')); await tick()
+  sectieVink('run').checked = true
+  sectieVink('run').dispatchEvent(new window.Event('change')); await tick()
   $('#modal-proj-save').click(); await tick(); await tick()
-  check('en weer aan', projects[0].secties.tools === true && !$('[data-sectieblok="tools"]').classList.contains('sectie-uit'))
+  check('en weer aan', projects[0].secties.run === true && !$('[data-sectieblok="run"]').classList.contains('sectie-uit'))
 
-  // Geen knoppen onder een groep → sectie helemaal weg (niet alleen inklappen)
+  // Geen knoppen meer in een map → de map verdwijnt uit de rij. Een mapkop
+  // zonder inhoud is alleen een naam waar niets achter zit.
   $$('.proj-edit')[0].click(); await tick()
-  $$('#cmdvis-section [data-cmdvis-id]').forEach(chk => {
-    if (chk.dataset.cmdvisId.startsWith('custom:')) return
-    // alles onder tools uitzetten
-  })
-  // tools-groep: alle standaard tools-vinkjes uit
   const toolIds = ['run-android', 'run-windows', 'run-chrome', 'devices', 'pub-get', 'clean', 'doctor', 'build-apk', 'build-web', 'build-windows']
-  toolIds.forEach(id => {
+  const zetTools = (aan) => toolIds.forEach(id => {
     const chk = $(`#cmdvis-section [data-cmdvis-id="${id}"]`)
-    if (chk) { chk.checked = false; chk.dispatchEvent(new window.Event('change')) }
+    if (chk) { chk.checked = aan; chk.dispatchEvent(new window.Event('change')) }
   })
+  zetTools(false)
   $('#modal-proj-save').click(); await tick(); await tick()
-  check('zonder knoppen verdwijnt de tools-sectie helemaal', !$('[data-sectieblok="tools"]'))
-  check('uitvoeren blijft (heeft nog knoppen)', !!$('[data-sectieblok="run"]'))
+  check('zonder knoppen verdwijnt de flutter-map uit de rij', !$('.cmd-map-kop'))
+  check('de rij zelf blijft, die heeft nog knoppen', !!$('[data-sectieblok="run"]'))
 
   // weer aanzetten via instellingen
   $$('.proj-edit')[0].click(); await tick()
-  toolIds.forEach(id => {
-    const chk = $(`#cmdvis-section [data-cmdvis-id="${id}"]`)
-    if (chk) { chk.checked = true; chk.dispatchEvent(new window.Event('change')) }
-  })
+  zetTools(true)
   $('#modal-proj-save').click(); await tick(); await tick()
-  check('knoppen terug → tools-sectie ook terug', !!$('[data-sectieblok="tools"]'))
+  check('knoppen terug → map ook terug', !!$('.cmd-map-kop'))
 
   // ── is dit wel een Flutter-project? ────────────────────────────────────────
   // Tools slaan alleen ergens op bij Flutter. Dat wordt één keer nagekeken, bij
@@ -2314,30 +2315,31 @@ function startVraagAutomaat() {
   projectSoorten['C:\\gekozen'] = { ok: true, flutter: false, dart: false, node: true }
   const fl = await maakProject('flutter-app', 'C:\\a')
   check('een nieuw project wordt meteen bekeken', soortVragen.includes('C:\\a'))
-  check('bij Flutter blijven de tools staan', fl.secties.tools === true)
+  check('bij Flutter staat de flutter-map open',
+    fl.secties.tools === true && (fl.cmdFolders || []).some(f => f.auto === 'flutter' && f.open === true))
 
   soortVragen = []
   const web = await maakProject('web-app', 'C:\\gekozen')
   check('een niet-Flutter project wordt ook bekeken', soortVragen.includes('C:\\gekozen'))
-  check('en daar gaan de tools uit', web.secties.tools === false)
+  check('en bij een ander soort project gaat die map dicht',
+    web.secties.tools === false && (web.cmdFolders || []).some(f => f.auto === 'flutter' && f.open === false))
 
   const webRij = projects.findIndex(p => p.name === 'web-app')
   soortVragen = []
   $$('.proj-item')[webRij].click(); for (let i = 0; i < 6; i++) await tick()
-  check('de tools-sectie is dan ingeklapt (niet weg)',
-    !!$('[data-sectieblok="tools"]') && $('[data-sectieblok="tools"]').classList.contains('sectie-uit'))
-  check('en uitvoeren staat er gewoon',
+  check('de flutter-map is dan dicht, niet weg',
+    !!$('.cmd-map-kop.dicht') && !$('[data-cmd="run-android"]'))
+  check('en de rij staat er gewoon',
     !!$('[data-sectieblok="run"]') && !$('[data-sectieblok="run"]').classList.contains('sectie-uit'))
   check('een tweede keer openen vraagt niets meer', soortVragen.length === 0)
 
   // je eigen keuze wint van de automaat
-  $('#toggle-sectie-tools').checked = true
-  $('#toggle-sectie-tools').dispatchEvent(new window.Event('change')); await tick()
+  $('.cmd-map-kop').click(); await tick()
   soortVragen = []
   $$('.proj-item')[0].click(); await tick()
   $$('.proj-item')[webRij].click(); for (let i = 0; i < 6; i++) await tick()
   check('een eigen keuze blijft staan',
-    projects[webRij].secties.tools === true && !$('[data-sectieblok="tools"]').classList.contains('sectie-uit') && soortVragen.length === 0)
+    !!$('[data-map-groep] [data-cmd="run-android"]') && soortVragen.length === 0)
 
   await wisProject('web-app')
   await wisProject('flutter-app')
@@ -2905,7 +2907,7 @@ function startVraagAutomaat() {
   check('knop-commando komt ook in de geschiedenis',
     executed.slice(n2).some(e => e.cmd === 'flutter pub get' && e.source === 'button'))
 
-  // ── eigen commando's als knop in uitvoeren / tools ─────────────────────────
+  // ── eigen commando's als knop ────────────────────────────────────
   $('#btn-nav-dict').click(); await tick()
   const addBtn = $$('[data-addbtn]')[0]
   check('woordenboek heeft een knop om toe te voegen', !!addBtn)
@@ -2916,8 +2918,6 @@ function startVraagAutomaat() {
 
   const chosenCmd = $('#addbtn-cmd').textContent
   $('#addbtn-label').value = 'Mijn knop'
-  window.document.querySelector('input[name="addbtn-section"][value="tools"]').checked = true
-  window.document.querySelector('input[name="addbtn-section"][value="run"]').checked = false
   $('#modal-addbtn-save').click(); await tick(); await tick()
   check('modal sluit na toevoegen', $('#modal-addbtn').hidden === true)
 
@@ -2925,8 +2925,8 @@ function startVraagAutomaat() {
   const customBtns = $$('.cmd-btn[data-custom]')
   check('eigen knop verschijnt in de projectweergave', customBtns.length === 1)
   check('eigen knop heeft de gekozen tekst', customBtns[0].textContent.includes('Mijn knop'))
-  const toolsGrid = $$('.cmd-section')[1]
-  check('eigen knop staat in de tools-sectie', !!toolsGrid.querySelector('.cmd-btn[data-custom]'))
+  check('en staat in de enige knoppenrij die er is',
+    $$('.cmd-section').length === 1 && !!$('.cmd-section .cmd-btn[data-custom]'))
 
   const nCustom = executed.length
   customBtns[0].click(); await tick(); await tick()
@@ -2936,8 +2936,6 @@ function startVraagAutomaat() {
   // dubbel toevoegen wordt geweigerd
   $('#btn-nav-dict').click(); await tick()
   $$('[data-addbtn]')[0].click(); await tick()
-  window.document.querySelector('input[name="addbtn-section"][value="tools"]').checked = true
-  window.document.querySelector('input[name="addbtn-section"][value="run"]').checked = false
   $('#modal-addbtn-save').click(); await tick(); await tick()
   $$('.proj-item')[0].click(); await tick()
   check('zelfde commando komt er niet twee keer bij', $$('.cmd-btn[data-custom]').length === 1)
@@ -3864,6 +3862,195 @@ function startVraagAutomaat() {
     ghRepoAntwoord = { ok: true, repos: [] }
     $('#modal-proj-cancel').click(); await tick()
     gitStaatNu = null
+  }
+
+  // ── Knopvolgorde: slepen pakt de knop die je vasthebt ──────────────────
+  // De rij bij uitvoeren laat niet alles zien: uitgevinkte knoppen vallen weg,
+  // en van git alleen wat bij deze repo-toestand hoort. Wie sleept, wijst een
+  // plek aan in die rij. Rekent het verplaatsen met een andere lijst, dan
+  // schuift een andere knop op dan je vastpakt en staat er daarna rommel in
+  // cmdVolgorde -- waarna ook knoppen die je niet had aangeraakt fout slepen.
+  {
+    const PAD = 'C:/volgorde'
+    const proj = {
+      id: 'volgorde', name: 'volgorde', icon: 'x', locations: [{ label: 'main', path: PAD }],
+      activeLocation: 0, cmdVisibility: {}, customCmds: [], cmdVolgorde: {},
+    }
+    // Verse repo zonder remote en zonder commits: van git blijft maar een
+    // handvol knoppen over. Precies de situatie waarin de twee lijsten uit
+    // elkaar lopen.
+    W.__test.zetGitStaat(PAD, {
+      gemeten: true, beschikbaar: true, isRepo: true, gekoppeld: false,
+      commits: 0, vuil: 0, stashes: 0,
+    })
+    const rij = () => W.__test.cmdIdsInBeeld(proj, 'run', 'rij')
+    const alles = () => W.__test.cmdIdsInBeeld(proj, 'run', 'alles')
+
+    const voor = rij()
+    check('de rij laat minder knoppen zien dan er bestaan', voor.length > 1 && voor.length < alles().length)
+
+    const laatste = voor[voor.length - 1]
+    const verborgenVoor = alles().filter(id => !voor.includes(id))
+    W.__test.verplaatsCmdVolgorde(proj, 'run', voor.length - 1, 0)
+    check('slepen verplaatst de knop die je vasthebt', rij()[0] === laatste)
+    check('en laat de rest van de rij op volgorde staan',
+      rij().slice(1).join() === voor.slice(0, -1).join())
+    check('knoppen die niet in beeld staan blijven op hun plek',
+      alles().filter(id => !rij().includes(id)).join() === verborgenVoor.join())
+
+    // Het bewerkvenster toont juist alles, ook de uitgevinkte. Daar telt dus
+    // een andere lijst, en verplaatsen moet die volgen.
+    const alVoor = alles()
+    W.__test.verplaatsCmdVolgorde(proj, 'run', alVoor.length - 1, 0, 'alles')
+    check('in het bewerkvenster telt de volledige lijst', alles()[0] === alVoor[alVoor.length - 1])
+  }
+
+  // ── Mappen van knoppen ───────────────────────────────────────
+  // Een map is een plek in dezelfde volgorde als de knoppen. Wat erin ligt
+  // verdwijnt uit de rij en komt onder de mapkop terug; de map opheffen laat
+  // elke knop staan waar hij stond.
+  {
+    const PAD = 'C:/mappen'
+    const proj = {
+      id: 'mappen', name: 'mappen', icon: 'x', locations: [{ label: 'main', path: PAD }],
+      activeLocation: 0, cmdVisibility: {}, customCmds: [], cmdVolgorde: {},
+      cmdFolders: [], cmdFolderVan: {},
+    }
+    // Gekoppelde repo met werk en een stash: dan staan bijna alle git-knoppen
+    // in de rij, en is er dus genoeg om in te delen.
+    W.__test.zetGitStaat(PAD, {
+      gemeten: true, beschikbaar: true, isRepo: true, gekoppeld: true,
+      commits: 3, vuil: 2, stashes: 1,
+    })
+    const rij = () => W.__test.cmdIdsInBeeld(proj, 'run', 'rij')
+    const html = () => W.__test.cmdGridHtml(proj, 'run')
+    const losseGit = () => rij().filter(id => id.indexOf('git-') === 0)
+
+    check('zonder mappen staan de git-knoppen los in de rij', losseGit().length > 2)
+
+    W.__test.autoMappen(proj, 'run')
+    const git = (proj.cmdFolders || []).find(f => f.sectie === 'run' && f.auto === 'git')
+    check('automatisch mappen maakt een git-map', !!git)
+    check('alles wat erin ligt is ook echt git',
+      Object.entries(proj.cmdFolderVan).filter(([, v]) => v === git.id)
+        .every(([id]) => id.indexOf('git-') === 0))
+    check('de rij toont de map in plaats van de losse git-knoppen',
+      rij().includes('map:' + git.id) && losseGit().length === 0)
+    check('en de map weet wat erin zit', W.__test.knoppenInMap(proj, 'run', git.id).length > 2)
+
+    // Ook knoppen die nu niet in beeld staan gaan mee, anders duikt er later
+    // alsnog een losse git-knop naast de map op.
+    check('ook de knoppen die nu niet in beeld staan zijn ingedeeld',
+      Object.keys(proj.cmdFolderVan).length > W.__test.knoppenInMap(proj, 'run', git.id).length)
+
+    check('een open map laat zijn knoppen zien',
+      html().includes('data-map-groep') && html().includes('data-cmd="git-status"'))
+    git.open = false
+    check('een dichte map niet', !html().includes('data-cmd="git-status"'))
+    git.open = true
+
+    // Handmatig erin leggen en er weer uit halen: zonder die weg terug is een
+    // map een eenrichtingsstraat.
+    const eigen = { id: 'mtest', sectie: 'run', label: 'test', open: true }
+    proj.cmdFolders = [...proj.cmdFolders, eigen]
+    const los = rij().find(id => id.indexOf('map:') !== 0)
+    W.__test.legInMap(proj, 'run', los, eigen.id)
+    check('een knop in een map verdwijnt uit de rij',
+      !rij().includes(los) && W.__test.knoppenInMap(proj, 'run', eigen.id).includes(los))
+    W.__test.verplaatsKnopId(proj, 'run', los, null, null, false)
+    check('en eruit halen zet hem terug in de rij', rij().includes(los))
+
+    const voorOpheffen = W.__test.knoppenInMap(proj, 'run', git.id)
+    W.__test.hefMappenOp(proj, 'run', [git.id])
+    check('map opheffen haalt de map weg',
+      !(proj.cmdFolders || []).some(f => f.id === git.id) && !rij().includes('map:' + git.id))
+    check('maar laat elke knop staan', voorOpheffen.every(id => rij().includes(id)))
+  }
+
+  // ── Knoppen vinden zelf hun map ─────────────────────────────────
+  // Een knop die er later bij komt -- een AI-programma dat je net hebt
+  // geinstalleerd, een git-knop die pas verschijnt zodra er een remote is --
+  // heeft nog nooit een map toegewezen gekregen. Zonder afleiding staat die
+  // los naast de map die er precies voor bedoeld is.
+  {
+    const PAD = 'C:/vanzelf'
+    const proj = {
+      id: 'vanzelf', name: 'vanzelf', icon: 'x', locations: [{ label: 'main', path: PAD }],
+      activeLocation: 0, cmdVisibility: {}, customCmds: [], cmdVolgorde: {},
+      cmdFolders: [], cmdFolderVan: {},
+    }
+    W.__test.zetGitStaat(PAD, {
+      gemeten: true, beschikbaar: true, isRepo: true, gekoppeld: true,
+      commits: 3, vuil: 2, stashes: 1,
+    })
+
+    check('een vers project ordent zichzelf', W.__test.ordenProject(proj) === true)
+    const soorten = (proj.cmdFolders || []).map(f => f.auto).sort()
+    check('en krijgt in elk geval een git- en een flutter-map',
+      soorten.includes('git') && soorten.includes('flutter'))
+    check('twee keer ordenen doet niets meer', W.__test.ordenProject(proj) === false)
+
+    const git = proj.cmdFolders.find(f => f.auto === 'git')
+    // Een knop waar nog nooit iets over is vastgelegd is precies wat een nieuwe
+    // knop is: die hoort in de map van zijn soort te vallen.
+    delete proj.cmdFolderVan['git-status']
+    check('een knop zonder toewijzing valt in de map van zijn soort',
+      (W.__test.folderVanKnop(proj, 'run', 'git-status') || {}).id === git.id
+      && W.__test.knoppenInMap(proj, 'run', git.id).includes('git-status'))
+
+    // Maar wie hem er zelf uit haalt, wil hem er ook uit houden.
+    W.__test.zetKnopInMap(proj, 'git-status', null)
+    check('en eruit halen houdt hem eruit, ook al past hij in de soort',
+      W.__test.folderVanKnop(proj, 'run', 'git-status') === null
+      && W.__test.cmdIdsInBeeld(proj, 'run', 'rij').includes('git-status'))
+
+    // Zonder de map valt er niets af te leiden: dan staat alles gewoon los.
+    W.__test.hefMappenOp(proj, 'run', [git.id])
+    check('is de map opgeheven, dan blijft de soort er ook van af',
+      W.__test.folderVanKnop(proj, 'run', 'git-commit') === null)
+
+    // Weggooien via de prullenbak: een volle map gaat niet mee, want dan
+    // verdwijnen de knoppen erin stilletjes ook.
+    const flutter = proj.cmdFolders.find(f => f.auto === 'flutter')
+    W.__test.verwijderMap(proj, 'run', flutter.id)
+    check('een volle map wordt niet weggegooid', !!W.__test.folderOp(proj, flutter.id))
+    W.__test.knoppenInMap(proj, 'run', flutter.id).forEach(id => W.__test.zetKnopInMap(proj, id, null))
+    W.__test.verwijderMap(proj, 'run', flutter.id)
+    check('leeg mag hij wel weg', !W.__test.folderOp(proj, flutter.id))
+  }
+
+  // ── Volgorde in beeld ────────────────────────────────────────
+  // Een open map is een blok over de hele breedte; die horen onderaan. Dichte
+  // mappen zijn chips en horen naast de knoppen te passen, niet erboven of
+  // eronder op een eigen regel.
+  {
+    const PAD = 'C:/volgorde2'
+    const proj = {
+      id: 'volgorde2', name: 'volgorde2', icon: 'x', locations: [{ label: 'main', path: PAD }],
+      activeLocation: 0, cmdVisibility: {}, customCmds: [], cmdVolgorde: {},
+      cmdFolders: [], cmdFolderVan: {},
+    }
+    W.__test.zetGitStaat(PAD, {
+      gemeten: true, beschikbaar: true, isRepo: true, gekoppeld: true,
+      commits: 3, vuil: 2, stashes: 1,
+    })
+    W.__test.ordenProject(proj)
+    const mappen = proj.cmdFolders
+    check('er zijn meerdere mappen om mee te vergelijken', mappen.length > 1)
+
+    mappen.forEach(f => { f.open = false })
+    const alleDicht = W.__test.rijVolgorde(proj, 'run')
+    const eersteKnop = alleDicht.findIndex(id => id.indexOf('map:') !== 0)
+    const laatsteMap = alleDicht.map(id => id.indexOf('map:') === 0).lastIndexOf(true)
+    check('dichte mappen staan vooraan, bij de knoppen op dezelfde regels',
+      eersteKnop === -1 || laatsteMap < eersteKnop)
+
+    mappen[0].open = true
+    const gemengd = W.__test.rijVolgorde(proj, 'run')
+    check('een open map zakt naar onderen',
+      gemengd[gemengd.length - 1] === 'map:' + mappen[0].id)
+    check('en de dichte mappen blijven vooraan staan',
+      gemengd[0].indexOf('map:') === 0 && gemengd[0] !== 'map:' + mappen[0].id)
   }
 
   console.log(ok ? '\n✓ ALLE UI-TESTS GESLAAGD' : '\n✗ ER ZIJN TESTS GEFAALD')

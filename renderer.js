@@ -22,8 +22,8 @@ let pendingCmdVisibility = {}
 let pendingSecties = {}      // hele secties aan/uit voor het project dat je bewerkt
 let pendingCustomCmds = []   // eigen knoppen van het project dat je bewerkt
 let pendingCmdVolgorde = { run: [], tools: [] }
-let cmdSorteerModus = ''     // '' | 'run' | 'tools' — volgorde aanpassen in projectweergave
-let cmdvisSorteerModus = ''  // '' | 'run' | 'tools' — volgorde in projectinstellingen
+let cmdSorteerModus = ''     // '' | 'run' — volgorde aanpassen in projectweergave
+let cmdvisSorteerModus = ''  // '' | 'run' — volgorde in projectinstellingen
 let selEmoji    = '📱'
 const termOutput = {}
 // Wat je hebt getypt maar nog niet hebt verstuurd, per weergave (elk project,
@@ -412,12 +412,6 @@ function ontdubbelCustomEditors() {
   return true
 }
 
-// Zichtbaar tenzij deze knop voor dit project is uitgezet — of tenzij hij
-// standaard uit staat en er nooit iets over gezegd is. Zie cmdZichtbaar.
-function isCmdVisible(p, id) {
-  return cmdZichtbaar(p, id, (p && p.cmdVisibility) || {})
-}
-
 // Hele sectie aan of uit. Handiger dan alle vinkjes los omzetten als je
 // bijvoorbeeld bij een niet-Flutter project de tools niet wilt zien.
 function sectieAan(p, sectie) {
@@ -429,8 +423,66 @@ function zetSectie(p, sectie, aan) {
   saveProjects()
 }
 
-// Tools slaan alleen ergens op bij een Flutter-project. Dat kijken we één keer
-// na, en alleen als de gebruiker er zelf nog niets over gezegd heeft.
+// 'tools' was een eigen sectie onder uitvoeren, met een eigen kop, een eigen
+// schuifje en een eigen volgorde. Het waren nooit knoppen van een andere soort:
+// het zijn de Flutter-knoppen. Ze verhuizen daarom eenmalig naar een map in
+// dezelfde rij. Daarna is er nog maar één plek waar knoppen staan, en is die
+// groep te verplaatsen, te hernoemen en op te heffen zoals elke andere map.
+const FLUTTER_MAP = 'flutter'
+
+function flutterMap(p) {
+  return (p.cmdFolders || []).find(f => f && f.auto === FLUTTER_MAP) || null
+}
+
+function migreerToolsNaarMap(p) {
+  if (!p || p.knoppenSamengevoegd) return false
+  p.knoppenSamengevoegd = true
+
+  const oudeVolgorde = ((p.cmdVolgorde || {}).tools) || []
+  const hoortErin = [
+    ...TOOLS_CMD_DEFS.map(d => d.id),
+    ...(p.customCmds || []).filter(c => c.section === 'tools').map(c => 'custom:' + c.id),
+  ]
+  // De volgorde die de gebruiker in de tools-rij had staan blijft binnen de map
+  // gelden; wat daar niet in stond komt erachter.
+  const inMap = [
+    ...oudeVolgorde.filter(id => hoortErin.includes(id)),
+    ...hoortErin.filter(id => !oudeVolgorde.includes(id)),
+  ]
+
+  const f = {
+    id: nieuwMapId(), sectie: 'run', label: I18N.t('folder.flutter'),
+    // Stond de tools-sectie uit (geen Flutter-project), dan hoort de map dicht
+    // te staan. De knoppen zijn er nog wel: dicht is niet weg.
+    open: sectieAan(p, 'tools'), auto: FLUTTER_MAP,
+  }
+  p.cmdFolders = [...(p.cmdFolders || []), f]
+  p.cmdFolderVan = {
+    ...(p.cmdFolderVan || {}),
+    ...Object.fromEntries(inMap.map(id => [id, f.id])),
+  }
+  p.cmdVolgorde = {
+    ...(p.cmdVolgorde || {}),
+    run: [...(((p.cmdVolgorde || {}).run) || []), MAP_PREFIX + f.id, ...inMap],
+    tools: [],
+  }
+  return true
+}
+
+function migreerAlleProjecten() {
+  let veranderd = false
+  for (const p of projects) {
+    if (migreerToolsNaarMap(p)) veranderd = true
+    if (ordenProject(p)) veranderd = true
+  }
+  if (veranderd) saveProjects()
+  return veranderd
+}
+
+// Flutter-knoppen slaan alleen ergens op bij een Flutter-project. Dat kijken we
+// één keer na, en alleen als de gebruiker er zelf nog niets over gezegd heeft.
+// Geen Flutter? Dan gaat de map dicht -- zichtbaar dat hij bestaat, maar niet
+// in de weg.
 async function bepaalToolsVoorProject(p) {
   if (!p || (p.secties && typeof p.secties.tools === 'boolean')) return false
   const loc = p.locations?.[p.activeLocation] || p.locations?.[0]
@@ -440,8 +492,10 @@ async function bepaalToolsVoorProject(p) {
   if (!r || !r.ok) return false          // map even niet bereikbaar: later nog eens
 
   p.secties = { ...(p.secties || {}), tools: !!r.flutter }
+  const f = flutterMap(p)
+  if (f) f.open = !!r.flutter
   saveProjects()
-  return !r.flutter                      // true = we hebben iets verborgen
+  return !r.flutter                      // true = we hebben iets ingeklapt
 }
 
 // Bij het opstarten en na een update: projecten die nog nooit gekeken zijn,
@@ -690,27 +744,30 @@ function identiteitChipHtml(p) {
       <i class="ti ti-user"></i>${esc(GitTools.profielLabel(status.gevonden))}</span>`
 }
 
-// Eigen knoppen die de gebruiker vanuit het woordenboek heeft toegevoegd.
-// Ze horen bij een project en staan in de sectie 'run' (uitvoeren) of 'tools'.
-function customCmdsOf(p, section) {
-  return (p.customCmds || []).filter(c => c.section === section)
+// Eigen knoppen die de gebruiker vanuit het woordenboek heeft toegevoegd. Die
+// hoorden vroeger bij een sectie; nu is er nog maar een rij, dus horen ze
+// gewoon bij het project. Oude knoppen dragen nog een `section` mee -- die
+// wordt genegeerd, niet gefilterd, anders vallen ze uit beeld.
+function customCmdsOf(p) {
+  return p.customCmds || []
 }
 
-// Alle knop-id's die bij een sectie horen (zichtbaar of niet).
+// Alle knop-id's van een project, zichtbaar of niet. Er is nog maar een rij:
+// tools was geen tweede soort knop maar een tweede rij, en staat nu als map
+// 'Flutter' tussen de rest. Zie migreerToolsNaarMap().
 function alleCmdKnopIds(bron, sectie) {
   const ids = []
-  if (sectie === 'run') {
-    for (const def of RUN_CMD_DEFS) ids.push(def.id)
-    for (const e of eigenEditors()) ids.push('editor:custom:' + e.id)
-    // Een dienst die klaarstaat is net zo goed een knop als de rest: dus ook
-    // per project uit te zetten en te verslepen. Programmaknoppen die al als
-    // editor in deze rij staan, niet nog eens.
-    for (const d of aiDienstenOpProject()) ids.push('ai:' + d.id)
-    for (const c of customCmdsOf(bron, 'run')) ids.push('custom:' + c.id)
-  } else {
-    for (const def of TOOLS_CMD_DEFS) ids.push(def.id)
-    for (const c of customCmdsOf(bron, 'tools')) ids.push('custom:' + c.id)
-  }
+  for (const def of RUN_CMD_DEFS) ids.push(def.id)
+  for (const e of eigenEditors()) ids.push('editor:custom:' + e.id)
+  // Een dienst die klaarstaat is net zo goed een knop als de rest: dus ook
+  // per project uit te zetten en te verslepen. Programmaknoppen die al als
+  // editor in deze rij staan, niet nog eens.
+  for (const d of aiDienstenOpProject()) ids.push('ai:' + d.id)
+  for (const def of TOOLS_CMD_DEFS) ids.push(def.id)
+  for (const c of customCmdsOf(bron)) ids.push('custom:' + c.id)
+  // Een map staat in dezelfde lijst als de knoppen. Zo houdt hij een plek in de
+  // rij zonder dat er een tweede volgorde bijgehouden hoeft te worden.
+  for (const f of foldersVan(bron, sectie)) ids.push(MAP_PREFIX + f.id)
   return ids
 }
 
@@ -724,6 +781,67 @@ function cmdZichtbaar(bron, id, zichtbaarMap = null) {
   return keuze !== false
 }
 
+// -- Mappen van knoppen ------------------------------------------------------
+// Een map is geen tweede lijst maar een gewone plek in cmdVolgorde. Wat erin
+// zit staat in cmdFolderVan, per knop-id. Dat scheelt een boel: de volgorde
+// blijft plat, dus zichtbaarheid, sorteren en opslaan werken zoals ze deden,
+// en een map opheffen laat elke knop staan waar hij stond.
+//
+//   p.cmdFolders   = [{ id, sectie, label, open, auto }]
+//   p.cmdFolderVan = { '<knop-id>': '<map-id>' }
+//   p.cmdVolgorde  = { run: ['git-status', 'map:m1', 'custom:x', ...] }
+const MAP_PREFIX = 'map:'
+const isMapId = (id) => typeof id === 'string' && id.startsWith(MAP_PREFIX)
+const mapIdVan = (id) => String(id).slice(MAP_PREFIX.length)
+
+function foldersVan(bron, sectie) {
+  return (bron.cmdFolders || []).filter(f => f && f.sectie === sectie)
+}
+
+function folderOp(bron, mapId) {
+  return (bron.cmdFolders || []).find(f => f && f.id === mapId) || null
+}
+
+// In welke map hoort deze knop? Drie antwoorden, in deze volgorde:
+//
+//   een map-id  -- daar heb jij hem neergelegd
+//   lege tekst  -- daar heb jij hem juist uit gehaald, laat hem los staan
+//   niets       -- nooit iets over gezegd: dan beslist zijn soort
+//
+// Dat laatste is wat een knop die er later bij komt vanzelf op zijn plek laat
+// vallen. Zonder die regel zou elke nieuw gevonden AI-knop of git-knop los
+// naast een map belanden die er precies voor bedoeld is, en zou je na elke
+// installatie opnieuw moeten opruimen.
+//
+// Een verwijzing naar een map die niet meer bestaat telt als los: anders
+// verdwijnt de knop uit beeld zonder dat er nog iets is om hem uit te halen.
+function folderVanKnop(bron, sectie, id) {
+  const gekozen = (bron.cmdFolderVan || {})[id]
+  if (gekozen === '') return null
+  if (gekozen) {
+    const f = folderOp(bron, gekozen)
+    return f && f.sectie === sectie ? f : null
+  }
+  return autoMapVoor(bron, sectie, id)
+}
+
+// De map die bij de soort van deze knop hoort, als die map er is. Bestaat hij
+// niet, dan blijft de knop gewoon los staan -- er wordt hier niets gemaakt.
+function autoMapVoor(bron, sectie, id) {
+  const soort = AUTO_MAPPEN.find(x => x.toets(id))
+  if (!soort) return null
+  return foldersVan(bron, sectie).find(f => f.auto === soort.auto) || null
+}
+
+function mapIsOpen(bron, id) {
+  const f = folderOp(bron, mapIdVan(id))
+  return !!f && f.open !== false
+}
+
+function nieuwMapId() {
+  return 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+}
+
 function cmdVolgordeLijst(bron, sectie) {
   const alle = alleCmdKnopIds(bron, sectie)
   const opgeslagen = (bron.cmdVolgorde && bron.cmdVolgorde[sectie]) || []
@@ -731,8 +849,22 @@ function cmdVolgordeLijst(bron, sectie) {
   return [...geldig, ...alle.filter(id => !geldig.includes(id))]
 }
 
-function zichtbareCmdVolgorde(bron, sectie, zichtbaar = null) {
-  const ids = cmdVolgordeLijst(bron, sectie).filter(id => cmdZichtbaar(bron, id, zichtbaar))
+// Welke knoppen staan er, in welke volgorde, in de lijst waar je naar kijkt?
+// Slepen rekent met de plek in die lijst, dus tekenen en verplaatsen moeten
+// exact dezelfde lijst gebruiken. Deden ze dat niet, dan schuift een andere
+// knop op dan je vastpakt en staat er daarna rommel in cmdVolgorde -- waarna
+// ook knoppen die je nog niet had aangeraakt verkeerd gaan slepen.
+//
+// Twee lijsten kijken naar dezelfde knoppen en zien niet hetzelfde:
+//   'rij'    -- de knoppenrij bij uitvoeren: alleen aangevinkte knoppen, en
+//               van git alleen wat bij deze repo-toestand hoort.
+//   'alles'  -- het bewerkvenster: elke knop, ook de uitgevinkte, want daar
+//               zet je ze juist weer aan.
+// Elke knop die deze sectie mag laten zien -- of hij nu los in de rij staat of
+// in een map ligt.
+function zichtbareKnopIds(bron, sectie, zichtbaar = null) {
+  const ids = cmdVolgordeLijst(bron, sectie)
+    .filter(id => !isMapId(id) && cmdZichtbaar(bron, id, zichtbaar))
   // Een niet-gekoppeld project ziet alleen de koppelknop; een gekoppeld
   // project ziet de rest en de koppelknop niet meer. Zolang we de toestand
   // nog niet weten tonen we geen enkele git-knop: liever even niets dan een
@@ -742,13 +874,78 @@ function zichtbareCmdVolgorde(bron, sectie, zichtbaar = null) {
   return ids.filter(id => !GitTools.isGitId(id) || toon.includes(id))
 }
 
-function verplaatsCmdVolgorde(bron, sectie, van, naar, zichtbaar = null) {
+// Wat ligt er in deze map, in de volgorde van de rij?
+function knoppenInMap(bron, sectie, mapId, zichtbaar = null) {
+  return zichtbareKnopIds(bron, sectie, zichtbaar)
+    .filter(id => (folderVanKnop(bron, sectie, id) || {}).id === mapId)
+}
+
+function cmdIdsInBeeld(bron, sectie, weergave = 'rij', zichtbaar = null) {
+  const alle = cmdVolgordeLijst(bron, sectie)
+  // Het bewerkvenster gaat over welke knoppen er zijn, niet over waar ze
+  // staan: daar hoort elke knop in de lijst, ook de uitgevinkte, en geen map
+  // ertussen.
+  if (weergave === 'alles') return alle.filter(id => !isMapId(id))
+  const knoppen = new Set(zichtbareKnopIds(bron, sectie, zichtbaar))
+  // Een lege map hoort alleen in beeld terwijl je aan het ordenen bent: dan
+  // moet je er iets in kunnen leggen. Daarbuiten staat hij alleen in de weg.
+  const toonLeeg = sorteertSectie(sectie)
+  return alle.filter(id => {
+    if (isMapId(id)) return toonLeeg || knoppenInMap(bron, sectie, mapIdVan(id), zichtbaar).length > 0
+    return knoppen.has(id) && !folderVanKnop(bron, sectie, id)
+  })
+}
+
+function zichtbareCmdVolgorde(bron, sectie, zichtbaar = null) {
+  return cmdIdsInBeeld(bron, sectie, 'rij', zichtbaar)
+}
+
+// De knoppen die niet in beeld staan blijven staan waar ze stonden: alleen de
+// zichtbare plekken worden opnieuw gevuld. Zo raakt de volgorde van verborgen
+// knoppen niet in de war door een sleep die daar niets mee te maken had.
+function verplaatsCmdVolgorde(bron, sectie, van, naar, weergave = 'rij', zichtbaar = null) {
   const volledig = cmdVolgordeLijst(bron, sectie)
-  const zichtbaarIds = volledig.filter(id => cmdZichtbaar(bron, id, zichtbaar))
-  if (!verschuif(zichtbaarIds, van, naar)) return false
+  const inBeeld = cmdIdsInBeeld(bron, sectie, weergave, zichtbaar)
+  if (!verschuif(inBeeld, van, naar)) return false
+  const staatInBeeld = new Set(inBeeld)
   let zi = 0
-  const nieuw = volledig.map(id => (cmdZichtbaar(bron, id, zichtbaar) ? zichtbaarIds[zi++] : id))
+  const nieuw = volledig.map(id => (staatInBeeld.has(id) ? inBeeld[zi++] : id))
   bron.cmdVolgorde = { ...(bron.cmdVolgorde || {}), [sectie]: nieuw }
+  return true
+}
+
+// De rij zoals je hem ziet staan. Een open map is een blok over de hele
+// breedte; die blokken gaan naar onderen. Wat overblijft -- de losse knoppen en
+// de dichte mappen -- past naast elkaar op dezelfde regels, met de dichte
+// mappen vooraan zodat ze bij elkaar staan.
+function rijVolgorde(bron, sectie, zichtbaar = null) {
+  const ids = cmdIdsInBeeld(bron, sectie, 'rij', zichtbaar)
+  const open = ids.filter(id => isMapId(id) && mapIsOpen(bron, id))
+  const dicht = ids.filter(id => isMapId(id) && !mapIsOpen(bron, id))
+  if (!open.length && !dicht.length) return ids
+  return [...dicht, ...ids.filter(id => !isMapId(id)), ...open]
+}
+
+// Slepen in de knoppenrij rekent met id's, niet met plekken. Een knop kan van
+// de rij in een map springen en andersom, en dan zegt "plek 3" niets meer:
+// welke lijst zou dat zijn? Het id blijft hetzelfde, waar hij ook heen gaat.
+// Uit een map halen legt een lege tekst vast, geen niets. Het verschil telt:
+// niets betekent "beslis zelf maar", en dan zou de soort hem meteen weer
+// terugtrekken in de map waar je hem net uit sleepte.
+function zetKnopInMap(bron, knopId, mapId) {
+  bron.cmdFolderVan = { ...(bron.cmdFolderVan || {}), [knopId]: mapId || '' }
+}
+
+function verplaatsKnopId(bron, sectie, knopId, doelId, mapId = null, achter = false) {
+  if (!knopId || knopId === doelId) return false
+  const lijst = cmdVolgordeLijst(bron, sectie).filter(id => id !== knopId)
+  const i = doelId ? lijst.indexOf(doelId) : -1
+  if (i < 0) lijst.push(knopId)
+  else lijst.splice(achter ? i + 1 : i, 0, knopId)
+  bron.cmdVolgorde = { ...(bron.cmdVolgorde || {}), [sectie]: lijst }
+  // Een map in een map bestaat niet: dan wordt "waar staat deze knop" een boom
+  // die je moet uitklappen om een knop te vinden die je zo wilde indrukken.
+  if (!isMapId(knopId)) zetKnopInMap(bron, knopId, mapId)
   return true
 }
 
@@ -763,31 +960,77 @@ function cmdKnopHtmlMap(p) {
   })
   const actiefAi = (aiSessies[p.id] && aiSessies[p.id].aan) ? aiSessies[p.id].providerId : ''
   aiDienstenOpProject().forEach(d => { map['ai:' + d.id] = aiKnopHtml(d, actiefAi) })
-  customCmdsOf(p, 'run').forEach(c => {
-    const id = 'custom:' + c.id
-    map[id] = `<button class="cmd-btn custom" data-custom="${esc(c.id)}" data-volgorde-id="${esc(id)}" title="${esc(c.cmd)}"><i class="ti ${esc(c.icon || 'ti-player-play')}"></i> ${esc(c.label || c.cmd)}</button>`
-  })
   for (const def of TOOLS_CMD_DEFS) {
     map[def.id] = `<button class="cmd-btn" data-cmd="${def.id}" data-volgorde-id="${def.id}"><i class="ti ${def.icon}"></i> ${esc(defLabel(def))}</button>`
   }
-  customCmdsOf(p, 'tools').forEach(c => {
+  customCmdsOf(p).forEach(c => {
     const id = 'custom:' + c.id
     map[id] = `<button class="cmd-btn custom" data-custom="${esc(c.id)}" data-volgorde-id="${esc(id)}" title="${esc(c.cmd)}"><i class="ti ${esc(c.icon || 'ti-player-play')}"></i> ${esc(c.label || c.cmd)}</button>`
   })
   return map
 }
 
+// --release hoort bij de Flutter-knoppen en nergens anders, dus staat het
+// schuifje op de kop van die map. Alleen als de map open is: bij een dichte map
+// zie je de knoppen niet waar het over gaat, en dan is het schuifje een vraag
+// zonder aanleiding.
+function mapExtraHtml(p, f) {
+  if (f.auto !== FLUTTER_MAP) return ''
+  return `<label class="toggle-switch" title="${esc(I18N.t('project.releaseToggleTitle'))}">
+      <input type="checkbox" id="toggle-release" ${p.release === true ? 'checked' : ''} />
+      <span class="toggle-slider"></span>
+      <span class="toggle-text">--release</span>
+    </label>`
+}
+
 function cmdGridHtml(p, sectie) {
-  const map = cmdKnopHtmlMap(p)
-  const ids = zichtbareCmdVolgorde(p, sectie)
-  const kleuren = kleurKlassenVoorIds(ids.map(id => knopKleurSpec(id, p)))
+  const knopHtml = cmdKnopHtmlMap(p)
+  const ids = rijVolgorde(p, sectie)
   const sorteren = cmdSorteerModus === sectie
-  return ids.map((id, i) => {
-    let btn = map[id]
+  const inhoud = {}
+  for (const id of ids) if (isMapId(id)) inhoud[id] = knoppenInMap(p, sectie, mapIdVan(id))
+
+  // Kleuren worden op de buren gekozen, dus ze moeten lopen over de knoppen
+  // zoals je ze ziet staan. Een mapkop telt niet mee: die heeft geen kleur en
+  // zou er anders eentje opeten.
+  const opVolgorde = ids.flatMap(id => (isMapId(id) ? inhoud[id] : [id]))
+  const kleuren = kleurKlassenVoorIds(opVolgorde.map(id => knopKleurSpec(id, p)))
+  const kleurVan = Object.fromEntries(opVolgorde.map((id, i) => [id, kleuren[i]]))
+
+  // In de sorteermodus krijgt elk ding zijn eigen pijltjes. Het id staat op de
+  // omhulling, want slepen rekent met id's en niet met plekken.
+  const knop = (id, i, aantal) => {
+    const btn = zetBtnKleur(knopHtml[id], kleurVan[id])
     if (!btn) return ''
-    btn = zetBtnKleur(btn, kleuren[i])
     if (!sorteren) return btn
-    return `<span class="cmd-sort-item" data-volgorde-index="${i}">${pijlenHtml(i === 0, i === ids.length - 1, true)}${btn}</span>`
+    return `<span class="cmd-sort-item" data-volgorde-id="${esc(id)}">${pijlenHtml(i === 0, i === aantal - 1, true)}${btn}</span>`
+  }
+
+  return ids.map((id, i) => {
+    if (!isMapId(id)) return knop(id, i, ids.length)
+    const f = folderOp(p, mapIdVan(id))
+    if (!f) return ''
+    const kinderen = inhoud[id] || []
+    const open = f.open !== false
+    const kop = `<button class="cmd-map-kop ${open ? '' : 'dicht'}" data-map="${esc(f.id)}" title="${esc(I18N.t('folder.toggleTitle'))}">
+      <i class="ti ${open ? 'ti-folder-open' : 'ti-folder'}"></i>
+      <span class="cmd-map-naam">${esc(f.label)}</span>
+      <span class="cmd-map-aantal">${kinderen.length}</span>
+    </button>`
+    const kopDeel = sorteren
+      ? `<span class="cmd-sort-item cmd-map-regel" data-volgorde-id="${esc(id)}">${pijlenHtml(i === 0, i === ids.length - 1, true)}${kop}</span>`
+      : kop
+    // Dicht is de map niet meer dan zijn naam: een chip die naast de andere
+    // dichte mappen past. Open wordt het een blok over de hele breedte, met de
+    // naam erboven -- anders is bij een lange rij niet te zien waar de map
+    // ophoudt en de gewone knoppen weer beginnen.
+    if (!open) return kopDeel
+    const leeg = sorteren ? `<span class="cmd-map-leeg">${esc(I18N.t('folder.emptyHint'))}</span>` : ''
+    const binnen = kinderen.map((kid, ki) => knop(kid, ki, kinderen.length)).join('') || leeg
+    return `<div class="cmd-map-groep" data-map-groep="${esc(f.id)}">
+      <div class="cmd-map-regelrij">${kopDeel}${mapExtraHtml(p, f)}</div>
+      <div class="cmd-map-inhoud">${binnen}</div>
+    </div>`
   }).join('')
 }
 
@@ -801,36 +1044,19 @@ function modalProjectCtx() {
 
 function cmdvisRijen(sectie) {
   const ctx = modalProjectCtx()
-  if (sectie === 'run') {
-    const vaste = RUN_CMD_DEFS
-      .map(def => ({ id: def.id, label: defLabel(def), icon: def.icon }))
-    const editors = eigenEditors().map((e, i) => ({
-      id: 'editor:custom:' + e.id, label: e.label || 'editor', icon: progIcoon(e), kleurCls: progKleurCls(e, i),
-    }))
-    const ai = aiDienstenOpProject().map(d => ({
-      id: 'ai:' + d.id, label: d.label, icon: AI_KNOP_ICON[d.id] || aiKnopIcoon(d),
-    }))
-    const customs = pendingCustomCmds.filter(c => c.section === 'run').map(c => ({
-      id: 'custom:' + c.id, custom: c, label: c.label || c.cmd, icon: c.icon || 'ti-player-play',
-    }))
-    const map = Object.fromEntries([...vaste, ...editors, ...ai, ...customs].map(r => [r.id, r]))
-    return cmdVolgordeLijst(ctx, 'run').map(id => map[id]).filter(Boolean)
-  }
-  const vaste = TOOLS_CMD_DEFS.map(def => ({ id: def.id, label: defLabel(def), icon: def.icon }))
-  const customs = pendingCustomCmds.filter(c => c.section === 'tools').map(c => ({
+  const vaste = [...RUN_CMD_DEFS, ...TOOLS_CMD_DEFS]
+    .map(def => ({ id: def.id, label: defLabel(def), icon: def.icon }))
+  const editors = eigenEditors().map((e, i) => ({
+    id: 'editor:custom:' + e.id, label: e.label || 'editor', icon: progIcoon(e), kleurCls: progKleurCls(e, i),
+  }))
+  const ai = aiDienstenOpProject().map(d => ({
+    id: 'ai:' + d.id, label: d.label, icon: AI_KNOP_ICON[d.id] || aiKnopIcoon(d),
+  }))
+  const customs = pendingCustomCmds.map(c => ({
     id: 'custom:' + c.id, custom: c, label: c.label || c.cmd, icon: c.icon || 'ti-player-play',
   }))
-  const map = Object.fromEntries([...vaste, ...customs].map(r => [r.id, r]))
-  return cmdVolgordeLijst(ctx, 'tools').map(id => map[id]).filter(Boolean)
-}
-
-function customBtnMarkup(p, section) {
-  return customCmdsOf(p, section)
-    .filter(c => isCmdVisible(p, 'custom:' + c.id))
-    .map(c => `<button class="cmd-btn custom" data-custom="${esc(c.id)}" title="${esc(c.cmd)}">
-        <i class="ti ${esc(c.icon || 'ti-player-play')}"></i> ${esc(c.label || c.cmd)}
-      </button>`)
-    .join('')
+  const map = Object.fromEntries([...vaste, ...editors, ...ai, ...customs].map(r => [r.id, r]))
+  return cmdVolgordeLijst(ctx, sectie).map(id => map[id]).filter(Boolean)
 }
 
 const AUTOFIX_CMD_KEYS = new Set([
@@ -863,6 +1089,8 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (migreerStandaardEditors() || ontdubbelCustomEditors() || normaliseerEditorKleuren()) window.api.saveSettings(settings)
 
   await I18N.init(settings.language)
+  // Pas na I18N: de Flutter-map krijgt een naam uit de taalbestanden.
+  migreerAlleProjecten()
   try {
     [LANGUAGES, detectedLanguageCode] = await Promise.all([
       window.api.listLanguages(),
@@ -1434,6 +1662,9 @@ function toonContextMenu(x, y, items) {
 function sluitContextMenu() {
   const menu = document.getElementById('ctx-menu')
   if (menu) { menu.hidden = true; menu.innerHTML = '' }
+  // De knop die dit menu opende licht op zolang het openstaat. Gaat het dicht,
+  // dan hoort die gloed ook weg te zijn: anders lijkt er nog iets open.
+  document.querySelectorAll('.knop-map.aan').forEach(b => b.classList.remove('aan'))
 }
 
 function gekozenItems() {
@@ -2233,6 +2464,7 @@ function bedraadZijbalkBreedte() {
 // slepen of de pijltjes gebruiken, en klikken opent even niets.
 let sorteerModus = ''            // '' | 'nav' | 'proj' | 'sectie'
 let sleepBron = null
+let sleepKnop = null         // { sectie, id } tijdens het slepen in een knoppenrij
 
 const NAV_KNOPPEN = [
   { sleutel: 'cmd',  id: 'btn-nav-cmd',  open: () => setView('cmd') },
@@ -2704,6 +2936,253 @@ function toggleSettings() {
 }
 
 // ── Main panel ────────────────────────────────────────────────────────────────
+// -- Mappen bedienen ---------------------------------------------------------
+// De rij waar een knop in meedoet: los in de sectie, of binnen zijn map. De
+// pijltjes van een knop in een map schuiven binnen die map. Eruit springen doe
+// je door hem eruit te slepen, niet door hem langs alle andere knoppen te
+// duwen tot hij er per ongeluk uit valt.
+function knopRij(p, sectie, id) {
+  const f = isMapId(id) ? null : folderVanKnop(p, sectie, id)
+  return f ? knoppenInMap(p, sectie, f.id) : rijVolgorde(p, sectie)
+}
+
+function mapVanKnop(p, sectie, id) {
+  if (isMapId(id)) return null
+  const f = folderVanKnop(p, sectie, id)
+  return f ? f.id : null
+}
+
+// Achteraan in een map erbij. Ligt er nog niets in, dan is de map zelf het
+// mikpunt en komt de knop er meteen achter te staan.
+function legInMap(p, sectie, knopId, mapId) {
+  const inMap = knoppenInMap(p, sectie, mapId).filter(id => id !== knopId)
+  const doel = inMap.length ? inMap[inMap.length - 1] : MAP_PREFIX + mapId
+  return verplaatsKnopId(p, sectie, knopId, doel, mapId, true)
+}
+
+function bedraadMapKoppen(p, sectie, grid) {
+  grid.querySelectorAll('[data-map]').forEach(kop => {
+    const f = folderOp(p, kop.dataset.map)
+    if (!f) return
+    kop.onclick = (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      f.open = f.open === false
+      saveProjects()
+      renderMain()
+    }
+    kop.oncontextmenu = (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      toonContextMenu(e.clientX, e.clientY, [
+        { label: I18N.t('folder.rename'), icoon: 'ti-pencil', doe: () => hernoemMap(p, f.id) },
+        { label: I18N.t('folder.dissolve'), icoon: 'ti-folder-off', doe: () => hefMappenOp(p, sectie, [f.id]) },
+      ])
+    }
+  })
+}
+
+function bedraadKnopSlepen(p, sectie, grid) {
+  const bewaar = () => { saveProjects(); renderMain() }
+  const gesleept = () => (sleepKnop && sleepKnop.sectie === sectie ? sleepKnop.id : null)
+
+  grid.querySelectorAll('.cmd-sort-item[data-volgorde-id]').forEach(item => {
+    const id = item.dataset.volgordeId
+    item.draggable = true
+    item.ondragstart = (e) => {
+      sleepKnop = { sectie, id }
+      item.classList.add('sleept')
+      try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', id) } catch {}
+    }
+    item.ondragend = () => { sleepKnop = null; item.classList.remove('sleept') }
+    item.ondragover = (e) => { e.preventDefault(); item.classList.add('doelwit') }
+    item.ondragleave = () => item.classList.remove('doelwit')
+    item.ondrop = (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      item.classList.remove('doelwit')
+      const bron = gesleept()
+      sleepKnop = null
+      if (!bron || bron === id) return
+      // Op een mapkop laten vallen betekent: erin. Op een knop betekent: op
+      // die plek, en dus in dezelfde map als die knop.
+      if (isMapId(id) && !isMapId(bron)) legInMap(p, sectie, bron, mapIdVan(id))
+      else {
+        const rij = knopRij(p, sectie, id)
+        const vanaf = rij.indexOf(bron)
+        verplaatsKnopId(p, sectie, bron, id, mapVanKnop(p, sectie, id), vanaf >= 0 && vanaf < rij.indexOf(id))
+      }
+      bewaar()
+    }
+    item.querySelectorAll('.sort-pijl:not(.uit)').forEach(pijl => {
+      pijl.onclick = (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        const rij = knopRij(p, sectie, id)
+        const i = rij.indexOf(id)
+        const doel = sortPijlDoel(i, pijl.dataset.op, true)
+        if (i < 0 || doel < 0 || doel >= rij.length) return
+        verplaatsKnopId(p, sectie, id, rij[doel], mapVanKnop(p, sectie, id), doel > i)
+        bewaar()
+      }
+    })
+  })
+
+  // In de lege ruimte van een map laten vallen hoort ook gewoon "erin" te
+  // betekenen. Precies mikken op de kop is geen bediening.
+  grid.querySelectorAll('[data-map-groep]').forEach(groep => {
+    groep.ondragover = (e) => { if (gesleept()) e.preventDefault() }
+    groep.ondrop = (e) => {
+      const bron = gesleept()
+      if (!bron || isMapId(bron)) return
+      e.preventDefault()
+      e.stopPropagation()
+      sleepKnop = null
+      legInMap(p, sectie, bron, groep.dataset.mapGroep)
+      bewaar()
+    }
+  })
+
+  // Buiten een map laten vallen haalt hem eruit. Zonder die weg terug is een
+  // map een eenrichtingsstraat.
+  grid.ondragover = (e) => { if (gesleept()) e.preventDefault() }
+  grid.ondrop = (e) => {
+    const bron = gesleept()
+    sleepKnop = null
+    if (!bron || isMapId(bron) || !folderVanKnop(p, sectie, bron)) return
+    e.preventDefault()
+    verplaatsKnopId(p, sectie, bron, null, null, false)
+    bewaar()
+  }
+}
+
+// -- Mappen maken en opruimen ------------------------------------------------
+async function nieuweMap(p, sectie) {
+  const naam = await vraagTekst({
+    titel: I18N.t('folder.newTitle'),
+    placeholder: I18N.t('folder.namePlaceholder'),
+    okLabel: I18N.t('folder.newButton'),
+  })
+  if (naam == null) return
+  const f = { id: nieuwMapId(), sectie, label: naam.trim() || I18N.t('folder.defaultName'), open: true }
+  p.cmdFolders = [...(p.cmdFolders || []), f]
+  // Vastleggen waar hij staat: anders schuift hij een plek op zodra er een
+  // knop bij komt die nog geen plek in de volgorde had.
+  p.cmdVolgorde = { ...(p.cmdVolgorde || {}), [sectie]: cmdVolgordeLijst(p, sectie) }
+  saveProjects()
+  cmdSorteerModus = sectie
+  renderMain()
+}
+
+async function hernoemMap(p, mapId) {
+  const f = folderOp(p, mapId)
+  if (!f) return
+  const naam = await vraagTekst({
+    titel: I18N.t('folder.renameTitle'), waarde: f.label, okLabel: I18N.t('common.save'),
+  })
+  if (naam == null || !naam.trim()) return
+  f.label = naam.trim()
+  // Zelf een naam gekozen: dan hoort automatisch mappen die niet meer te
+  // overschrijven.
+  f.auto = ''
+  saveProjects()
+  renderMain()
+}
+
+// De map gaat weg, de knoppen blijven. Ze stonden al op hun eigen plek in de
+// volgorde, dus ze komen daar gewoon weer tevoorschijn.
+function hefMappenOp(p, sectie, mapIds) {
+  const weg = new Set(mapIds)
+  if (!weg.size) { showToast(I18N.t('folder.noneToast')); return }
+  p.cmdFolders = (p.cmdFolders || []).filter(f => !weg.has(f.id))
+  p.cmdFolderVan = Object.fromEntries(
+    Object.entries(p.cmdFolderVan || {}).filter(([, v]) => !weg.has(v)))
+  p.cmdVolgorde = {
+    ...(p.cmdVolgorde || {}),
+    [sectie]: cmdVolgordeLijst(p, sectie).filter(id => !(isMapId(id) && weg.has(mapIdVan(id)))),
+  }
+  saveProjects()
+  renderMain()
+  showToast(I18N.t('folder.dissolvedToast', { count: weg.size }))
+}
+
+// Waar hoort een knop vanzelf thuis? Drie groepen, te herkennen aan het id.
+// Wat er niet in past blijft los staan: een map met een restje erin helpt
+// niemand aan overzicht.
+const TOOLS_IDS = new Set(TOOLS_CMD_DEFS.map(d => d.id))
+const AUTO_MAPPEN = [
+  { auto: 'git',       sleutel: 'folder.autoGit',   toets: (id) => GitTools.isGitId(id) },
+  { auto: 'ai',        sleutel: 'folder.autoAi',    toets: (id) => id.startsWith('ai:') && !id.startsWith('ai:prog:') },
+  { auto: 'prog',      sleutel: 'folder.autoProgs', toets: (id) => id.startsWith('editor:custom:') || id.startsWith('ai:prog:') },
+  { auto: FLUTTER_MAP, sleutel: 'folder.flutter',   toets: (id) => TOOLS_IDS.has(id) },
+]
+
+// Ook knoppen die nu niet in beeld staan gaan mee. Een git-knop die pas
+// verschijnt zodra er een remote is hoort in dezelfde map als de rest, anders
+// staat hij er later alsnog los naast.
+function maakAutoMappen(p, sectie) {
+  const losse = cmdVolgordeLijst(p, sectie)
+    .filter(id => !isMapId(id) && !folderVanKnop(p, sectie, id))
+  let gedaan = 0
+  for (const soort of AUTO_MAPPEN) {
+    const hoort = losse.filter(soort.toets)
+    if (hoort.length < 2) continue
+    let f = foldersVan(p, sectie).find(x => x.auto === soort.auto)
+    if (!f) {
+      f = { id: nieuwMapId(), sectie, label: I18N.t(soort.sleutel), open: true, auto: soort.auto }
+      p.cmdFolders = [...(p.cmdFolders || []), f]
+    }
+    // De map neemt de plek van de eerste knop die erin gaat: zo verspringt de
+    // rest van de rij zo min mogelijk.
+    verplaatsKnopId(p, sectie, MAP_PREFIX + f.id, hoort[0], null, false)
+    let vorige = MAP_PREFIX + f.id
+    for (const id of hoort) {
+      verplaatsKnopId(p, sectie, id, vorige, f.id, true)
+      vorige = id
+      gedaan++
+    }
+  }
+  return gedaan
+}
+
+function autoMappen(p, sectie) {
+  const gedaan = maakAutoMappen(p, sectie)
+  if (!gedaan) { showToast(I18N.t('folder.autoNothingToast')); return }
+  saveProjects()
+  renderMain()
+  showToast(I18N.t('folder.autoDoneToast', { count: gedaan }))
+}
+
+// Een project begint geordend: git bij git, AI bij AI, programma's bij
+// programma's. Dat is wat je zelf ook meteen zou doen, en het scheelt iedereen
+// die de app voor het eerst opent een rij van dertig losse knoppen. Eenmalig --
+// wie zijn mappen daarna opheft, houdt ze opgeheven.
+function ordenProject(p) {
+  if (!p || p.knoppenGeordend) return false
+  p.knoppenGeordend = true
+  maakAutoMappen(p, 'run')
+  return true
+}
+
+function bedraadMapMenu(p, sectie, blok) {
+  const knop = blok.querySelector('[data-map-sectie]')
+  if (!knop) return
+  knop.onclick = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const doos = knop.getBoundingClientRect()
+    knop.classList.add('aan')
+    toonContextMenu(doos.left, doos.bottom + 4, [
+      { label: I18N.t('folder.new'), icoon: 'ti-folder-plus', doe: () => nieuweMap(p, sectie) },
+      { label: I18N.t('folder.auto'), icoon: 'ti-wand', doe: () => autoMappen(p, sectie) },
+      { scheiding: true },
+      { label: I18N.t('folder.dissolveAll'), icoon: 'ti-folder-off',
+        uit: !foldersVan(p, sectie).length,
+        doe: () => hefMappenOp(p, sectie, foldersVan(p, sectie).map(f => f.id)) },
+    ])
+  }
+}
+
 function bedraadCmdKnopVolgorde(p) {
   document.querySelectorAll('[data-sectieblok]').forEach(blok => {
     const sectie = blok.dataset.sectieblok
@@ -2732,28 +3211,9 @@ function bedraadCmdKnopVolgorde(p) {
       ;(kop?.querySelector('.kop-acties') || kop)?.appendChild(klaar)
     }
 
-    grid.querySelectorAll('.cmd-sort-item').forEach((item, index) => {
-      item.dataset.volgordeIndex = String(index)
-      if (!sorteren) return
-      maakSleepbaar(item, index, (van, naar) => {
-        if (verplaatsCmdVolgorde(p, sectie, van, naar)) {
-          saveProjects()
-          renderMain()
-        }
-      })
-      item.querySelectorAll('.sort-pijl:not(.uit)').forEach(pijl => {
-        pijl.onclick = (e) => {
-          e.preventDefault()
-          e.stopPropagation()
-          const idx = parseInt(item.dataset.volgordeIndex)
-          const doel = sortPijlDoel(idx, pijl.dataset.op, true)
-          if (verplaatsCmdVolgorde(p, sectie, idx, doel)) {
-            saveProjects()
-            renderMain()
-          }
-        }
-      })
-    })
+    bedraadMapMenu(p, sectie, blok)
+    bedraadMapKoppen(p, sectie, grid)
+    if (sorteren) bedraadKnopSlepen(p, sectie, grid)
 
     grid.querySelectorAll('.cmd-btn').forEach(btn => {
       let timer = null
@@ -2782,7 +3242,7 @@ function bedraadCmdKnopVolgorde(p) {
 //                 commando, een gevonden programma), dan gaat hij echt weg.
 //
 // Die keuze wordt de eerste keer gevraagd en staat daarna in de instellingen.
-let knopWisModus = ''        // '' | 'run' | 'tools' | 'snel'
+let knopWisModus = ''        // '' | 'run' | 'snel'
 
 function wisWijze() {
   const w = settings.knopVerwijderen
@@ -2929,6 +3389,16 @@ function bedraadKnopWissen(ctx, sectie, grid) {
   if (!grid || knopWisModus !== sectie) return
   grid.classList.add('cmd-wissen')
   grid.addEventListener('click', (e) => {
+    // Een mapkop hoort in deze modus niet open te klappen maar weg te gaan.
+    // Deze luisteraar zit op capture, dus hij is eerder aan de beurt dan het
+    // openklappen -- daar hoeft dat verderop niets van te weten.
+    const kop = e.target.closest('.cmd-map-kop')
+    if (kop && grid.contains(kop)) {
+      e.preventDefault()
+      e.stopPropagation()
+      verwijderMap(ctx, sectie, kop.dataset.map)
+      return
+    }
     const btn = e.target.closest('.cmd-btn')
     if (!btn || !grid.contains(btn)) return
     e.preventDefault()
@@ -2938,11 +3408,35 @@ function bedraadKnopWissen(ctx, sectie, grid) {
   }, true)
 }
 
+// Een volle map weggooien zou de knoppen erin ook laten verdwijnen, en dat is
+// niet wat iemand bedoelt die op een prullenbak drukt bij een naam. Dus eerst
+// leegmaken. Wie de knoppen wil houden maar de map niet, heeft "map opheffen"
+// in het rechtermuismenu -- die laat de knoppen staan.
+function verwijderMap(p, sectie, mapId) {
+  const f = folderOp(p, mapId)
+  if (!f) return
+  if (knoppenInMap(p, sectie, mapId).length) {
+    showToast(I18N.t('folder.notEmptyToast', { name: f.label }))
+    return
+  }
+  hefMappenOp(p, sectie, [mapId])
+}
+
 // Rechts in de sectiekop: eerst de prullenbak, dan de klaar-knop. In een eigen
 // hoekje, want anders bepaalt de rest van de kop (het schuifje, --release)
 // waar ze belanden en staan ze per sectie ergens anders.
 function kopActiesHtml(sectie) {
-  return `<span class="kop-acties">${wisKnopHtml(sectie)}</span>`
+  return `<span class="kop-acties">${wisKnopHtml(sectie)}${mapKnopHtml(sectie)}</span>`
+}
+
+// Mappen maak je terwijl je de rij ordent, niet ertussendoor: de knop staat
+// daarom in hetzelfde hoekje als de prullenbak en komt in dezelfde modus
+// tevoorschijn. Snelknoppen hebben geen mappen -- die rij is er juist om kort
+// te blijven.
+function mapKnopHtml(sectie) {
+  if (sectie !== 'run') return ''
+  if (!sorteertSectie(sectie)) return ''
+  return `<button class="knop-map" data-map-sectie="${esc(sectie)}" title="${esc(I18N.t('folder.menuTitle'))}"><i class="ti ti-folder"></i></button>`
 }
 
 // Weghalen hoort bij het herschikken van een rij, niet bij het dagelijks
@@ -3018,25 +3512,14 @@ function renderMain() {
   // Nog niet gemeten? Dan halen we het op en tekent die aanroep zelf opnieuw.
   ververesGitStaat(p)
 
-  const runGridHtml  = cmdGridHtml(p, 'run')
-  const toolsGridHtml = cmdGridHtml(p, 'tools')
+  const runGridHtml = cmdGridHtml(p, 'run')
   const aiShell     = aiShellKnop(p.id)
   const runInhoud   = !!zichtbareCmdVolgorde(p, 'run').length
-  const toolsInhoud = !!zichtbareCmdVolgorde(p, 'tools').length
   const runAan      = sectieAan(p, 'run')
-  const toolsAan    = sectieAan(p, 'tools')
 
   const locOptions = p.locations.map((l, i) =>
     `<option value="${i}" ${i === p.activeLocation ? 'selected' : ''}>${esc(l.label)} — ${esc(l.path)}</option>`
   ).join('')
-
-  const releaseToggle = `
-    <span class="sectie-spacer"></span>
-    <label class="toggle-switch" title="${esc(I18N.t('project.releaseToggleTitle'))}">
-      <input type="checkbox" id="toggle-release" ${p.release === true ? 'checked' : ''} />
-      <span class="toggle-slider"></span>
-      <span class="toggle-text">--release</span>
-    </label>`
 
   const chromeHtml = `
     <div class="proj-header">
@@ -3063,7 +3546,7 @@ function renderMain() {
     ${(runInhoud || aiShell) ? `
     <div class="cmd-section ${runAan ? '' : 'sectie-uit'}" data-sectieblok="run">
       <div class="cmd-section-label-row">
-        <div class="cmd-section-label">${esc(I18N.t('project.runSectionLabel'))}</div>
+        <div class="cmd-section-label">${esc(I18N.t('project.buttonsSectionLabel'))}</div>
         <label class="toggle-switch" title="${esc(I18N.t('project.sectionToggleTitle'))}">
           <input type="checkbox" id="toggle-sectie-run" ${runAan ? 'checked' : ''} />
           <span class="toggle-slider"></span>
@@ -3075,21 +3558,6 @@ function renderMain() {
       </div>
     </div>` : ''}
 
-    ${toolsInhoud ? `
-    <div class="cmd-section ${toolsAan ? '' : 'sectie-uit'}" data-sectieblok="tools">
-      <div class="cmd-section-label-row">
-        <div class="cmd-section-label">${esc(I18N.t('project.toolsSectionLabel'))}</div>
-        <label class="toggle-switch" title="${esc(I18N.t('project.sectionToggleTitle'))}">
-          <input type="checkbox" id="toggle-sectie-tools" ${toolsAan ? 'checked' : ''} />
-          <span class="toggle-slider"></span>
-        </label>
-        ${releaseToggle}
-        ${kopActiesHtml('tools')}
-      </div>
-      <div class="cmd-grid ${cmdSorteerModus === 'tools' ? 'cmd-sorteren' : ''}">
-        ${toolsGridHtml}
-      </div>
-    </div>` : ''}
   `
 
   const wrapBestaat = levend('#main .terminal-wrap.splitbaar')
@@ -3147,10 +3615,6 @@ function renderMain() {
   const runToggle = document.getElementById('toggle-sectie-run')
   if (runToggle) runToggle.onchange = (e) => {
     zetSectie(p, 'run', e.target.checked); renderMain()
-  }
-  const toolsToggle = document.getElementById('toggle-sectie-tools')
-  if (toolsToggle) toolsToggle.onchange = (e) => {
-    zetSectie(p, 'tools', e.target.checked); renderMain()
   }
 
   // Flutter commands
@@ -7492,7 +7956,6 @@ function openAddBtnModal(entryId) {
   sel.innerHTML = projects.map(p =>
     `<option value="${esc(p.id)}" ${p.id === activeId ? 'selected' : ''}>${p.icon} ${esc(p.name)}</option>`).join('')
 
-  document.querySelector('input[name="addbtn-section"][value="run"]').checked = true
   document.getElementById('modal-addbtn').hidden = false
   focusField('addbtn-label')
 }
@@ -7509,23 +7972,22 @@ function saveAddBtnModal() {
   const p = projects.find(x => x.id === document.getElementById('addbtn-proj').value)
   if (!p) { closeAddBtnModal(); return }
 
-  const section = document.querySelector('input[name="addbtn-section"]:checked').value
-  const label   = document.getElementById('addbtn-label').value.trim() || e.cmd
+  const label = document.getElementById('addbtn-label').value.trim() || e.cmd
 
   p.customCmds = p.customCmds || []
-  if (p.customCmds.some(c => c.cmd === e.cmd && c.section === section)) {
-    showToast(I18N.t('addBtn.alreadyInSectionToast', { section: I18N.t(section === 'run' ? 'project.runSectionLabel' : 'project.toolsSectionLabel') }))
+  if (p.customCmds.some(c => c.cmd === e.cmd)) {
+    showToast(I18N.t('addBtn.alreadyThereToast'))
     closeAddBtnModal()
     return
   }
   p.customCmds.push({
     id: 'c_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-    cmd: e.cmd, label, section, icon: section === 'run' ? 'ti-player-play' : 'ti-tool',
+    cmd: e.cmd, label, section: 'run', icon: 'ti-player-play',
   })
 
   saveProjects()
   closeAddBtnModal()
-  showToast(I18N.t('addBtn.addedToProjectToast', { section: I18N.t(section === 'run' ? 'project.runSectionLabel' : 'project.toolsSectionLabel'), project: p.name }))
+  showToast(I18N.t('addBtn.addedToProjectToast', { project: p.name }))
   vraagProjectHertekenen()
 }
 
@@ -8018,6 +8480,7 @@ async function wisselAccount(id, pin = null, opties = {}) {
   actiefAccount = id
   projects = r.projects || []
   settings = r.settings || settings
+  migreerAlleProjecten()
   gitStaten = {}
   gitRemoteGedaan.clear()
   for (const k of Object.keys(gitLaatsteFetch)) delete gitLaatsteFetch[k]
@@ -14477,7 +14940,12 @@ async function saveProjectModal() {
     }
     if (p.activeLocation >= locs.length) p.activeLocation = 0
   } else {
-    projects.push({ id: 'proj_' + Date.now(), name, icon: selEmoji, device, gitProfiel: profielId, locations: locs, activeLocation: 0, release: false, cmdVisibility: { ...pendingCmdVisibility }, secties: { ...pendingSecties }, customCmds: pendingCustomCmds.map(c => ({ ...c })), cmdVolgorde: { run: [...(pendingCmdVolgorde.run || [])], tools: [...(pendingCmdVolgorde.tools || [])] } })
+    const vers = { id: 'proj_' + Date.now(), name, icon: selEmoji, device, gitProfiel: profielId, locations: locs, activeLocation: 0, release: false, cmdVisibility: { ...pendingCmdVisibility }, secties: { ...pendingSecties }, customCmds: pendingCustomCmds.map(c => ({ ...c })), cmdVolgorde: { run: [...(pendingCmdVolgorde.run || [])], tools: [...(pendingCmdVolgorde.tools || [])] } }
+    // Ook een vers project krijgt zijn mappen: dan staat elk project er
+    // hetzelfde bij, ongeacht wanneer het is aangemaakt.
+    migreerToolsNaarMap(vers)
+    ordenProject(vers)
+    projects.push(vers)
   }
 
   saveProjects(); renderSidebar()
@@ -14628,9 +15096,7 @@ function renderCmdVisibilitySection() {
     </div>
   `}
 
-  container.innerHTML =
-    group(esc(I18N.t('project.runSectionLabel')), 'run') +
-    group(esc(I18N.t('project.toolsSectionLabel')), 'tools')
+  container.innerHTML = group(esc(I18N.t('project.buttonsSectionLabel')), 'run')
 
   container.querySelectorAll('[data-sectie]').forEach(chk => {
     chk.onchange = () => {
@@ -14650,27 +15116,29 @@ function renderCmdVisibilitySection() {
     }
   })
 
-  ;['run', 'tools'].forEach(sectie => {
+  ;['run'].forEach(sectie => {
     const groep = container.querySelector(`.cmdvis-group[data-cmdvis-sectie="${sectie}"]`)
     if (!groep) return
-    const ctx = () => modalProjectCtx()
+    // Dit venster toont elke knop, ook de uitgevinkte -- dus 'alles'. En het
+    // project bestaat hier nog niet: modalProjectCtx() geeft elke keer een
+    // vers hulpobject, dus de nieuwe volgorde moet er zelf uit gehaald en in
+    // pendingCmdVolgorde gezet worden. Zonder dat verdwijnt elke sleep.
+    const verplaatsHier = (van, naar) => {
+      const ctx = modalProjectCtx()
+      if (!verplaatsCmdVolgorde(ctx, sectie, van, naar, 'alles', pendingCmdVisibility)) return
+      pendingCmdVolgorde = ctx.cmdVolgorde
+      renderCmdVisibilitySection()
+    }
 
     if (cmdvisSorteerModus === sectie) {
       groep.querySelectorAll('.cmdvis-sort-item').forEach((item, index) => {
         item.dataset.cmdvisIndex = String(index)
-        maakSleepbaar(item, index, (van, naar) => {
-          if (verplaatsCmdVolgorde(ctx(), sectie, van, naar, pendingCmdVisibility)) {
-            renderCmdVisibilitySection()
-          }
-        })
+        maakSleepbaar(item, index, verplaatsHier)
         item.querySelectorAll('.sort-pijl:not(.uit)').forEach(pijl => {
           pijl.onclick = (e) => {
             e.preventDefault(); e.stopPropagation()
             const idx = parseInt(item.dataset.cmdvisIndex)
-            const doel = sortPijlDoel(idx, pijl.dataset.op, true)
-            if (verplaatsCmdVolgorde(ctx(), sectie, idx, doel, pendingCmdVisibility)) {
-              renderCmdVisibilitySection()
-            }
+            verplaatsHier(idx, sortPijlDoel(idx, pijl.dataset.op, true))
           }
         })
       })

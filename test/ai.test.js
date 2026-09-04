@@ -321,8 +321,9 @@ check('zonder systeemprompt blijft het veld weg',
     /MERK_KLEUR/.test(bron) && /editor-vscode/.test(bron) && /editor-claude/.test(bron))
   check('en die merkkleur staat in de css',
     /merk-codex/.test(css) && /merk-gemini/.test(css) && /merk-ollama/.test(css))
-  const toolsKop = bron.slice(bron.indexOf('data-sectieblok="tools"'), bron.indexOf('data-sectieblok="tools"') + 900)
-  check('--release staat bij tools', /releaseToggle/.test(toolsKop))
+  check('--release hangt aan de flutter-map en niet aan een sectie',
+    /function mapExtraHtml\(/.test(bron) && /f\.auto !== FLUTTER_MAP/.test(bron)
+    && !/data-sectieblok="tools"/.test(bron))
 }
 
 // ── Knoppen weghalen ──────────────────────────────────────────────────────────
@@ -383,8 +384,8 @@ check('zonder systeemprompt blijft het veld weg',
   const css = fs.readFileSync(path.join(REAL, 'style.css'), 'utf8')
   const regel = css.slice(css.indexOf('.knop-wis {'), css.indexOf('}', css.indexOf('.knop-wis {')))
   check('en is niet doorzichtig gemaakt', !/opacity:\s*0/.test(regel))
-  check('de wisknop staat in alle drie de sectiekoppen',
-    (bron.match(/(wisKnopHtml|kopActiesHtml)\('(run|tools|snel)'\)/g) || []).length === 3)
+  check('de wisknop staat in beide sectiekoppen',
+    (bron.match(/(wisKnopHtml|kopActiesHtml)\('(run|snel)'\)/g) || []).length === 2)
 
   // Weghalen hoort bij het herschikken, niet bij dagelijks gebruik: anders
   // staat er permanent een knop waarmee je per ongeluk iets weggooit.
