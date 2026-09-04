@@ -4488,7 +4488,33 @@ function startVraagAutomaat() {
     $('#btn-settings').click(); await tick(); await tick()
     check('de instellingen hebben een schakelaar per sectie',
       !!$('#set-sectie-cmd') && !!$('#set-sectie-dezepc'))
+
+    // Het vinkje zelf aanklikken, niet de functie erachter aanroepen. Dat is
+    // de weg die een mens neemt, en die was niet afgedekt.
+    const zetVink = (id, aan) => {
+      const el = $(id)
+      el.checked = aan
+      el.dispatchEvent(new window.Event('change', { bubbles: true }))
+    }
+    zetVink('#set-sectie-dezepc', false); await tick(); await tick()
+    check('het vinkje in de instellingen zet deze pc echt uit',
+      sectie('dezepc').hidden === true && (settings.zijbalkSecties || {}).dezepc === false)
+    zetVink('#set-sectie-dezepc', true); await tick(); await tick()
+    check('en weer aan', sectie('dezepc').hidden === false)
     $('#btn-settings').click(); await tick(); await tick()
+
+    // En het stuk dat hier écht misging: `hidden` zetten in JS doet niets als
+    // de CSS zelf een display meegeeft. `.nav-item` en `.sidebar-sectie` zijn
+    // allebei display:flex, dus bleven verborgen knoppen en secties gewoon
+    // staan — en omdat de zijbalk de zichtbare knoppen daarna opnieuw op
+    // volgorde zet, léék het alsof uitvinken ze alleen verschoof.
+    const cssGlobaal = fs.readFileSync(path.join(APP, 'style.css'), 'utf8')
+    check('hidden wint van elke eigen display-regel',
+      /\[hidden\]\s*\{\s*display:\s*none\s*!important/.test(cssGlobaal))
+    // Zonder commentaar, anders vindt de regex de uitleg hierboven.
+    const cssKaal = cssGlobaal.replace(/\/\*[\s\S]*?\*\//g, '')
+    check('en geen enkele regel zet een verborgen element weer zichtbaar',
+      !/\[hidden\][^{]*\{[^}]*display:\s*(?!none)[a-z-]+/i.test(cssKaal))
   }
 
   console.log(ok ? '\n✓ ALLE UI-TESTS GESLAAGD' : '\n✗ ER ZIJN TESTS GEFAALD')

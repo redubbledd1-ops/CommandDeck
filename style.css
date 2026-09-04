@@ -25,6 +25,18 @@
   --mono:     'Cascadia Code', 'Consolas', monospace;
 }
 
+/* Het hidden-attribuut moet altijd winnen.
+
+   De browser geeft [hidden] alleen `display: none` mee vanuit zijn eigen
+   stylesheet, en die verliest van élke eigen regel die zelf een display zet.
+   `.nav-item { display: flex }` is genoeg om een verborgen knop gewoon te laten
+   staan — en omdat de zijbalk de zichtbare knoppen daarna opnieuw op volgorde
+   zet, lijkt het net alsof uitvinken de knoppen alleen verschuift. Datzelfde
+   gold voor .sidebar-sectie, waardoor "opdrachten" en "deze pc" niet uit
+   konden. Eén regel bovenaan in plaats van er per selector eentje bij te
+   moeten onthouden. */
+[hidden] { display: none !important; }
+
 /* ── Scrollbalken ──
    Overal dezelfde: de breedte van de standaardbalk (fijner om te pakken) maar
    in de kleuren van de app. Het tekstvak in de bat-sectie had geen eigen regel
