@@ -1085,6 +1085,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   document.addEventListener('pointermove', noteerMuis, { passive: true })
   document.addEventListener('pointerdown', noteerMuis, { passive: true })
   wireWerkSplit()
+  volgKrappeVlakken()
   wisGemengdeProjectSplits()
   restoreLastView()
   herstelWerkSplitNaStart()
@@ -1638,7 +1639,7 @@ function sluitContextMenu() {
   if (menu) { menu.hidden = true; menu.innerHTML = '' }
   // De knop die dit menu opende licht op zolang het openstaat. Gaat het dicht,
   // dan hoort die gloed ook weg te zijn: anders lijkt er nog iets open.
-  document.querySelectorAll('.knop-map.aan').forEach(b => b.classList.remove('aan'))
+  document.querySelectorAll('.knop-map.aan, .loc-knop.aan').forEach(b => b.classList.remove('aan'))
 }
 
 function gekozenItems() {
@@ -2368,31 +2369,83 @@ function restoreLastView() {
 // zijbalk is; de rechterkant vult de rest. Dubbelklik brengt 210px terug.
 const ZIJBALK_BREEDTE_STANDAARD = 210
 const ZIJBALK_BREEDTE_MIN = 140
+// Ingeklapt: alleen nog de eerste letter van elke sectie en het icoon van een
+// project. Onder de drempel is er geen ruimte meer voor namen, en bij een smal
+// venster gaat hij sowieso dicht -- dan is de rest van het scherm harder nodig.
+const ZIJBALK_SMAL = 52
+const ZIJBALK_SMAL_DREMPEL = 120
+// Wat het werkvlak rechts minstens nodig heeft. Blijft daar minder van over,
+// dan wijkt de zijbalk -- niet omdat het venster een bepaalde maat heeft, maar
+// omdat het werk anders in de knel komt. Dat is ook het enige wat je merkt.
+const WERK_BREEDTE_MIN = 420
 
 function zijbalkBreedteMax() {
   const venster = Number(window.innerWidth)
   const breed = Number.isFinite(venster) && venster > 400 ? venster : 900
-  return Math.max(ZIJBALK_BREEDTE_MIN, Math.round(breed - 320))
+  return Math.max(ZIJBALK_BREEDTE_MIN, Math.round(breed - WERK_BREEDTE_MIN))
+}
+
+function gewensteZijbalkBreedte() {
+  const n = Number(settings.zijbalkBreedte)
+  return Number.isFinite(n) ? n : ZIJBALK_BREEDTE_STANDAARD
+}
+
+// Ingeklapt omdat je hem zelf smal hebt getrokken, of omdat er anders te weinig
+// werkvlak overblijft. Dat tweede zonder iets te bewaren: maak je het venster
+// weer breed, dan staat de zijbalk terug zoals jij hem had.
+//
+// Het gaat om wat er ná de zijbalk overblijft, niet om de maat van het venster
+// zelf. Een venster van 800 met een zijbalk van 210 houdt bijna 600 pixels over
+// -- daar is niets mis mee, en dan hoort hij gewoon te blijven staan.
+function zijbalkSmal() {
+  const gewenst = gewensteZijbalkBreedte()
+  if (gewenst < ZIJBALK_SMAL_DREMPEL) return true
+  const venster = Number(window.innerWidth)
+  if (!Number.isFinite(venster) || venster <= 0) return false
+  // De breedte die jij wilde, niet de afgeknepen versie ervan: knijpen we hem
+  // eerst af tot wat er nog net past, dan blijft er per definitie genoeg over
+  // en klapt hij nooit in.
+  return venster - gewenst < WERK_BREEDTE_MIN
 }
 
 function zijbalkBreedte() {
-  const n = Number(settings.zijbalkBreedte)
-  const gewenst = Number.isFinite(n) ? n : ZIJBALK_BREEDTE_STANDAARD
-  return Math.max(ZIJBALK_BREEDTE_MIN, Math.min(zijbalkBreedteMax(), Math.round(gewenst)))
+  if (zijbalkSmal()) return ZIJBALK_SMAL
+  return Math.max(ZIJBALK_BREEDTE_MIN, Math.min(zijbalkBreedteMax(), Math.round(gewensteZijbalkBreedte())))
 }
 
 function pasZijbalkBreedteToe() {
   const layout = document.querySelector('.layout')
   if (layout) layout.style.setProperty('--sidebar-w', zijbalkBreedte() + 'px')
+  const zijbalk = document.querySelector('.sidebar')
+  if (zijbalk) zijbalk.classList.toggle('smal', zijbalkSmal())
+  zetKorteLabels()
 }
 
 function zetZijbalkBreedte(px, { bewaren = true } = {}) {
-  const w = Math.max(ZIJBALK_BREEDTE_MIN, Math.min(zijbalkBreedteMax(), Math.round(px)))
+  // Onder de drempel klapt hij dicht, en dan is de bewaarde breedte ook echt de
+  // breedte die je ziet. Bewaarden we hier de gesleepte waarde (bijvoorbeeld
+  // 118 terwijl er 52 staat), dan begint de volgende sleep op een andere plek
+  // dan waar je hem vastpakt -- en verschuift het punt waarop hij omklapt elke
+  // keer een stukje.
+  const gevraagd = Math.round(px)
+  const w = gevraagd < ZIJBALK_SMAL_DREMPEL
+    ? ZIJBALK_SMAL
+    : Math.max(ZIJBALK_BREEDTE_MIN, Math.min(zijbalkBreedteMax(), gevraagd))
   settings.zijbalkBreedte = w
   pasZijbalkBreedteToe()
   updateTermPlaceholder()
   if (termTab === 'output' || termSplitAan()) pasPtyMaatAan(ptySessies.get(activeTermId))
   if (bewaren) window.api.saveSettings(settings)
+}
+
+// Met de pijltjes tien pixels tegelijk. Ingeklapt zou dat betekenen dat je
+// zeven keer moet drukken voordat er iets gebeurt; daar is één druk genoeg.
+function stapZijbalkBreedte(delta) {
+  if (zijbalkSmal()) {
+    if (delta > 0) zetZijbalkBreedte(ZIJBALK_BREEDTE_MIN)
+    return
+  }
+  zetZijbalkBreedte(zijbalkBreedte() + delta)
 }
 
 function startZijbalkSleep(e) {
@@ -2431,8 +2484,8 @@ function bedraadZijbalkBreedte() {
     showToast(I18N.t('sidebar.defaultWidthRestoredToast'))
   })
   greep.addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowLeft')  { e.preventDefault(); zetZijbalkBreedte(zijbalkBreedte() - 10) }
-    if (e.key === 'ArrowRight') { e.preventDefault(); zetZijbalkBreedte(zijbalkBreedte() + 10) }
+    if (e.key === 'ArrowLeft')  { e.preventDefault(); stapZijbalkBreedte(-10) }
+    if (e.key === 'ArrowRight') { e.preventDefault(); stapZijbalkBreedte(10) }
     if (e.key === 'Home')       { e.preventDefault(); zetZijbalkBreedte(ZIJBALK_BREEDTE_STANDAARD) }
   })
 
@@ -2666,6 +2719,13 @@ function bedraadSecties() {
         ontwapen()
         return
       }
+      // Deze pc is een boom met mappen erin; op 52 pixels valt daar niets
+      // zinnigs mee te doen. Uitklappen doet dan niets zichtbaars, dus zeg
+      // liever wat eraan schort.
+      if (sleutel === 'dezepc' && zijbalkSmal()) {
+        showToast(I18N.t('sidebar.dezepcNeedsRoomToast'))
+        return
+      }
       zetSectieOpen(sleutel, !sectieOpen(sleutel))
     })
 
@@ -2745,6 +2805,21 @@ function updateSidebarActief() {
   if (dictCount) dictCount.textContent = count ? String(count) : ''
 }
 
+// De letter die overblijft als de zijbalk dichtklapt. Uit de tekst zelf, dus
+// in het Engels staat er een c van commands waar hier een o van opdrachten
+// staat -- een vaste letter in de code zou daar niet meer kloppen.
+function zetKorteLabels() {
+  const smal = zijbalkSmal()
+  document.querySelectorAll('.sidebar-header, .nav-item').forEach(el => {
+    const tekst = (el.querySelector('span[data-i18n]')?.textContent || '').trim()
+    if (!tekst) return
+    el.dataset.kort = tekst.charAt(0)
+    // Ingeklapt staat er alleen een letter; dan hoort de naam er als tooltip
+    // bij. Uitgeklapt staat hij er gewoon en is een tooltip dubbelop.
+    if (smal) el.title = tekst; else el.removeAttribute('title')
+  })
+}
+
 function renderSidebar() {
   sidebarGetekend = true
   const list = document.getElementById('proj-list')
@@ -2759,6 +2834,9 @@ function renderSidebar() {
     div.className = 'proj-item'
       + (view === 'project' && p.id === activeId ? ' active' : '')
       + (inAnderVlak ? ' in-split' : '')
+    // Ingeklapt blijft alleen het icoon over; dan is dit het enige wat nog
+    // vertelt welk project het is.
+    div.title = p.name + (activeLoc ? ' — ' + activeLoc.label : '')
     div.innerHTML = `
       <div class="proj-icon">${p.icon}</div>
       <div class="proj-info">
@@ -2784,6 +2862,7 @@ function renderSidebar() {
   })
 
   document.getElementById('btn-add-proj').onclick = openNewModal
+  pasZijbalkBreedteToe()
   bedraadSecties()
   renderSecties()
   bedraadBoom()
@@ -3510,25 +3589,22 @@ function renderMain() {
   const runInhoud   = !!zichtbareCmdVolgorde(p, 'run').length
   const runAan      = sectieAan(p, 'run')
 
-  const locOptions = p.locations.map((l, i) =>
-    `<option value="${i}" ${i === p.activeLocation ? 'selected' : ''}>${esc(l.label)} — ${esc(l.path)}</option>`
-  ).join('')
 
   const chromeHtml = `
-    <div class="proj-header">
-      <div class="proj-header-left">
+    <div class="proj-header" data-krap>
+      <div class="proj-header-left" data-krap>
         <span class="proj-header-icon">${p.icon}</span>
         <span class="proj-header-name">${esc(p.name)}</span>
         ${gitIndicatorHtml(p)}
       </div>
       <div class="loc-switcher">
         <label>${esc(I18N.t('project.locationLabel'))}</label>
-        <select class="loc-select" id="loc-select">${locOptions}</select>
-        <button class="btn-open-folder" id="btn-open-folder">
-          <i class="ti ti-folder-open" style="font-size:14px"></i> ${esc(I18N.t('project.openFolderButton'))}
+        ${locKnopHtml(p)}
+        <button class="btn-open-folder" id="btn-open-folder" title="${esc(I18N.t('project.openFolderButton'))}">
+          <i class="ti ti-folder-open" style="font-size:14px"></i>${knopTekst(I18N.t('project.openFolderButton'))}
         </button>
-        <button class="btn-open-folder" id="btn-open-cmd">
-          <i class="ti ti-terminal-2" style="font-size:14px"></i> cmd
+        <button class="btn-open-folder" id="btn-open-cmd" title="cmd">
+          <i class="ti ti-terminal-2" style="font-size:14px"></i>${knopTekst('cmd')}
         </button>
         <button class="btn-open-folder" id="btn-copy-loc" title="${esc(I18N.t('ctx.copyPath'))}">
           <i class="ti ti-copy" style="font-size:14px"></i>
@@ -3580,10 +3656,7 @@ function renderMain() {
   getekendProjectId = p.id
   projectWeergaveAchterhaald = false
 
-  document.getElementById('loc-select').onchange = (e) => {
-    p.activeLocation = parseInt(e.target.value)
-    saveProjects(); renderSidebar(); renderMain()
-  }
+  bedraadLocKiezer(p)
   document.getElementById('btn-open-folder').onclick = () => {
     if (activeLoc) window.api.openFolder(activeLoc.path)
   }
@@ -3677,10 +3750,12 @@ function renderMain() {
     updateTermPlaceholder(loc?.path || '')
     pasTermSchermAan()
     vulIdleVerkenner()
+    keurKrappeBalken()
     keurStatusNa()
     return
   }
   wireTerminal(p, { volgBoom: !zelfdeProject })
+  keurKrappeBalken()
   keurStatusNa()
 }
 
@@ -3701,10 +3776,10 @@ function verkennerMarkup(suffix = '') {
           <button class="br-btn" id="${id('br-refresh')}" title="${esc(I18N.t('ctx.refresh'))}"><i class="ti ti-refresh"></i></button>
           <button class="br-btn" id="${id('br-external')}" title="${esc(I18N.t('browser.openInExplorerTitle'))}"><i class="ti ti-external-link"></i></button>
         </div>
-        <div class="br-bar">
+        <div class="br-bar" data-krap>
           <input class="field br-filter" id="${id('br-filter')}" placeholder="${esc(I18N.t('browser.filterPlaceholder'))}" spellcheck="false" />
           <button class="br-btn" id="${id('br-diep')}" title="${esc(I18N.t('browser.deepSearchTitle'))}"><i class="ti ti-zoom-scan"></i></button>
-          <button class="br-btn werkhier" id="${id('br-usehere')}" title="${esc(I18N.t('browser.useHereTitle'))}"><i class="ti ti-arrow-big-right-filled"></i> ${esc(I18N.t('browser.useHereButton'))}</button>
+          <button class="br-btn werkhier" id="${id('br-usehere')}" title="${esc(I18N.t('browser.useHereTitle'))}"><i class="ti ti-arrow-big-right-filled"></i>${knopTekst(I18N.t('browser.useHereButton'))}</button>
         </div>
         <div class="br-list" id="${id('br-list')}"><div class="br-kader" id="${id('br-kader')}" hidden></div></div>
         <div class="br-status" id="${id('br-status')}"></div>
@@ -3714,6 +3789,69 @@ function verkennerMarkup(suffix = '') {
           <button class="br-btn" id="${id('br-annuleer')}" title="${esc(I18N.t('browser.cancelTitle'))}"><i class="ti ti-x"></i></button>
         </div>
       </div>`
+}
+
+// ── De locatiekiezer ──────────────────────────────────────────────────────────
+// Was een keuzelijst met "label — heel lang pad" erin; die werd bij twee
+// locaties al breder dan de halve kopregel. Nu staat er alleen de naam van de
+// locatie met een pijltje erachter, en het pad zit in het menu en in de titel.
+function locKnopHtml(p) {
+  const loc = p.locations[p.activeLocation] || p.locations[0] || { label: '', path: '' }
+  return `<button class="loc-select loc-knop" id="loc-kiezer" title="${esc(loc.label + ' — ' + loc.path)}">
+      <span class="loc-naam">${esc(loc.label || I18N.t('project.locationLabel'))}</span>
+      <i class="ti ti-chevron-down"></i>
+    </button>`
+}
+
+function bedraadLocKiezer(p) {
+  const knop = document.getElementById('loc-kiezer')
+  if (!knop) return
+  knop.onclick = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const doos = knop.getBoundingClientRect()
+    knop.classList.add('aan')
+    toonContextMenu(doos.left, doos.bottom + 4, p.locations.map((l, i) => ({
+      label: `${l.label} — ${shortenPath(l.path, 44)}`,
+      icoon: i === p.activeLocation ? 'ti-check' : 'ti-folder',
+      doe: () => {
+        if (i === p.activeLocation) return
+        p.activeLocation = i
+        saveProjects(); renderSidebar(); renderMain()
+      },
+    })))
+  }
+}
+
+// ── Krappe balken ─────────────────────────────────────────────────────────────
+// Past een balk niet meer, dan gaan de teksten eruit en blijven de iconen. Dat
+// wordt gemeten en niet geraden: een vaste breedte-grens klopt niet bij elke
+// taal, en al helemaal niet in een gesplitst vlak -- daar is de helft van het
+// scherm de ruimte die telt, en het venster zegt daar niets over.
+//
+// De tekst van een knop staat daarom in een eigen span, en de titel herhaalt
+// hem: blijft alleen het icoon over, dan kun je er nog steeds achter komen wat
+// het is.
+function knopTekst(tekst) {
+  return `<span class="knop-tekst">${esc(tekst)}</span>`
+}
+
+function keurKrappeBalken() {
+  document.querySelectorAll('[data-krap]').forEach(el => {
+    // Eerst ruim aannemen en dan meten: anders meet je de ingeklapte stand en
+    // klapt hij nooit meer uit.
+    el.classList.remove('krap')
+    if (el.scrollWidth > el.clientWidth + 1) el.classList.add('krap')
+  })
+}
+
+// De panelen zelf blijven bestaan; alleen hun inhoud wordt hertekend. Daarom
+// kijken we naar die panelen en niet naar de balken erin: dan is één keer
+// aanmelden genoeg en houden we geen losgeraakte elementen vast.
+function volgKrappeVlakken() {
+  if (typeof ResizeObserver !== 'function') return
+  const waarnemer = new ResizeObserver(() => keurKrappeBalken())
+  document.querySelectorAll('.werk .main').forEach(el => waarnemer.observe(el))
 }
 
 // ── Herbruikbare terminal ─────────────────────────────────────────────────────
@@ -3729,21 +3867,21 @@ function terminalMarkup(opts = {}) {
   ` : ''
   return `
     <div class="terminal-wrap${splitbaar ? ' splitbaar' : ''}">
-      <div class="terminal-bar">
+      <div class="terminal-bar" data-krap>
         <div class="term-tabs">
-          <button class="term-tab active" data-tab="output"><i class="ti ti-terminal-2"></i> ${esc(I18N.t('term.tabOutput'))}<span class="pty-punt" id="pty-punt" hidden></span></button>
-          <button class="term-tab" data-tab="browser"><i class="ti ti-folders"></i> ${esc(I18N.t('term.tabBrowser'))}</button>
+          <button class="term-tab active" data-tab="output" title="${esc(I18N.t('term.tabOutput'))}"><i class="ti ti-terminal-2"></i>${knopTekst(I18N.t('term.tabOutput'))}<span class="pty-punt" id="pty-punt" hidden></span></button>
+          <button class="term-tab" data-tab="browser" title="${esc(I18N.t('term.tabBrowser'))}"><i class="ti ti-folders"></i>${knopTekst(I18N.t('term.tabBrowser'))}</button>
         </div>
         <div class="terminal-bar-btns">
-          <button class="term-btn alleen-verkenner" id="br-weergave" title="${esc(I18N.t('term.viewTitle'))}" hidden><i class="ti ti-layout-grid" style="font-size:13px"></i> ${esc(I18N.t('term.viewButton'))}</button>
-          <button class="term-btn alleen-verkenner" id="br-sorteer" title="${esc(I18N.t('term.sortTitle'))}" hidden><i class="ti ti-arrows-sort" style="font-size:13px"></i> ${esc(I18N.t('term.sortButton'))}</button>
-          <button class="term-btn" id="btn-copy-last"><i class="ti ti-copy" style="font-size:13px"></i> ${esc(I18N.t('term.copyLastButton'))}</button>
-          <button class="term-btn" id="btn-copy-all"><i class="ti ti-clipboard" style="font-size:13px"></i> ${esc(I18N.t('term.copyAllButton'))}</button>
-          <button class="term-btn bat" id="btn-bat" title="${esc(I18N.t('term.batButtonTitle'))}"><i class="ti ti-file-code" style="font-size:13px"></i> bat</button>
-          <button class="term-btn stop" id="btn-kill"><i class="ti ti-player-stop" style="font-size:13px"></i> ${esc(I18N.t('term.stopButton'))}</button>
-          <button class="term-btn" id="btn-pty-sluit" hidden><i class="ti ti-x" style="font-size:13px"></i> ${esc(I18N.t('term.closeSessionButton'))}</button>
-          <button class="term-btn" id="btn-clear"><i class="ti ti-trash" style="font-size:13px"></i> ${esc(I18N.t('common.clear'))}</button>
-          <button class="term-btn update" id="btn-relaunch" title="${esc(I18N.t('term.relaunchTitle'))}"><i class="ti ti-refresh" style="font-size:13px"></i> ${esc(I18N.t('term.relaunchButton'))}</button>
+          <button class="term-btn alleen-verkenner" id="br-weergave" title="${esc(I18N.t('term.viewTitle'))}" hidden><i class="ti ti-layout-grid" style="font-size:13px"></i>${knopTekst(I18N.t('term.viewButton'))}</button>
+          <button class="term-btn alleen-verkenner" id="br-sorteer" title="${esc(I18N.t('term.sortTitle'))}" hidden><i class="ti ti-arrows-sort" style="font-size:13px"></i>${knopTekst(I18N.t('term.sortButton'))}</button>
+          <button class="term-btn" id="btn-copy-last" title="${esc(I18N.t('term.copyLastButton'))}"><i class="ti ti-copy" style="font-size:13px"></i>${knopTekst(I18N.t('term.copyLastButton'))}</button>
+          <button class="term-btn" id="btn-copy-all" title="${esc(I18N.t('term.copyAllButton'))}"><i class="ti ti-clipboard" style="font-size:13px"></i>${knopTekst(I18N.t('term.copyAllButton'))}</button>
+          <button class="term-btn bat" id="btn-bat" title="${esc(I18N.t('term.batButtonTitle'))}"><i class="ti ti-file-code" style="font-size:13px"></i>${knopTekst('bat')}</button>
+          <button class="term-btn stop" id="btn-kill" title="${esc(I18N.t('term.stopButton'))}"><i class="ti ti-player-stop" style="font-size:13px"></i>${knopTekst(I18N.t('term.stopButton'))}</button>
+          <button class="term-btn" id="btn-pty-sluit" title="${esc(I18N.t('term.closeSessionButton'))}" hidden><i class="ti ti-x" style="font-size:13px"></i>${knopTekst(I18N.t('term.closeSessionButton'))}</button>
+          <button class="term-btn" id="btn-clear" title="${esc(I18N.t('common.clear'))}"><i class="ti ti-trash" style="font-size:13px"></i>${knopTekst(I18N.t('common.clear'))}</button>
+          <button class="term-btn update" id="btn-relaunch" title="${esc(I18N.t('term.relaunchTitle'))}"><i class="ti ti-refresh" style="font-size:13px"></i>${knopTekst(I18N.t('term.relaunchButton'))}</button>
         </div>
       </div>
       <div class="term-stage">
@@ -4619,6 +4757,9 @@ function pasWerkSchermAan() {
 
   pasWerkVlakNamenAan()
   pasWerkSplitKnoppenAan()
+  // Een vlak dat halveert is de belangrijkste reden dat een balk ineens niet
+  // meer past, dus meteen opnieuw meten.
+  keurKrappeBalken()
 
   if (splitGemengd() || levend('.terminal-wrap.splitbaar')) pasTermSchermAan()
 }
@@ -6140,8 +6281,8 @@ function renderCmdPanel() {
     </div>`
 
   panel.innerHTML = `
-    <div class="proj-header">
-      <div class="proj-header-left">
+    <div class="proj-header" data-krap>
+      <div class="proj-header-left" data-krap>
         <span class="proj-header-icon"><i class="ti ti-terminal-2" style="color:var(--accent)"></i></span>
         <span class="proj-header-name">cmd</span>
       </div>
@@ -6149,13 +6290,13 @@ function renderCmdPanel() {
         <label>${esc(I18N.t('cmd.folderLabel'))}</label>
         <select class="loc-select" id="cmd-cwd-select">${cwdOptions}</select>
         <button class="btn-open-folder" id="cmd-pick-folder" title="${esc(I18N.t('cmd.pickFolderTitle'))}">
-          <i class="ti ti-folder-search" style="font-size:14px"></i> ${esc(I18N.t('cmd.pickButton'))}
+          <i class="ti ti-folder-search" style="font-size:14px"></i>${knopTekst(I18N.t('cmd.pickButton'))}
         </button>
-        <button class="btn-open-folder" id="cmd-open-folder">
-          <i class="ti ti-folder-open" style="font-size:14px"></i> ${esc(I18N.t('project.openFolderButton'))}
+        <button class="btn-open-folder" id="cmd-open-folder" title="${esc(I18N.t('project.openFolderButton'))}">
+          <i class="ti ti-folder-open" style="font-size:14px"></i>${knopTekst(I18N.t('project.openFolderButton'))}
         </button>
-        <button class="btn-open-folder" id="cmd-open-cmd">
-          <i class="ti ti-terminal-2" style="font-size:14px"></i> cmd
+        <button class="btn-open-folder" id="cmd-open-cmd" title="cmd">
+          <i class="ti ti-terminal-2" style="font-size:14px"></i>${knopTekst('cmd')}
         </button>
         <button class="btn-open-folder" id="cmd-copy-loc" title="${esc(I18N.t('ctx.copyPath'))}">
           <i class="ti ti-copy" style="font-size:14px"></i>
@@ -6197,6 +6338,7 @@ function renderCmdPanel() {
   bedraadKnopWissen(cmdContext(), 'snel', document.getElementById('cmd-snel-grid'))
   bedraadAiKnoppen(cmdContext())
   wireTerminal(cmdContext())
+  keurKrappeBalken()
   keurStatusNa()
 }
 
@@ -6356,8 +6498,8 @@ function renderPsPanel() {
     </div>`
 
   panel.innerHTML = `
-    <div class="proj-header">
-      <div class="proj-header-left">
+    <div class="proj-header" data-krap>
+      <div class="proj-header-left" data-krap>
         <span class="proj-header-icon"><i class="ti ti-brand-powershell" style="color:#5391FE"></i></span>
         <span class="proj-header-name">powershell</span>
       </div>
@@ -6365,13 +6507,13 @@ function renderPsPanel() {
         <label>${esc(I18N.t('cmd.folderLabel'))}</label>
         <select class="loc-select" id="ps-cwd-select">${cwdOptions}</select>
         <button class="btn-open-folder" id="ps-pick-folder" title="${esc(I18N.t('cmd.pickFolderTitle'))}">
-          <i class="ti ti-folder-search" style="font-size:14px"></i> ${esc(I18N.t('cmd.pickButton'))}
+          <i class="ti ti-folder-search" style="font-size:14px"></i>${knopTekst(I18N.t('cmd.pickButton'))}
         </button>
-        <button class="btn-open-folder" id="ps-open-folder">
-          <i class="ti ti-folder-open" style="font-size:14px"></i> ${esc(I18N.t('project.openFolderButton'))}
+        <button class="btn-open-folder" id="ps-open-folder" title="${esc(I18N.t('project.openFolderButton'))}">
+          <i class="ti ti-folder-open" style="font-size:14px"></i>${knopTekst(I18N.t('project.openFolderButton'))}
         </button>
-        <button class="btn-open-folder" id="ps-open-ps">
-          <i class="ti ti-brand-powershell" style="font-size:14px"></i> powershell
+        <button class="btn-open-folder" id="ps-open-ps" title="powershell">
+          <i class="ti ti-brand-powershell" style="font-size:14px"></i>${knopTekst('powershell')}
         </button>
       </div>
     </div>
@@ -6404,6 +6546,7 @@ function renderPsPanel() {
   bedraadKnopWissen(psContext(), 'ps-snel', document.getElementById('ps-snel-grid'))
   bedraadAiKnoppen(psContext())
   wireTerminal(psContext())
+  keurKrappeBalken()
   keurStatusNa()
 }
 
@@ -6524,10 +6667,10 @@ function renderDictPanel() {
     <div class="settings-header">
       <i class="ti ti-book" style="font-size:18px;color:var(--accent)"></i>
       <span class="settings-header-title">${esc(I18N.t('dict.title'))}</span>
-      <button class="btn-primary dict-add-btn" id="dict-add"><i class="ti ti-plus" style="font-size:13px"></i> ${esc(I18N.t('dict.addButton'))}</button>
+      <button class="btn-primary dict-add-btn" id="dict-add" title="${esc(I18N.t('dict.addButton'))}"><i class="ti ti-plus" style="font-size:13px"></i>${knopTekst(I18N.t('dict.addButton'))}</button>
     </div>
 
-    <div class="dict-toolbar">
+    <div class="dict-toolbar" data-krap>
       <div class="dict-search-wrap">
         <i class="ti ti-search"></i>
         <input class="field dict-search" id="dict-search" placeholder="${esc(I18N.t('dict.searchPlaceholder'))}" autocomplete="off" spellcheck="false" />
@@ -6578,6 +6721,7 @@ function renderDictPanel() {
   document.getElementById('dict-add').onclick = () => openDictModal(null)
 
   renderDictList()
+  keurKrappeBalken()
   requestAnimationFrame(() => { search.focus(); search.selectionStart = search.selectionEnd = search.value.length })
 }
 
@@ -7401,15 +7545,15 @@ async function renderBatPanel() {
     <div class="settings-header">
       <i class="ti ti-file-code" style="font-size:18px;color:var(--green)"></i>
       <span class="settings-header-title">${esc(I18N.t('bat.title'))}</span>
-      <button class="btn-primary dict-add-btn" id="bat-new"><i class="ti ti-file-plus" style="font-size:13px"></i> ${esc(I18N.t('bat.newFileButton'))}</button>
+      <button class="btn-primary dict-add-btn" id="bat-new" title="${esc(I18N.t('bat.newFileButton'))}"><i class="ti ti-file-plus" style="font-size:13px"></i>${knopTekst(I18N.t('bat.newFileButton'))}</button>
     </div>
 
-    <div class="dict-toolbar">
+    <div class="dict-toolbar" data-krap>
       <label class="field-label" style="margin:0">${esc(I18N.t('bat.folderLabel'))}</label>
       <select class="loc-select" id="bat-cwd-select" style="flex:1">${cwdOptions}</select>
-      <button class="btn-open-folder" id="bat-pick-dir" title="${esc(I18N.t('bat.pickFolderTitle'))}"><i class="ti ti-folder-search" style="font-size:14px"></i> ${esc(I18N.t('cmd.pickButton'))}</button>
-      <button class="btn-open-folder" id="bat-open-dir" title="${esc(I18N.t('bat.openFolderTitle'))}"><i class="ti ti-folder-open" style="font-size:14px"></i> ${esc(I18N.t('project.openFolderButton'))}</button>
-      <button class="btn-open-folder" id="bat-browse" title="${esc(I18N.t('bat.browseTitle'))}"><i class="ti ti-file-search" style="font-size:14px"></i> ${esc(I18N.t('bat.browseButton'))}</button>
+      <button class="btn-open-folder" id="bat-pick-dir" title="${esc(I18N.t('bat.pickFolderTitle'))}"><i class="ti ti-folder-search" style="font-size:14px"></i>${knopTekst(I18N.t('cmd.pickButton'))}</button>
+      <button class="btn-open-folder" id="bat-open-dir" title="${esc(I18N.t('bat.openFolderTitle'))}"><i class="ti ti-folder-open" style="font-size:14px"></i>${knopTekst(I18N.t('project.openFolderButton'))}</button>
+      <button class="btn-open-folder" id="bat-browse" title="${esc(I18N.t('bat.browseTitle'))}"><i class="ti ti-file-search" style="font-size:14px"></i>${knopTekst(I18N.t('bat.browseButton'))}</button>
     </div>
 
     <div class="bat-layout">
@@ -7419,10 +7563,10 @@ async function renderBatPanel() {
       </aside>
 
       <section class="bat-edit">
-        <div class="bat-edit-head">
+        <div class="bat-edit-head" data-krap>
           <span class="bat-edit-title" id="bat-edit-title"></span>
-          <button class="term-btn" id="bat-reload" title="${esc(I18N.t('bat.reloadTitle'))}"><i class="ti ti-refresh" style="font-size:12px"></i> ${esc(I18N.t('bat.reloadButton'))}</button>
-          <button class="term-btn" id="bat-regen" title="${esc(I18N.t('bat.regenTitle'))}"><i class="ti ti-wand" style="font-size:12px"></i> ${esc(I18N.t('bat.regenButton'))}</button>
+          <button class="term-btn" id="bat-reload" title="${esc(I18N.t('bat.reloadTitle'))}"><i class="ti ti-refresh" style="font-size:12px"></i>${knopTekst(I18N.t('bat.reloadButton'))}</button>
+          <button class="term-btn" id="bat-regen" title="${esc(I18N.t('bat.regenTitle'))}"><i class="ti ti-wand" style="font-size:12px"></i>${knopTekst(I18N.t('bat.regenButton'))}</button>
         </div>
 
         <div class="bat-opts">
@@ -7450,15 +7594,15 @@ async function renderBatPanel() {
 
         <div class="bat-warn" id="bat-warn" hidden></div>
 
-        <div class="bat-edit-foot">
+        <div class="bat-edit-foot" data-krap>
           <input class="field mono bat-name" id="bat-name" placeholder="${esc(I18N.t('bat.namePlaceholder'))}" />
           <button class="btn-run" id="bat-test" title="${esc(I18N.t('bat.testTitle'))}">
-            <i class="ti ti-player-play" style="font-size:13px"></i> ${esc(I18N.t('bat.testButton'))}
+            <i class="ti ti-player-play" style="font-size:13px"></i>${knopTekst(I18N.t('bat.testButton'))}
           </button>
           <button class="btn-exe" id="bat-exe" title="${esc(I18N.t('bat.exeTitle'))}">
-            <i class="ti ti-app-window" style="font-size:13px"></i> ${esc(I18N.t('bat.exeButton'))}
+            <i class="ti ti-app-window" style="font-size:13px"></i>${knopTekst(I18N.t('bat.exeButton'))}
           </button>
-          <button class="btn-primary" id="bat-save"><i class="ti ti-device-floppy" style="font-size:13px"></i> ${esc(I18N.t('common.save'))}</button>
+          <button class="btn-primary" id="bat-save" title="${esc(I18N.t('common.save'))}"><i class="ti ti-device-floppy" style="font-size:13px"></i>${knopTekst(I18N.t('common.save'))}</button>
         </div>
       </section>
     </div>
@@ -7471,6 +7615,7 @@ async function renderBatPanel() {
   updateBatEditTitle()
   syncBatPauseState()
   wireBatPanel()
+  keurKrappeBalken()
   await refreshBatFiles()
 
   const ta = document.getElementById('bat-content')

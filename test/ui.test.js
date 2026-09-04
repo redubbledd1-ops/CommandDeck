@@ -395,7 +395,8 @@ window.eval(fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8')
   + '\n  cmdIdsInBeeld, verplaatsCmdVolgorde, cmdGridHtml, knoppenInMap,'
   + '\n  autoMappen, hefMappenOp, legInMap, verplaatsKnopId,'
   + '\n  rijVolgorde, ordenProject, zetKnopInMap, folderVanKnop,'
-  + '\n  snelRij, migreerSnelRijen, zetRijSorteerModus, rijVoor,'
+  + '\n  snelRij, migreerSnelRijen, zetRijSorteerModus, rijVoor, keurKrappeBalken,'
+  + '\n  sectieIsOpen: sectieOpen, zijbalkSmal,'
   + '\n  verwijderMap, folderOp,'
   + '\n  gekoppeldeRepoAdressen, zetBewerkt: (id) => { editingId = id } };')
 startVraagAutomaat()
@@ -478,7 +479,63 @@ function startVraagAutomaat() {
   document.dispatchEvent(new window.MouseEvent('mousemove', { clientX: 0, bubbles: true }))
   document.dispatchEvent(new window.MouseEvent('mouseup', { bubbles: true }))
   await tick()
-  check('niet smaller dan het minimum', settings.zijbalkBreedte === 140)
+  // ── Ingeklapte zijbalk ───────────────────────────────────────
+  // Helemaal naar links betekent niet "zo smal mogelijk maar nog met namen",
+  // maar: klap hem in. Van elke sectie blijft de eerste letter over, van een
+  // project zijn icoon.
+  check('helemaal naar links klapt de zijbalk in', settings.zijbalkBreedte === 52)
+  check('en dat is te zien',
+    $('.sidebar').classList.contains('smal') &&
+    $('.layout').style.getPropertyValue('--sidebar-w') === '52px')
+  check('elke sectie houdt zijn eerste letter',
+    $('#kop-cmd').dataset.kort === 'o' && $('#kop-dezepc').dataset.kort === 'd')
+  check('en elke opdracht ook',
+    $('#btn-nav-cmd').dataset.kort === 'c' && $('#btn-nav-ps').dataset.kort === 'p' &&
+    $('#btn-nav-bat').dataset.kort === 'b' && $('#btn-nav-dict').dataset.kort === 'w')
+  check('een project draagt zijn naam in de titel, want er staat alleen een icoon',
+    ($$('.proj-item')[0].title || '').includes('dd_crypto'))
+  check('en een letter vertelt in zijn tooltip waar hij voor staat',
+    $('#btn-nav-ps').title === 'powershell' && $('#kop-dezepc').title === 'deze pc')
+  // Deze pc is een mappenboom; die past hier niet, dus zeggen we dat.
+  const dezepcOpen = W.__test.sectieIsOpen('dezepc')
+  $('#kop-dezepc').click(); await tick()
+  check('klikken op deze pc zegt dat er meer ruimte nodig is',
+    ($('#toast-msg')?.textContent || '').includes('meer ruimte'))
+  check('en klapt de sectie niet om', W.__test.sectieIsOpen('dezepc') === dezepcOpen)
+
+  zijGreep.dispatchEvent(new window.MouseEvent('mousedown', { button: 0, clientX: 52, bubbles: true }))
+  document.dispatchEvent(new window.MouseEvent('mousemove', { clientX: 210, bubbles: true }))
+  document.dispatchEvent(new window.MouseEvent('mouseup', { bubbles: true }))
+  await tick()
+  check('en breed slepen brengt de namen terug',
+    settings.zijbalkBreedte === 210 && !$('.sidebar').classList.contains('smal'))
+  check('dan is de tooltip weer dubbelop en dus weg', !$('#btn-nav-ps').title)
+
+  // Het punt waarop hij omklapt hoort altijd hetzelfde te zijn. Dat gaat mis
+  // zodra de bewaarde breedte iets anders is dan wat je ziet: dan begint de
+  // volgende sleep op een andere plek dan waar je hem vastpakt.
+  const sleepNaar = (van, naar) => {
+    zijGreep.dispatchEvent(new window.MouseEvent('mousedown', { button: 0, clientX: van, bubbles: true }))
+    document.dispatchEvent(new window.MouseEvent('mousemove', { clientX: naar, bubbles: true }))
+    document.dispatchEvent(new window.MouseEvent('mouseup', { bubbles: true }))
+  }
+  sleepNaar(210, 110); await tick()
+  check('net onder de drempel klapt hij in, en niet half',
+    settings.zijbalkBreedte === 52 && $('.layout').style.getPropertyValue('--sidebar-w') === '52px')
+  sleepNaar(52, 210); await tick()
+  sleepNaar(210, 119); await tick()
+  check('en dat gebeurt de tweede keer op precies dezelfde plek',
+    settings.zijbalkBreedte === 52)
+  sleepNaar(52, 210); await tick()
+
+  // Niet de maat van het venster telt, maar wat er ná de zijbalk overblijft.
+  const zetVenster = (w) => Object.defineProperty(window, 'innerWidth', { value: w, configurable: true })
+  const echtVenster = window.innerWidth
+  zetVenster(800)
+  check('een venster van 800 houdt genoeg werkvlak over', !W.__test.zijbalkSmal())
+  zetVenster(600)
+  check('bij 600 komt het werk in de knel en wijkt de zijbalk', W.__test.zijbalkSmal())
+  zetVenster(echtVenster)
   zijGreep.dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true }))
   await tick()
 
@@ -2060,8 +2117,8 @@ function startVraagAutomaat() {
   check('met de mapnaam als label',
     projects[0].locations[projVoor].label === 'lib' && projects[0].locations[projVoor].path === 'C:\\a\\lib')
   check('en wordt meteen de actieve locatie', projects[0].activeLocation === projVoor)
-  check('de keuzelijst in de kop toont hem ook',
-    $('#loc-select').value === String(projVoor))
+  check('de kiezer in de kop toont hem ook',
+    $('#loc-kiezer .loc-naam').textContent === projects[0].locations[projVoor].label)
 
   // nog een keer dezelfde map: niet dubbel toevoegen
   $('[data-tab="browser"]').click(); await tick(); await tick()
@@ -2074,10 +2131,18 @@ function startVraagAutomaat() {
 
   // terug naar de oorspronkelijke locatie, zodat de rest van de test klopt
   $('[data-tab="output"]').click(); await tick()
-  $('#loc-select').value = '0'
-  $('#loc-select').dispatchEvent(new window.Event('change')); await tick(); await tick()
+  // De locatiekiezer is een uitklapmenu geworden: klikken opent de lijst, en
+  // daarin staat elke locatie van dit project.
+  $('#loc-kiezer').click(); await tick()
+  const locItems = $$('#ctx-menu .ctx-item')
+  check('de kiezer klapt de locaties uit', locItems.length === projects[0].locations.length)
+  check('en zet een vinkje bij de locatie waar je staat',
+    !!locItems[projects[0].activeLocation].querySelector('.ti-check'))
+  locItems[0].click(); await tick(); await tick()
   check('van locatie wisselen werkt en wordt bewaard',
     projects[0].activeLocation === 0 && $('#term-input').placeholder === 'C:\\a')
+  check('het menu gaat daarna dicht en de knop dooft',
+    $('#ctx-menu').hidden && !$('#loc-kiezer').classList.contains('aan'))
 
   // ── weergave per project onthouden ─────────────────────────────────────────
   $('[data-tab="browser"]').click(); await tick(); await tick()
@@ -4271,6 +4336,97 @@ function startVraagAutomaat() {
 
     check('en het project krijgt er niets van mee',
       (projects[0].cmdFolders || []).every(x => x.sectie === 'run' && x.auto !== 'standaard'))
+  }
+
+  // ── Balken die zichzelf inklappen ────────────────────────────
+  // Bij te weinig ruimte gaan de teksten eruit en blijven de iconen. Dat wordt
+  // gemeten, dus hier zetten we de maten zelf: jsdom rekent niets uit.
+  {
+    $$('.proj-item')[0].click(); await tick(); await tick()
+    const balk = $('.terminal-bar')
+    check('de terminalbalk meet zichzelf', !!balk && balk.hasAttribute('data-krap'))
+    check('elke knop heeft zijn tekst in een eigen span',
+      $$('.terminal-bar .term-btn').every(b => !!b.querySelector('.knop-tekst')))
+    check('en de tabs ook', $$('.terminal-bar .term-tab').every(b => !!b.querySelector('.knop-tekst')))
+    // Blijft alleen het icoon over, dan moet je er nog achter kunnen komen wat
+    // het is.
+    check('elke knop heeft een titel',
+      $$('.terminal-bar .term-btn, .terminal-bar .term-tab').every(b => !!b.title))
+
+    const zetMaat = (el, scroll, client) => {
+      Object.defineProperty(el, 'scrollWidth', { value: scroll, configurable: true })
+      Object.defineProperty(el, 'clientWidth', { value: client, configurable: true })
+    }
+    zetMaat(balk, 900, 400)
+    W.__test.keurKrappeBalken()
+    check('past de balk niet, dan klapt hij in', balk.classList.contains('krap'))
+    zetMaat(balk, 300, 400)
+    W.__test.keurKrappeBalken()
+    check('en met ruimte komen de teksten terug', !balk.classList.contains('krap'))
+
+    const kop = $('.proj-header-left')
+    check('de kopregel meet ook zichzelf', !!kop && kop.hasAttribute('data-krap'))
+    check('en de hele kopregel ook', $('.proj-header').hasAttribute('data-krap'))
+    // Openen en cmd worden iconen zodra het krap wordt; de locatiekiezer houdt
+    // zijn naam, want die zegt waar je bent.
+    check('openen en cmd hebben hun tekst in een span',
+      !!$('#btn-open-folder .knop-tekst') && !!$('#btn-open-cmd .knop-tekst'))
+    check('en een titel voor als alleen het icoon overblijft',
+      !!$('#btn-open-folder').title && !!$('#btn-open-cmd').title)
+    check('de locatiekiezer is een knop met een pijltje',
+      !!$('#loc-kiezer .ti-chevron-down') && $('#loc-kiezer').tagName === 'BUTTON')
+    zetMaat(kop, 500, 200)
+    W.__test.keurKrappeBalken()
+    check('bij te weinig ruimte gaat de git-chip eruit', kop.classList.contains('krap'))
+    zetMaat(kop, 100, 200)
+    W.__test.keurKrappeBalken()
+  }
+
+  // ── En de andere schermen doen mee ───────────────────────────
+  // Woordenboek, bat en de verkenner hebben dezelfde soort balken; die horen
+  // op dezelfde manier in te klappen in plaats van hun knoppen af te knippen.
+  {
+    $('#btn-nav-dict').click(); await tick(); await tick()
+    const balk = $('#dict-panel .dict-toolbar')
+    check('de balk van het woordenboek meet zichzelf', !!balk && balk.hasAttribute('data-krap'))
+    check('en de toevoegknop kan een icoon worden',
+      !!$('#dict-add .knop-tekst') && !!$('#dict-add').title)
+
+    $('#btn-nav-bat').click(); await tick(); await tick(); await tick()
+    check('de mapbalk van bat ook', !!$('#bat-panel .dict-toolbar[data-krap]'))
+    check('en de knoppenrij onder de editor',
+      !!$('.bat-edit-foot[data-krap]') && !!$('.bat-edit-head[data-krap]'))
+    check('opslaan, testen en exe hebben hun tekst in een span',
+      !!$('#bat-save .knop-tekst') && !!$('#bat-test .knop-tekst') && !!$('#bat-exe .knop-tekst'))
+    check('en een titel voor als alleen het icoon overblijft', !!$('#bat-save').title)
+
+    $$('.proj-item')[0].click(); await tick(); await tick()
+    $('[data-tab="browser"]').click(); await tick(); await tick()
+    check('in de verkenner klapt de balk met "werk hier" ook in',
+      !!$('#browser .br-bar[data-krap]') && !!$('#br-usehere .knop-tekst'))
+    $('[data-tab="output"]').click(); await tick()
+  }
+
+  // ── En wat de stijl ervan vindt ──────────────────────────────
+  {
+    const css = fs.readFileSync(path.join(APP, 'style.css'), 'utf8')
+    check('ingeklapt toont een sectie zijn letter uit data-kort',
+      /\.sidebar\.smal \.sidebar-header::after \{ content: attr\(data-kort\); \}/.test(css)
+      && /\.sidebar\.smal \.nav-item::after \{ content: attr\(data-kort\)/.test(css))
+    check('en van een project blijft alleen het icoon staan',
+      /\.sidebar\.smal \.proj-info,\s*\n\.sidebar\.smal \.proj-edit \{ display: none; \}/.test(css))
+    check('de boom van deze pc gaat ingeklapt uit',
+      /\.sidebar\.smal \.sidebar-sectie\[data-zijsectie="dezepc"\] \.sectie-inhoud/.test(css))
+    check('een ingeklapte balk verbergt de teksten',
+      /\[data-krap\]\.krap \.knop-tekst \{ display: none; \}/.test(css))
+    check('en de git-chip bij een ingeklapte kopregel',
+      /\.proj-header-left\.krap \.git-ind \{ display: none; \}/.test(css))
+    // Twee regels knoppen onder elkaar was precies de klacht; dit is wat dat
+    // tegenhoudt, en tegelijk wat de meting mogelijk maakt.
+    check('de knoppenbalk breekt niet af naar een tweede regel',
+      /\.terminal-bar-btns \{[^}]*flex-wrap: nowrap/.test(css) && /\[data-krap\] \{ flex-wrap: nowrap; \}/.test(css))
+    check('en de naam in de kop duwt de rest niet weg',
+      /\.proj-header-name \{[^}]*text-overflow: ellipsis/.test(css))
   }
 
   console.log(ok ? '\n✓ ALLE UI-TESTS GESLAAGD' : '\n✗ ER ZIJN TESTS GEFAALD')

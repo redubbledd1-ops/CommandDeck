@@ -316,6 +316,43 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
 }
 .add-proj-btn:hover { border-color: var(--accent); color: var(--accent); }
 
+/* ── Zijbalk ingeklapt ────────────────────────────────────────────────────
+   Onder de 120 pixels past er geen naam meer. Dan blijft van elke sectie de
+   eerste letter over en van een project alleen zijn icoon: genoeg om te zien
+   waar je klikt, en de rest van het scherm is voor je werk. De letter komt uit
+   data-kort, dat de renderer uit de zichtbare tekst haalt -- dan klopt hij ook
+   in een andere taal. */
+.sidebar.smal .sidebar-header {
+  justify-content: center; gap: 0; padding: 12px 2px 8px; margin: 0 4px;
+}
+.sidebar.smal .sidebar-header span[data-i18n],
+.sidebar.smal .sidebar-header .sectie-pijl,
+.sidebar.smal .sidebar-header .sec-sort { display: none; }
+.sidebar.smal .sidebar-header::after { content: attr(data-kort); }
+
+.sidebar.smal .nav-list { padding: 0 4px 4px; }
+.sidebar.smal .nav-item { justify-content: center; gap: 0; padding: 8px 2px; }
+.sidebar.smal .nav-item i,
+.sidebar.smal .nav-item span { display: none; }
+.sidebar.smal .nav-item::after { content: attr(data-kort); font-size: 13px; }
+
+.sidebar.smal #proj-list { padding: 0 4px; }
+.sidebar.smal .proj-item { justify-content: center; gap: 0; padding: 9px 2px; }
+.sidebar.smal .proj-info,
+.sidebar.smal .proj-edit { display: none; }
+.sidebar.smal .add-proj-btn { justify-content: center; gap: 0; margin: 8px 4px; padding: 8px 2px; }
+.sidebar.smal .add-proj-btn span { display: none; }
+
+/* Deze pc is een mappenboom; op 52 pixels valt daar niets mee te doen. De kop
+   blijft staan -- anders lijkt de sectie verdwenen -- en klikken zegt wat
+   eraan schort. */
+.sidebar.smal .sidebar-sectie[data-zijsectie="dezepc"] .sectie-inhoud,
+.sidebar.smal .dezepc-greep { display: none; }
+.sidebar.smal .sidebar-sectie[data-zijsectie="dezepc"] { flex: 0 0 auto; min-height: 0; }
+/* Volledige hoogte voor een boom die je niet ziet heeft geen zin: ingeklapt
+   komen de andere secties gewoon terug. */
+.sidebar.smal.dezepc-vol .sidebar-sectie:not([data-zijsectie="dezepc"]) { display: flex; }
+
 /* ── Werkvlak (project / cmd / woordenboek / bat) ── */
 .werk, .settings-panel {
   grid-column: 2; grid-row: 1; min-width: 0;
@@ -383,12 +420,22 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
 
 /* Project header */
 .proj-header {
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 14px 18px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0;
 }
-.proj-header-left { display: flex; align-items: center; gap: 10px; overflow: hidden; }
-.proj-header-icon { font-size: 22px; line-height: 1; }
-.proj-header-name { font-size: 16px; font-weight: 600; color: var(--text); }
+.proj-header-left {
+  display: flex; align-items: center; gap: 10px;
+  overflow: hidden; flex: 0 1 auto; min-width: 0; flex-wrap: nowrap;
+}
+.proj-header-icon { font-size: 22px; line-height: 1; flex-shrink: 0; }
+/* De naam krimpt mee tot een punt of negentig pixels. Daaronder is er echt te
+   weinig ruimte, en dan verdwijnt eerst de git-chip -- die zegt iets extra's,
+   de naam zegt waar je bent. */
+.proj-header-name {
+  font-size: 16px; font-weight: 600; color: var(--text);
+  min-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.proj-header-left.krap .git-ind { display: none; }
 
 /* ── Accounts in de instellingen ─────────────────────────────────────────── */
 .account-rij.actief .editor-row-name { color: var(--accent); font-weight: 500; }
@@ -444,6 +491,20 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
   font-family: var(--mono); max-width: 200px;
 }
 .loc-select:focus { border-color: var(--accent); }
+/* De locatiekiezer: een knop die eruitziet als de keuzelijst die het was, maar
+   met alleen de naam erin. Het pad staat in het menu en in de titel -- in de
+   kop nam het de halve regel in beslag. */
+.loc-knop {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 220px;
+  font-family: inherit; text-align: left;
+}
+.loc-knop .loc-naam { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.loc-knop i { font-size: 14px; flex-shrink: 0; color: var(--muted); }
+.loc-knop:hover, .loc-knop.aan { border-color: var(--accent); color: var(--accent); }
+.loc-knop.aan i { color: var(--accent); }
+/* Krap: het woord "locatie" ervoor zegt niets wat de knop zelf niet toont. */
+.proj-header.krap .loc-switcher label { display: none; }
+.proj-header.krap .loc-knop { max-width: 120px; }
 .btn-open-folder {
   padding: 5px 10px; background: var(--s2); border: 1px solid var(--border2);
   border-radius: var(--radius); color: var(--muted2); cursor: pointer; font-size: 12px;
@@ -761,11 +822,21 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
 .terminal-wrap.gesplitst.twee-projecten .term-pane-naam { display: block; }
 .terminal-wrap.gesplitst.twee-projecten .term-pane { padding-top: 18px; }
 .terminal-bar {
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
   padding: 6px 18px; border-bottom: 1px solid var(--border); flex-shrink: 0; background: var(--s1);
 }
+/* Een balk die zichzelf inklapt. Hij breekt nooit af naar een tweede regel:
+   dat is precies wat er te meten valt -- past het niet, dan steekt de inhoud
+   erbuiten en zet keurKrappeBalken() de klasse erop, waarna de teksten weg
+   gaan en de iconen blijven. */
+[data-krap] { flex-wrap: nowrap; }
+.terminal-bar[data-krap] { overflow: hidden; }
+.terminal-bar > * { flex-shrink: 0; }
+[data-krap].krap .knop-tekst { display: none; }
+[data-krap].krap .term-btn,
+[data-krap].krap .term-tab { padding-left: 6px; padding-right: 6px; gap: 0; }
 .terminal-bar-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
-.terminal-bar-btns { display: flex; gap: 4px; }
+.terminal-bar-btns { display: flex; gap: 4px; flex-wrap: nowrap; }
 .term-btn {
   padding: 3px 9px; background: none; border: 1px solid var(--border2);
   border-radius: 5px; color: var(--muted2); cursor: pointer; font-size: 11px;
@@ -1155,7 +1226,14 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
 .dict-toolbar {
   display: flex; align-items: center; gap: 8px;
   padding: 12px 22px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+  overflow: hidden;
 }
+/* Een veld dat tot niets mag krimpen laat de balk altijd "passen", en dan
+   klapt hij nooit in. Met een ondergrens loopt hij over zodra het krap wordt,
+   en dat is precies wat keurKrappeBalken() meet. */
+.dict-toolbar .dict-search-wrap { min-width: 150px; }
+.dict-toolbar .loc-select { min-width: 90px; }
+.dict-toolbar.krap .field-label { display: none; }
 .dict-search-wrap { position: relative; flex: 1; display: flex; align-items: center; }
 .dict-search-wrap i {
   position: absolute; left: 10px; font-size: 14px; color: var(--muted); pointer-events: none;
@@ -1398,7 +1476,7 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
 .bat-file-btn.danger:hover { background: var(--red-d); color: var(--red); }
 
 .bat-edit { display: flex; flex-direction: column; min-width: 0; padding: 12px 16px 14px; gap: 8px; overflow: hidden; }
-.bat-edit-head { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.bat-edit-head { display: flex; align-items: center; gap: 6px; flex-shrink: 0; overflow: hidden; }
 .bat-edit-title { flex: 1; font-size: 13px; color: var(--text); display: flex; align-items: center; gap: 6px; }
 .bat-edit-title i { color: var(--green); font-size: 14px; }
 
@@ -1406,8 +1484,8 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
 .bat-edit .bat-runfiles { flex-shrink: 0; max-height: 108px; overflow-y: auto; }
 .bat-edit .bat-warn { flex-shrink: 0; margin-top: 0; }
 
-.bat-edit-foot { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-.bat-name { flex: 1; min-width: 0; }
+.bat-edit-foot { display: flex; align-items: center; gap: 8px; flex-shrink: 0; overflow: hidden; }
+.bat-name { flex: 1; min-width: 120px; }
 .bat-edit-foot .btn-run { margin-right: 0; }
 
 /* ── Hint bij 'zonder venster' ── */
@@ -1497,7 +1575,8 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
 #browser[hidden], #browser-andere[hidden], .br-host[hidden] { display: none; }
 .proj-chrome { flex-shrink: 0; }
 
-.br-bar { display: flex; align-items: center; gap: 6px; padding: 6px 8px 0; flex-shrink: 0; }
+.br-bar { display: flex; align-items: center; gap: 6px; padding: 6px 8px 0; flex-shrink: 0; overflow: hidden; }
+.br-bar .br-filter { min-width: 90px; }
 .br-bar:last-of-type { padding-bottom: 6px; }
 .br-path { flex: 1; min-width: 0; font-size: 11.5px; padding: 5px 8px !important; }
 .br-filter { flex: 1; min-width: 0; font-size: 11.5px; padding: 5px 8px !important; }

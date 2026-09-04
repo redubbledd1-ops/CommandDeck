@@ -74,7 +74,10 @@ let win
 let isQuittingForUpdate = false
 function createWindow() {
   win = new BrowserWindow({
-    width: 1050, height: 680, minWidth: 820, minHeight: 520,
+    // Kleiner mag: de zijbalk klapt in zodra er te weinig werkvlak overblijft
+    // en de balken worden iconen, dus ook op deze maat is alles bereikbaar.
+    // Let op: dit geldt pas na een herstart van de app.
+    width: 1050, height: 680, minWidth: 520, minHeight: 420,
     frame: false, backgroundColor: '#0a0a0a',
     icon: path.join(__dirname, 'assets', 'icon.ico'),
     webPreferences: {
