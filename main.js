@@ -1567,6 +1567,22 @@ function gitSlotPad(dir) {
   return path.join(dir, '.git', 'index.lock')
 }
 
+// Een slot dat niemand meer kan gebruiken. Bestaat het niet, dan valt er niets
+// op te ruimen; bestaat het wel, dan telt alleen hoe lang het er al staat.
+// Zowel git als de updateflow zetten zo'n bestand neer, dus hier staat één
+// antwoord op dezelfde vraag.
+function slotVerlopen(pad, maxLeeftijdMs) {
+  try {
+    return Date.now() - fs.statSync(pad).mtimeMs > maxLeeftijdMs
+  } catch { return false }
+}
+
+// Git schrijft zijn index in milliseconden; staat het slot er na vijf minuten
+// nog, dan is er niets meer dat ermee bezig is. Een afgebroken update mag het
+// tien minuten proberen -- die pakt bestanden uit en bouwt.
+const GIT_SLOT_VERLOPEN_MS = 5 * 60e3
+const UPDATE_SLOT_VERLOPEN_MS = 10 * 60e3
+
 // Draait er nog een git op deze pc? Niet te zeggen bij wélke map hij hoort —
 // Windows geeft geen werkmap prijs — dus dit is een aanwijzing, geen bewijs.
 // Daarom staat het aantal in de vraag en beslist de gebruiker.
@@ -1594,6 +1610,37 @@ ipcMain.handle('git:slotInfo', (_, dir) => {
     eigenCommandoDraait: !!activeProc,
     gitProcessen: gitProcessenOpDezePc(),
   }
+})
+
+// Bij het opstarten alle sloten nalopen die van een afgebroken commando kunnen
+// zijn. Alleen als er zeker niets meer draait: geen eigen commando, en nergens
+// op deze pc een git. Dat is streng, en dat hoort ook: een slot van iets dat
+// nog wél bezig is weghalen levert een halve index op.
+ipcMain.handle('git:slotenOpruimen', (_, dirs) => {
+  const uit = { opgeruimd: [], overgeslagen: [] }
+  if (activeProc) return uit
+  if (gitProcessenOpDezePc()) return uit
+
+  for (const dir of (Array.isArray(dirs) ? dirs : [])) {
+    if (!dir || !padToegestaan(dir)) continue
+    const slot = gitSlotPad(dir)
+    if (!fs.existsSync(slot)) continue
+    if (!slotVerlopen(slot, GIT_SLOT_VERLOPEN_MS)) { uit.overgeslagen.push(slot); continue }
+    try { fs.unlinkSync(slot); uit.opgeruimd.push(slot) }
+    catch { uit.overgeslagen.push(slot) }
+  }
+
+  // Het slot van de updateflow hoort in hetzelfde rondje. Blijft dat liggen,
+  // dan kun je nooit meer bijwerken -- en dat merk je pas als je het probeert.
+  const bron = findSourceDir()
+  const updateSlot = bron ? path.join(bron, 'update-bezig.lock') : ''
+  if (updateSlot && fs.existsSync(updateSlot) && slotVerlopen(updateSlot, UPDATE_SLOT_VERLOPEN_MS)) {
+    try { fs.unlinkSync(updateSlot); uit.opgeruimd.push(updateSlot) }
+    catch { uit.overgeslagen.push(updateSlot) }
+  }
+
+  if (uit.opgeruimd.length) logSchrijf('git', 'blijven staan sloten opgeruimd', { paden: uit.opgeruimd })
+  return uit
 })
 
 ipcMain.handle('git:slotWeg', (_, dir) => {
@@ -4104,11 +4151,15 @@ ipcMain.handle('app:updateAndRestart', async (_, opties = {}) => {
   // (venster weggeklikt, script gestruikeld), dan zou je nooit meer kunnen
   // updaten. Een slot ouder dan tien minuten is dus geen slot meer.
   const lock = path.join(SOURCE_DIR, 'update-bezig.lock')
-  try {
-    const st = fs.statSync(lock)
-    if (opties.force || Date.now() - st.mtimeMs > 10 * 60e3) fs.unlinkSync(lock)
-    else return { ok: false, reason: 'bezig', dir: SOURCE_DIR, sinds: st.mtimeMs }
-  } catch {}
+  if (fs.existsSync(lock)) {
+    if (opties.force || slotVerlopen(lock, UPDATE_SLOT_VERLOPEN_MS)) {
+      try { fs.unlinkSync(lock) } catch {}
+    } else {
+      let sinds = 0
+      try { sinds = fs.statSync(lock).mtimeMs } catch {}
+      return { ok: false, reason: 'bezig', dir: SOURCE_DIR, sinds }
+    }
+  }
 
   const exePath = path.join(SOURCE_DIR, 'dist', 'CommandDeck.exe')
 

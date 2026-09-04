@@ -396,7 +396,8 @@ window.eval(fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8')
   + '\n  autoMappen, hefMappenOp, legInMap, verplaatsKnopId,'
   + '\n  rijVolgorde, ordenProject, zetKnopInMap, folderVanKnop,'
   + '\n  snelRij, migreerSnelRijen, zetRijSorteerModus, rijVoor, keurKrappeBalken,'
-  + '\n  sectieIsOpen: sectieOpen, zijbalkSmal,'
+  + '\n  sectieIsOpen: sectieOpen, zijbalkSmal, zijbalkSectieAan, navItemAan,'
+  + '\n  zetNavItem, zetZijbalkSectie,'
   + '\n  verwijderMap, folderOp,'
   + '\n  gekoppeldeRepoAdressen, zetBewerkt: (id) => { editingId = id } };')
 startVraagAutomaat()
@@ -4415,6 +4416,14 @@ function startVraagAutomaat() {
       && /\.sidebar\.smal \.nav-item::after \{ content: attr\(data-kort\)/.test(css))
     check('en van een project blijft alleen het icoon staan',
       /\.sidebar\.smal \.proj-info,\s*\n\.sidebar\.smal \.proj-edit \{ display: none; \}/.test(css))
+    // Past de kolom niet in de hoogte, dan hoort het bovenste deel te schuiven
+    // in plaats van onderaan afgeknipt te worden.
+    check('de knoppenkop van een project kan schuiven',
+      /\.proj-chrome,\n#cmd-panel > \.cmd-section,\n#ps-panel > \.cmd-section \{[^}]*overflow-y: auto/.test(css))
+    check('en de terminal eronder houdt een bodem',
+      /\.terminal-wrap \{ min-height: 150px; \}/.test(css))
+    check('in bat schuiven de opties en houdt het tekstvak een bodem',
+      /\.bat-edit \.bat-opts \{[^}]*overflow-y: auto/.test(css) && /\.bat-editor \{ min-height: 120px; \}/.test(css))
     check('de boom van deze pc gaat ingeklapt uit',
       /\.sidebar\.smal \.sidebar-sectie\[data-zijsectie="dezepc"\] \.sectie-inhoud/.test(css))
     check('een ingeklapte balk verbergt de teksten',
@@ -4427,6 +4436,59 @@ function startVraagAutomaat() {
       /\.terminal-bar-btns \{[^}]*flex-wrap: nowrap/.test(css) && /\[data-krap\] \{ flex-wrap: nowrap; \}/.test(css))
     check('en de naam in de kop duwt de rest niet weg',
       /\.proj-header-name \{[^}]*text-overflow: ellipsis/.test(css))
+  }
+
+  // ── Kiezen wat er in de zijbalk staat ────────────────────────
+  // Een knop die je nooit indrukt staat in de weg. Het potlood in de kop van
+  // "opdrachten" bepaalt wat je ziet; staat er niets meer in, dan hoort de hele
+  // sectie weg te zijn.
+  {
+    const sectie = (naam) => $(`.sidebar-sectie[data-zijsectie="${naam}"]`)
+    check('er staat een potlood in de kop van opdrachten', !!$('#nav-kies'))
+    $('#nav-kies').click(); await tick()
+    const items = $$('#ctx-menu .ctx-item')
+    check('het menu toont alle vier de opdrachten', items.length === 4)
+    check('en zet een vinkje bij wat aan staat',
+      items.every(el => !!el.querySelector('.ti-check')))
+
+    items.find(el => el.textContent.includes('bat')).click(); await tick(); await tick()
+    check('uitvinken haalt hem uit de zijbalk',
+      $('#btn-nav-bat').hidden === true && W.__test.navItemAan('bat') === false)
+    check('en de sectie blijft, want er staat nog van alles in',
+      sectie('cmd').hidden === false)
+
+    // Kijk je naar het scherm dat je wegzet, dan hoor je ergens anders te
+    // belanden -- anders staat er een paneel open zonder weg terug.
+    $('#btn-nav-cmd').click(); await tick(); await tick()
+    W.__test.zetNavItem('cmd', false); await tick(); await tick()
+    check('het scherm dat je verbergt laat je niet achter',
+      $('#cmd-panel').style.display !== 'flex')
+
+    for (const sleutel of ['ps', 'dict']) W.__test.zetNavItem(sleutel, false)
+    await tick()
+    check('is alles uitgevinkt, dan verdwijnt de hele sectie',
+      sectie('cmd').hidden === true && W.__test.zijbalkSectieAan('cmd') === false)
+
+    // Terugzetten via de instellingen: een lege sectie aanzetten zou een lege
+    // kop opleveren, dus komen de opdrachten dan ook terug.
+    W.__test.zetZijbalkSectie('cmd', true); await tick()
+    check('via de instellingen komt hij terug, met inhoud',
+      sectie('cmd').hidden === false && W.__test.navItemAan('cmd') === true)
+
+    W.__test.zetZijbalkSectie('dezepc', false); await tick()
+    check('deze pc kan ook uit', sectie('dezepc').hidden === true)
+    W.__test.zetZijbalkSectie('dezepc', true); await tick()
+    check('en weer aan', sectie('dezepc').hidden === false)
+
+    // Projecten is geen keuze: een zijbalk zonder projecten is een kapotte app.
+    W.__test.zetZijbalkSectie('projecten', false); await tick()
+    check('projecten kan niet uit',
+      W.__test.zijbalkSectieAan('projecten') === true && sectie('projecten').hidden === false)
+
+    $('#btn-settings').click(); await tick(); await tick()
+    check('de instellingen hebben een schakelaar per sectie',
+      !!$('#set-sectie-cmd') && !!$('#set-sectie-dezepc'))
+    $('#btn-settings').click(); await tick(); await tick()
   }
 
   console.log(ok ? '\n✓ ALLE UI-TESTS GESLAAGD' : '\n✗ ER ZIJN TESTS GEFAALD')

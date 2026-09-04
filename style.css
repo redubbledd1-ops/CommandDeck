@@ -1573,7 +1573,21 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
   flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden;
 }
 #browser[hidden], #browser-andere[hidden], .br-host[hidden] { display: none; }
-.proj-chrome { flex-shrink: 0; }
+/* ── Te weinig hoogte ─────────────────────────────────────────────────────
+   Elk vlak is een kolom: kop, knoppen, en daaronder waar het echt om gaat.
+   Paste die kolom niet, dan werd wat onderaan stond gewoon afgeknipt -- geen
+   schuifbalk, gewoon weg. Nu geeft het bovenste deel mee en krijgt het een
+   schuifbalk, terwijl de terminal eronder een werkbare hoogte houdt. */
+.proj-chrome,
+#cmd-panel > .cmd-section,
+#ps-panel > .cmd-section {
+  flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+}
+.terminal-wrap { min-height: 150px; }
+/* Zelfde verhaal in de bat-editor: de opties mogen schuiven, het tekstvak
+   houdt een bodem. */
+.bat-edit .bat-opts { flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.bat-editor { min-height: 120px; }
 
 .br-bar { display: flex; align-items: center; gap: 6px; padding: 6px 8px 0; flex-shrink: 0; overflow: hidden; }
 .br-bar .br-filter { min-width: 90px; }
@@ -1808,8 +1822,11 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
 .thema-knop:hover { border-color: var(--accent); }
 .thema-knop.aan { border-color: var(--accent); color: var(--text); }
 .thema-knop .ti { font-size: 13px; }
+/* Vast geplaatst, net als het rechtsklikmenu: de balk waar de knop in staat
+   knipt af wat erbuiten valt -- dat is nodig om te kunnen meten of hij nog past
+   -- en daar viel dit menu onder. plaatsThemaMenu() rekent de plek uit. */
 .thema-menu {
-  position: absolute; top: calc(100% + 4px); right: 0; z-index: 60;
+  position: fixed; z-index: 400;
   min-width: 210px; max-height: 320px; overflow-y: auto;
   background: var(--s1); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 5px;

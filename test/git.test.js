@@ -1503,6 +1503,35 @@ t('git-processen worden nooit afgeschoten',
   !/taskkill[^\n]*git/i.test(mainSlot)
   && !/ipcMain\.handle\('git:slotWeg'[\s\S]{0,400}(taskkill|process\.kill)/.test(mainSlot))
 
+// ── Blijven staan sloten opruimen ────────────────────────────────────────────
+// Een index.lock van een afgebroken git blokkeert élke volgende commit. Dat
+// hoor je niet te merken op het moment dat je wilt committen; bij het opstarten
+// is er tijd genoeg om te kijken of er nog iets mee bezig is.
+const opruimBlok = (mainSlot.match(/ipcMain\.handle\('git:slotenOpruimen'[\s\S]*?\n\}\)/) || [''])[0]
+t('er is een opruimronde voor blijven staan sloten', !!opruimBlok)
+t('die niets doet zolang de app zelf een commando draait',
+  /if \(activeProc\) return uit/.test(opruimBlok))
+t('en niets doet zolang er ergens een git draait',
+  /if \(gitProcessenOpDezePc\(\)\) return uit/.test(opruimBlok))
+t('alleen mappen die bij dit account horen', /padToegestaan\(dir\)/.test(opruimBlok))
+t('een vers slot blijft staan', /slotVerlopen\(slot, GIT_SLOT_VERLOPEN_MS\)/.test(opruimBlok))
+t('het slot van de updateflow gaat in hetzelfde rondje mee',
+  /update-bezig\.lock/.test(opruimBlok) && /UPDATE_SLOT_VERLOPEN_MS/.test(opruimBlok))
+// Twee plekken die dezelfde vraag stellen, één antwoord: anders staat er straks
+// op de ene plek vijf minuten en op de andere tien.
+t('de updateflow rekent met dezelfde functie',
+  (mainSlot.match(/slotVerlopen\(/g) || []).length >= 3
+  && !/Date\.now\(\) - st\.mtimeMs > 10 \* 60e3/.test(mainSlot))
+t('de renderer laat het bij het opstarten draaien',
+  /ruimVerlopenSlotenOp\(\)/.test(fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8')))
+t('en het hoofdproces stelt de knop beschikbaar',
+  /gitSlotenOpruimen/.test(fs.readFileSync(path.join(APP, 'preload.js'), 'utf8')))
+// Slotbestanden horen bij één pc op één moment, dus nooit in de repo.
+{
+  const negeer = fs.readFileSync(path.join(APP, '.gitignore'), 'utf8')
+  t('slotbestanden staan in .gitignore', /^\*\.lock$/m.test(negeer))
+}
+
 const rendererSlot = fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8')
 t('de renderer biedt het aan en probeert daarna opnieuw',
   /async function regelGitSlot\(/.test(rendererSlot)

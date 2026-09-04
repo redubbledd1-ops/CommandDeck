@@ -66,6 +66,7 @@ contextBridge.exposeInMainWorld('api', {
   gitGhRepos:    (o)     => ipcRenderer.invoke('git:ghRepos', o || {}),
   gitSlotInfo:   (d)     => ipcRenderer.invoke('git:slotInfo', d),
   gitSlotWeg:    (d)     => ipcRenderer.invoke('git:slotWeg', d),
+  gitSlotenOpruimen: (dirs) => ipcRenderer.invoke('git:slotenOpruimen', dirs),
   gitGhIdentiteit: (u)   => ipcRenderer.invoke('git:ghIdentiteit', u),
   gitAccountActiveren: (p) => ipcRenderer.invoke('git:accountActiveren', p),
   gitKoppelingDiagnose: (d) => ipcRenderer.invoke('git:koppelingDiagnose', d),

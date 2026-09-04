@@ -4,6 +4,9 @@
   "description": "CommandDeck — Flutter & terminal command launcher",
   "author": "CommandDeck",
   "main": "main.js",
+  "engines": {
+    "node": ">=22.22.0"
+  },
   "scripts": {
     "start": "electron .",
     "build": "set CSC_IDENTITY_AUTO_DISCOVERY=false&& electron-builder --win --x64",
@@ -95,6 +98,8 @@
     "jsdom": "^30.0.1"
   },
   "overrides": {
-    "@noble/hashes": "1.8.0"
+    "@noble/hashes": "1.8.0",
+    "@xmldom/xmldom": "^0.8.15",
+    "fast-uri": "^3.1.7"
   }
 }

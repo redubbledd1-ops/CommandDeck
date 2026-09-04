@@ -1099,6 +1099,10 @@ window.addEventListener('DOMContentLoaded', async () => {
     planSplitPlusVervers()
   })
 
+  // Sloten van een afgebroken git of update opruimen voordat je er tegenaan
+  // loopt. Niet meteen: eerst mag het venster er staan.
+  setTimeout(() => ruimVerlopenSlotenOp(), 1200)
+
   // Even wachten zodat het venster er al staat voordat we gaan zoeken
   setTimeout(() => zoekEditors({ stil: true, automatisch: true }), 900)
 
@@ -2507,6 +2511,88 @@ const NAV_KNOPPEN = [
   { sleutel: 'dict', id: 'btn-nav-dict', open: () => setView('dict') },
 ]
 
+// ── Wat er in de zijbalk staat ────────────────────────────────────────────────
+// Niet iedereen gebruikt alle vier de opdrachten, en een knop die je nooit
+// indrukt is een knop die in de weg staat. Uit betekent hier echt weg uit de
+// zijbalk; terugzetten gaat via het potlood in de kop, of via de instellingen
+// als de hele sectie uit staat.
+//
+// Projecten kan niet uit. Dat is waar de app om draait -- een zijbalk zonder
+// projecten is geen keuze maar een kapotte app.
+const ZIJBALK_VASTE_SECTIE = 'projecten'
+
+function navItemAan(sleutel) {
+  return ((settings.navZichtbaar || {})[sleutel]) !== false
+}
+
+function zetNavItem(sleutel, aan) {
+  settings.navZichtbaar = { ...(settings.navZichtbaar || {}), [sleutel]: !!aan }
+  window.api.saveSettings(settings)
+  if (!aan) verlaatVerborgenScherm(sleutel)
+  renderSidebar()
+}
+
+// Sta je te kijken naar wat je net hebt weggehaald? Dan hoor je ergens anders
+// te belanden: het scherm blijft anders open terwijl er geen knop meer is om
+// terug te komen.
+function verlaatVerborgenScherm(sleutel) {
+  if (view !== sleutel) return
+  if (activeId) setView('project')
+  else if (projects[0]) selectProject(projects[0].id)
+}
+
+// Een sectie staat er als jij hem aan hebt staan. De opdrachten-sectie
+// verdwijnt bovendien vanzelf zodra er niets meer in staat: een kop met een
+// lege lijst eronder zegt niets.
+function zijbalkSectieAan(sleutel) {
+  if (sleutel === ZIJBALK_VASTE_SECTIE) return true
+  if (((settings.zijbalkSecties || {})[sleutel]) === false) return false
+  if (sleutel === 'cmd') return NAV_KNOPPEN.some(k => navItemAan(k.sleutel))
+  return true
+}
+
+function zetZijbalkSectie(sleutel, aan) {
+  if (sleutel === ZIJBALK_VASTE_SECTIE) return
+  settings.zijbalkSecties = { ...(settings.zijbalkSecties || {}), [sleutel]: !!aan }
+  // Alles uitgevinkt en dan de sectie weer aanzetten zou een lege sectie geven.
+  // Dan horen de opdrachten er ook weer te zijn.
+  if (aan && sleutel === 'cmd' && !NAV_KNOPPEN.some(k => navItemAan(k.sleutel))) {
+    settings.navZichtbaar = {}
+  }
+  if (!aan && sleutel === 'cmd') NAV_KNOPPEN.forEach(k => verlaatVerborgenScherm(k.sleutel))
+  // Volledige hoogte voor een sectie die je net hebt verborgen laat een lege
+  // zijbalk achter.
+  if (!aan && sleutel === 'dezepc' && dezepcVol) dezepcVol = false
+  window.api.saveSettings(settings)
+  renderSidebar()
+  if (view === 'settings') renderSettingsPanel()
+}
+
+// Het potlood in de kop van "opdrachten": aanvinken wat je wilt zien. Het menu
+// blijft openstaan zolang je bezig bent -- vier keer opnieuw het potlood zoeken
+// is geen bediening.
+function toonNavKiesMenu(knop) {
+  const doos = knop.getBoundingClientRect()
+  knop.classList.add('aan')
+  toonContextMenu(doos.left, doos.bottom + 4, NAV_KNOPPEN.map(k => ({
+    label: navLabel(k.sleutel),
+    icoon: navItemAan(k.sleutel) ? 'ti-check' : 'ti-square',
+    doe: () => {
+      zetNavItem(k.sleutel, !navItemAan(k.sleutel))
+      const opnieuw = document.getElementById('nav-kies')
+      if (opnieuw && zijbalkSectieAan('cmd')) toonNavKiesMenu(opnieuw)
+    },
+  })))
+}
+
+// De naam zoals hij in de zijbalk staat; dan heet het in het menu hetzelfde.
+function navLabel(sleutel) {
+  const def = NAV_KNOPPEN.find(k => k.sleutel === sleutel)
+  const knop = def && document.getElementById(def.id)
+  const tekst = (knop?.querySelector('span[data-i18n]')?.textContent || '').trim()
+  return tekst || sleutel
+}
+
 function navVolgorde() {
   const bekend = NAV_KNOPPEN.map(n => n.sleutel)
   const eigen = (settings.navVolgorde || []).filter(k => bekend.includes(k))
@@ -2634,6 +2720,8 @@ function renderSecties() {
     const sectie = zijbalk.querySelector(`.sidebar-sectie[data-zijsectie="${sleutel}"]`)
     if (!sectie) return
     zijbalk.appendChild(sectie)                    // hiermee komt hij op zijn plek
+    sectie.hidden = !zijbalkSectieAan(sleutel)
+    if (sectie.hidden) return
 
     const open = sectieOpen(sleutel)
     sectie.classList.toggle('dicht', !open)
@@ -2643,7 +2731,11 @@ function renderSecties() {
     if (pijl) pijl.className = 'ti sectie-pijl ' + (open ? 'ti-chevron-down' : 'ti-chevron-right')
     const kop = sectie.querySelector('.sidebar-header')
     if (kop) {
-      kop.title = sorteerSectie
+      // Ingeklapt staat er alleen een letter; dan is de naam nuttiger dan de
+      // uitleg dat je op een kop kunt klikken.
+      kop.title = zijbalkSmal()
+        ? (kop.querySelector('span[data-i18n]')?.textContent || '').trim()
+        : sorteerSectie
         ? I18N.t('sidebar.sectionSortTitle')
         : open ? I18N.t('sidebar.sectionCollapseTitle')
                : I18N.t('sidebar.sectionExpandTitle')
@@ -2871,12 +2963,20 @@ function renderSidebar() {
   // Navigatieknoppen: in de volgorde die jij hebt gekozen
   const navLijst = document.querySelector('.nav-list')
   const sorteerNav = sorteerModus === 'nav'
-  const volgorde = navVolgorde()
+  // Verbergen doet niets met de volgorde: zet je hem later weer aan, dan staat
+  // hij weer waar hij stond.
+  const volgorde = navVolgorde().filter(navItemAan)
+  navVolgorde().filter(k => !navItemAan(k)).forEach(k => {
+    const uit = NAV_KNOPPEN.find(x => x.sleutel === k)
+    const el = uit && document.getElementById(uit.id)
+    if (el) el.hidden = true
+  })
   navLijst.classList.toggle('sorteren', sorteerNav)
 
   volgorde.forEach((sleutel, n) => {
     const def = NAV_KNOPPEN.find(k => k.sleutel === sleutel)
     const knop = document.getElementById(def.id)
+    knop.hidden = false
     navLijst.appendChild(knop)                       // hiermee komt hij op zijn plek
     knop.classList.toggle('active', view === sleutel)
     knop.classList.toggle('in-split', splitAan() && werkSlots.some((s, i) => i !== werkSlotFocus && s.view === sleutel))
@@ -2910,6 +3010,13 @@ function renderSidebar() {
       knop.onclick = def.open
     }
   })
+
+  const navKies = document.getElementById('nav-kies')
+  if (navKies) navKies.onclick = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    toonNavKiesMenu(navKies)
+  }
 
   document.getElementById('sort-nav').classList.toggle('aan', sorteerNav)
   document.getElementById('sort-proj').classList.toggle('aan', sorteerProj)
@@ -6712,6 +6819,7 @@ function renderDictPanel() {
     e.stopPropagation()
     const menu = document.getElementById('dict-thema-menu')
     menu.hidden = !menu.hidden
+    plaatsThemaMenu()
   }
 
   const sort = document.getElementById('dict-sort')
@@ -6960,6 +7068,22 @@ function vulThemaLijst() {
   })
 }
 
+// Het themamenu hangt onder zijn knop, maar niet ín de balk: die knipt af wat
+// er buiten valt. Dus zelf uitrekenen waar het komt, en binnen het venster
+// blijven -- rechts uitlijnen op de knop, en omhoog geknepen als er onderaan
+// weinig ruimte is.
+function plaatsThemaMenu() {
+  const knop = document.getElementById('dict-thema')
+  const menu = document.getElementById('dict-thema-menu')
+  if (!knop || !menu || menu.hidden) return
+  const doos = knop.getBoundingClientRect()
+  const breed = menu.offsetWidth || 210
+  const venster = window.innerWidth || 1000
+  menu.style.left = Math.max(6, Math.min(doos.right - breed, venster - breed - 6)) + 'px'
+  menu.style.top = (doos.bottom + 4) + 'px'
+  menu.style.maxHeight = Math.max(160, (window.innerHeight || 700) - doos.bottom - 16) + 'px'
+}
+
 function bouwThemaMenu() {
   const menu = document.getElementById('dict-thema-menu')
   if (!menu) return
@@ -6981,6 +7105,8 @@ function bouwThemaMenu() {
     <div id="thema-lijst"></div>
   `
   vulThemaLijst()
+  // De inhoud is net anders van maat; opnieuw uitlijnen.
+  plaatsThemaMenu()
 
   document.getElementById('thema-zoek-knop').onclick = () => {
     themaZoekAan = !themaZoekAan
@@ -9133,6 +9259,19 @@ function renderSettingsPanel() {
         </div>
       </div>
       <div>
+        <div class="settings-section-title">${I18N.t('settings.section.sidebarTitle')}</div>
+        <div class="editor-row enabled">
+          <input type="checkbox" id="set-sectie-cmd" ${zijbalkSectieAan('cmd') ? 'checked' : ''} />
+          <div class="editor-row-name"><i class="ti ti-terminal-2"></i> ${I18N.t('settings.sidebar.cmdLabel')}</div>
+          <div class="instel-uitleg">${I18N.t('settings.sidebar.cmdDesc')}</div>
+        </div>
+        <div class="editor-row enabled">
+          <input type="checkbox" id="set-sectie-dezepc" ${zijbalkSectieAan('dezepc') ? 'checked' : ''} />
+          <div class="editor-row-name"><i class="ti ti-device-desktop"></i> ${I18N.t('settings.sidebar.dezepcLabel')}</div>
+          <div class="instel-uitleg">${I18N.t('settings.sidebar.dezepcDesc')}</div>
+        </div>
+      </div>
+      <div>
         <div class="settings-section-title">${I18N.t('settings.section.explorerTitle')}</div>
         <div class="editor-row enabled">
           <input type="checkbox" id="set-mapgroottes" ${settings.mapGroottes !== false ? 'checked' : ''} />
@@ -9401,6 +9540,8 @@ function renderSettingsPanel() {
   }
   const wisHerstel = document.getElementById('wis-herstel')
   if (wisHerstel) wisHerstel.onclick = herstelVerborgenKnoppen
+  document.getElementById('set-sectie-cmd').onchange = (e) => zetZijbalkSectie('cmd', e.target.checked)
+  document.getElementById('set-sectie-dezepc').onchange = (e) => zetZijbalkSectie('dezepc', e.target.checked)
   document.getElementById('set-mapgroottes').onchange = (e) => {
     settings.mapGroottes = e.target.checked
     window.api.saveSettings(settings)
@@ -12849,6 +12990,22 @@ async function executeCmd(project, cmd, cmdKey = null, opties = {}) {
 // een git-proces hoort, dus dat zou ook de commit van een ander project kunnen
 // afkappen — en juist dát is hoe je een half geschreven index krijgt.
 // Geeft true als het commando opnieuw geprobeerd mag worden.
+// Bij het opstarten alle projectmappen nalopen. Een index.lock van een git die
+// halverwege is afgebroken -- venster dicht, pc uit -- blokkeert élke volgende
+// commit, en dat merk je nu pas op het moment dat je wilt committen. Het
+// hoofdproces beslist of het weg mag; hier staat alleen welke mappen het zijn.
+async function ruimVerlopenSlotenOp() {
+  // Na een update kan de preload nog van de vorige versie zijn; dan bestaat
+  // deze weg nog niet en is er niets aan de hand.
+  const opruimen = window.api && window.api.gitSlotenOpruimen
+  if (typeof opruimen !== 'function') return
+  const paden = []
+  for (const p of projects) for (const loc of projectLocaties(p)) if (loc.pad) paden.push(loc.pad)
+  const uit = await opruimen(paden).catch(() => null)
+  if (!uit || !uit.opgeruimd || !uit.opgeruimd.length) return
+  showToast(I18N.t('git.slot.opgeruimdToast', { aantal: uit.opgeruimd.length }))
+}
+
 async function regelGitSlot(project, pad) {
   const netwerk = padIsNetwerk(pad)
 

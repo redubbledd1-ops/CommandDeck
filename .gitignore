@@ -34,3 +34,7 @@ _to_delete/
 *.bak-*
 %TargetName%
 diag-tijdelijk.js
+
+# Slotbestanden. Die horen bij één pc op één moment -- ze zeggen "hier is nu
+# iets bezig" -- en dus nooit in een repo die je met een andere pc deelt.
+*.lock
