@@ -1944,16 +1944,28 @@ button.thema-regel.wis:hover .thema-aantal { color: var(--red); }
   box-shadow: 0 0 0 1px var(--accent), 0 0 10px rgba(84,200,232,.45);
 }
 
-/* Een open map is een blok over de hele breedte: de naam bovenaan, de knoppen
-   eronder. Zo is bij een lange rij te zien waar de map ophoudt en de gewone
-   knoppen weer beginnen. Een dichte map is alleen zijn naam en staat gewoon
-   in de rij mee -- zie rijVolgorde() voor waarom die vooraan komt. */
+/* Een open map is een blok met de naam bovenaan en de knoppen eronder. Zo is
+   bij een lange rij te zien waar de map ophoudt en de gewone knoppen weer
+   beginnen. Een dichte map is alleen zijn naam en loopt gewoon in de rij mee --
+   zie rijVolgorde() voor waarom die vooraan komt.
+
+   Het blok neemt alleen de breedte die het nodig heeft. Nam het de hele regel
+   (flex-basis: 100%), dan stond alles ernaast opeens eronder: bij een project
+   waar de meeste knoppen in mappen zitten bleef er op de eerste regel niets
+   over dan de dichte mappen. Nu schuift alles aan tot de regel vol is, en pas
+   dan naar de volgende. */
 .cmd-map-groep {
   display: flex; flex-direction: column; align-items: flex-start; gap: 7px;
-  flex-basis: 100%; padding: 8px;
+  flex-basis: auto; max-width: 100%; padding: 8px;
   border: 1px solid var(--border2); border-radius: var(--radius-lg);
   background: var(--s2);
 }
+/* Dichte mappen in de kopregel, naast de schakelaar. Ze mogen doorlopen naar
+   de volgende regel als het niet past, maar ze horen niet uit zichzelf onder
+   de knoppen te gaan staan. */
+.cmd-kop-mappen { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; min-width: 0; }
+.cmd-section-label-row { flex-wrap: wrap; }
+
 .cmd-map-inhoud { display: flex; flex-wrap: wrap; gap: 7px; }
 /* Kopregel van een open map: de naam, en wat er verder bij die map hoort (bij
    Flutter is dat --release). */
@@ -1983,6 +1995,22 @@ button.thema-regel.wis:hover .thema-aantal { color: var(--red); }
 .cmd-map-leeg { padding: 0 6px; color: var(--muted); font-size: 11px; }
 .cmd-grid.cmd-sorteren .cmd-map-kop { cursor: grab; }
 .cmd-grid.cmd-sorteren .cmd-sort-item.doelwit .cmd-map-kop { box-shadow: inset 2px 0 0 var(--accent); }
+
+/* Waarschuwingen in de git-sectie: wat er niet klopt, met de twee namen erbij
+   en een knop die het uitlegt. Geen knop die meteen iets doet -- stil
+   ingrijpen is hoe dit soort verschillen zo lang verborgen blijft. */
+.git-set-waarschuwingen { display: flex; flex-direction: column; gap: 6px; }
+.git-set-waarschuwing {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: var(--radius);
+  background: var(--amber-d); border: 1px solid var(--amber);
+  color: var(--text); font-size: 12px; line-height: 1.4;
+}
+.git-set-waarschuwing.e-fout { background: var(--red-d); border-color: var(--red); }
+.git-set-waarschuwing i { flex-shrink: 0; font-size: 15px; color: var(--amber); }
+.git-set-waarschuwing.e-fout i { color: var(--red); }
+.git-set-waarschuwing span { flex: 1; }
+.git-set-waarschuwing button { flex-shrink: 0; }
 
 .cmd-grid.cmd-wissen .cmd-btn,
 .cmd-grid.cmd-wissen .cmd-map-kop { cursor: pointer; border-style: dashed; }

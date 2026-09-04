@@ -2211,6 +2211,11 @@ function startVraagAutomaat() {
   check('een map dichtklappen haalt zijn knoppen uit beeld',
     !$('[data-cmd="run-android"]') && !!$('.cmd-map-kop.dicht'))
   check('en --release gaat mee, want dat hoort bij die knoppen', !$('#toggle-release'))
+  // Een dichte map is drie woorden breed. Onder de knoppen nam hij daar een
+  // hele regel voor; hij hoort naast de schakelaar in de kopregel te staan.
+  check('een dichte map staat in de kopregel, naast de schakelaar',
+    !!$('.cmd-section-label-row .cmd-map-kop.dicht'))
+  check('en dus niet in het knoppenraster', !$('.cmd-grid .cmd-map-kop.dicht'))
   check('het wordt bewaard bij het project',
     (projects[0].cmdFolders || []).some(f => f.auto === 'flutter' && f.open === false))
   $('.cmd-map-kop').click(); await tick()

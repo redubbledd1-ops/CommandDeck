@@ -1596,19 +1596,101 @@
   // Alles wat er bij het activeren van een account moet gebeuren, als losse
   // stappen. Los, want ze kunnen onafhankelijk van elkaar mislukken: gh hoeft
   // niet geïnstalleerd te zijn om je naam wel goed te zetten.
+  //
+  // Losse argumenten, geen commandoregel. Een regel moet door een shell heen en
+  // op Windows overleeft een aanhalingsteken die reis niet:
+  //
+  //   git config --global user.name "Frank de Boer"
+  //     -> git kreeg drie losse woorden en gaf "no action specified"
+  //   git config --global "credential.https://github.com.username" "naam"
+  //     -> git kreeg de sleuteltekens erbij: 'invalid key: "credential..."'
+  //
+  // Beide mislukten stil, en daardoor stond er maandenlang een account in beeld
+  // dat git nooit gekregen had. Argumenten gaan rechtstreeks naar het
+  // programma; er is niets meer dat ze kan herinterpreteren.
+  //
+  // --replace-all is geen detail. Staat er per ongeluk meer dan één user.name
+  // in de config (precies wat de kapotte quoting opleverde), dan weigert een
+  // gewone `git config` vóórgoed te schrijven: "cannot overwrite multiple
+  // values". De app kan zichzelf dan niet meer repareren. --replace-all ruimt
+  // die rommel juist op.
   function accountActiveerStappen(profiel, ghAanwezig = false) {
     const uit = []
-    const ident = globaalIdentiteitCommando(profiel)
-    if (ident) uit.push({ soort: 'identiteit', cmd: ident })
+    const cfg = (sleutel, waarde) =>
+      ({ prog: 'git', args: ['config', '--global', '--replace-all', sleutel, waarde] })
 
-    const cred = globaalGhGebruikerCommando(profiel && profiel.ghGebruiker)
-    if (cred) uit.push({ soort: 'github-gebruiker', cmd: cred })
+    if (profielGeldig(profiel)) {
+      uit.push({ soort: 'identiteit', opdrachten: [
+        cfg('user.name', veiligConfigWaarde(profiel.naam)),
+        cfg('user.email', veiligConfigWaarde(profiel.email)),
+      ] })
+    }
 
-    if (ghAanwezig) {
-      const sw = ghSwitchCommando(profiel && profiel.ghGebruiker)
-      if (sw) uit.push({ soort: 'gh-wissel', cmd: sw })
+    const naam = String((profiel && profiel.ghGebruiker) || '').trim()
+    if (geldigeGhGebruiker(naam)) {
+      uit.push({ soort: 'github-gebruiker', opdrachten: [
+        cfg('credential.https://github.com.username', naam),
+      ] })
+      if (ghAanwezig) {
+        uit.push({ soort: 'gh-wissel', opdrachten: [
+          { prog: 'gh', args: ['auth', 'switch', '--hostname', 'github.com', '--user', naam] },
+        ] })
+      }
     }
     return uit
+  }
+
+  // ── Klopt wat de app zegt met wat git doet? ─────────────────────────────────
+  // Deze drie zijn los van elkaar misgegaan en niemand zag het, omdat het
+  // paneel het account toonde in plaats van de werkelijkheid en "koppeling
+  // werkt" alleen bewees dat het adres te lézen was.
+  //
+  //   'identiteit-anders'  git commit onder een andere naam dan het account
+  //   'inlog-anders'       git pusht als een ander GitHub-account dan gh kent
+  //   'geen-push-recht'    je mag deze repo lezen maar niet schrijven
+  //
+  // Wat niet gemeten is (null) levert geen melding op. Een waarschuwing die
+  // soms uit de lucht komt vallen leert niemand iets, en na een tijdje klikt
+  // iedereen hem weg zonder te lezen.
+  function koppelingProblemen(d) {
+    const uit = []
+    if (!d) return uit
+    const acc = d.account || {}
+    const git = d.identiteit || {}
+
+    const naamAnders  = !!(acc.naam && git.naam && acc.naam !== git.naam)
+    const emailAnders = !!(acc.email && git.email && acc.email !== git.email)
+    if (naamAnders || emailAnders) {
+      uit.push({
+        id: 'identiteit-anders', ernst: 'let-op', actie: 'identiteit',
+        van: (git.naam || '') + (git.email ? ' <' + git.email + '>' : ''),
+        naar: (acc.naam || '') + (acc.email ? ' <' + acc.email + '>' : ''),
+      })
+    }
+
+    const inlog = String(d.credentialGebruiker || '').trim()
+    const ghNu  = String(d.ghActief || '').trim()
+    if (inlog && ghNu && inlog.toLowerCase() !== ghNu.toLowerCase()) {
+      uit.push({
+        id: 'inlog-anders', ernst: 'fout', actie: d.viaGh ? 'gh-wissel' : 'via-gh',
+        van: inlog, naar: ghNu,
+      })
+    }
+
+    if (d.pushRecht === false) {
+      uit.push({ id: 'geen-push-recht', ernst: 'fout', actie: 'via-gh', van: inlog || ghNu })
+    }
+    return uit
+  }
+
+  // owner/repo uit een remote-adres. Nodig om bij GitHub te vragen of je er ook
+  // in mag schrijven -- `git ls-remote` beantwoordt die vraag niet, dat is
+  // lezen. Alleen github.com; ergens anders bestaat dat antwoord niet.
+  function ghRepoUitUrl(url) {
+    const t = String(url || '').trim().replace(/\.git$/, '').replace(/\/+$/, '')
+    const m = t.match(/^(?:https?:\/\/|git@|ssh:\/\/git@)github\.com[/:]([^/]+)\/([^/]+)$/i)
+    if (!m) return null
+    return { eigenaar: m[1], repo: m[2] }
   }
 
   // De inlogstroom van de GitHub-CLI. --web opent je browser en toont een code;
@@ -1921,6 +2003,7 @@
     indicator, onveiligeRedenen, magFetchen, achterstandMelding, FETCH_INTERVAL_MS,
     achterstandKeuzes, pullCommando,
     globaalIdentiteitCommando, globaalGhGebruikerCommando, accountActiveerStappen,
+    koppelingProblemen, ghRepoUitUrl,
     ghLoginCommando, ghInstallCommando, parseGhAccounts, parseGhLoginCode, parseGhLoginUrl, nieuwGhAccount,
     parseGhUser, parseGhEmails, noreplyEmail, ghIdentiteit,
     diffCommando, isHoofdtak, parseTrack, branchOmschrijving, branchHeeftEigenWerk,

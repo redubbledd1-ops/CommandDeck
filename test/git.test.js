@@ -727,8 +727,63 @@ gelijk('zonder gh: naam en GitHub-gebruiker', zonderGh.map(x => x.soort),
   ['identiteit', 'github-gebruiker'])
 gelijk('met gh: ook echt van account wisselen', metGh.map(x => x.soort),
   ['identiteit', 'github-gebruiker', 'gh-wissel'])
-t('elke stap is een los commando — ze mogen apart mislukken',
-  metGh.every(x => typeof x.cmd === 'string' && x.cmd.length > 0))
+// Losse argumenten, geen commandoregel. Een regel moest door een shell heen en
+// daar sneuvelden de aanhalingstekens: `user.name "Frank de Boer"` kwam bij git
+// aan als losse woorden, en de credential-sleutel kwam aan mét aanhalingstekens
+// ("invalid key"). Beide mislukten stil, jarenlang.
+t('elke stap draait als losse argumenten, niet als tekstregel',
+  metGh.every(x => Array.isArray(x.opdrachten) && x.opdrachten.length
+    && x.opdrachten.every(o => o.prog && Array.isArray(o.args) && o.args.length)))
+t('er zit nergens een aanhalingsteken in een argument',
+  metGh.every(x => x.opdrachten.every(o => o.args.every(a => !/["']/.test(a)))))
+t('een naam met een spatie blijft één argument',
+  G.accountActiveerStappen({ ...prof, naam: 'Frank de Boer' }, false)[0]
+    .opdrachten[0].args.includes('Frank de Boer'))
+// Zonder --replace-all weigert git voorgoed te schrijven zodra er per ongeluk
+// twee user.name-regels staan: "cannot overwrite multiple values". Dan kan de
+// app zichzelf niet meer repareren.
+t('schrijven gaat met --replace-all, zodat dubbele regels opgeruimd worden',
+  metGh.filter(x => x.opdrachten[0].prog === 'git')
+    .every(x => x.opdrachten.every(o => o.args.includes('--replace-all'))))
+t('de credential-sleutel gaat kaal mee, zonder aanhalingstekens',
+  metGh.find(x => x.soort === 'github-gebruiker')
+    .opdrachten[0].args.includes('credential.https://github.com.username'))
+
+// ── klopt wat de app zegt met wat git doet? ──────────────────────────────────
+// Alle drie stonden ze fout terwijl er "koppeling werkt" naast stond.
+const acc = { naam: 'redubbledd1-ops', email: 'a@b.nl', ghGebruiker: 'redubbledd1-ops' }
+gelijk('alles gelijk levert geen enkele melding op',
+  G.koppelingProblemen({ account: acc, identiteit: { naam: acc.naam, email: acc.email },
+    credentialGebruiker: 'redubbledd1-ops', ghActief: 'redubbledd1-ops', viaGh: true, pushRecht: true })
+    .map(x => x.id), [])
+gelijk('een andere naam in deze map wordt gemeld',
+  G.koppelingProblemen({ account: acc, identiteit: { naam: 'redub', email: 'x@y.nl' } })
+    .map(x => x.id), ['identiteit-anders'])
+gelijk('pushen als een ander account is een fout, geen opmerking',
+  G.koppelingProblemen({ account: acc, credentialGebruiker: 'redubbledD', ghActief: 'redubbledd1-ops' })
+    .map(x => [x.id, x.ernst].join(':')), ['inlog-anders:fout'])
+t('en de voorgestelde oplossing hangt ervan af of git al via gh loopt',
+  G.koppelingProblemen({ account: acc, credentialGebruiker: 'a', ghActief: 'b', viaGh: false })[0].actie === 'via-gh'
+  && G.koppelingProblemen({ account: acc, credentialGebruiker: 'a', ghActief: 'b', viaGh: true })[0].actie === 'gh-wissel')
+gelijk('leesrecht zonder schrijfrecht wordt apart gemeld',
+  G.koppelingProblemen({ account: acc, pushRecht: false }).map(x => x.id), ['geen-push-recht'])
+// Niet gemeten is niet hetzelfde als fout. Een waarschuwing die soms uit de
+// lucht komt vallen klikt iedereen na een week weg zonder te lezen.
+gelijk('wat niet gemeten is levert geen melding op',
+  G.koppelingProblemen({ account: acc, identiteit: {}, credentialGebruiker: '', ghActief: '', pushRecht: null })
+    .map(x => x.id), [])
+gelijk('en zonder gegevens ook niet', G.koppelingProblemen(null).map(x => x.id), [])
+
+// `git ls-remote` beantwoordt de push-vraag niet; GitHub zelf wel, maar dan
+// moet je weten welke repo je bedoelt.
+t('owner en repo komen uit het remote-adres',
+  JSON.stringify(G.ghRepoUitUrl('https://github.com/redubbledd1-ops/CommandDeck.git'))
+  === JSON.stringify({ eigenaar: 'redubbledd1-ops', repo: 'CommandDeck' }))
+t('ssh-adressen tellen net zo goed',
+  (G.ghRepoUitUrl('git@github.com:redubbledd1-ops/CommandDeck.git') || {}).repo === 'CommandDeck')
+t('ergens anders dan github levert niets op',
+  G.ghRepoUitUrl('https://gitlab.com/iemand/iets.git') === null
+  && G.ghRepoUitUrl('') === null)
 t('zonder profiel valt er niets te activeren',
   G.accountActiveerStappen(null, true).length === 0)
 t('een profiel zonder GitHub-account zet alleen de naam',

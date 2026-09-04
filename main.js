@@ -1672,21 +1672,115 @@ function ghBeschikbaar() {
 // stap apart, want ze kunnen los van elkaar mislukken — gh hoeft niet te
 // bestaan om je naam wel goed te zetten.
 ipcMain.handle('git:accountActiveren', (_, profiel) => {
-  if (!heeftGit()) return { ok: false, reden: 'geen-git', gedaan: [] }
+  if (!heeftGit()) return { ok: false, reden: 'geen-git', gedaan: [], mislukt: [], fouten: {} }
 
   const gedaan = []
   const mislukt = []
+  const fouten = {}
   for (const stap of GitTools.accountActiveerStappen(profiel, ghBeschikbaar())) {
+    // Rechtstreeks, zonder shell ertussen. Ging dit als commandoregel door
+    // cmd.exe, dan werden de aanhalingstekens onderdeel van de sleutel of viel
+    // een naam met een spatie uit elkaar -- zie accountActiveerStappen.
+    //
     // In de thuismap draaien: dit is globale config en hoort bij geen enkele repo.
     try {
-      execFileSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', stap.cmd], {
-        cwd: os.homedir(), encoding: 'utf8', timeout: 8000, windowsHide: true,
-        stdio: ['ignore', 'pipe', 'ignore'],
-      })
+      for (const o of stap.opdrachten) {
+        execFileSync(o.prog, o.args, {
+          cwd: os.homedir(), encoding: 'utf8', timeout: 8000, windowsHide: true,
+          env: childEnv(), stdio: ['ignore', 'pipe', 'pipe'],
+        })
+      }
       gedaan.push(stap.soort)
-    } catch { mislukt.push(stap.soort) }
+    } catch (e) {
+      // De reden bewaren en niet weggooien. Dat dit stil mislukte is precies
+      // waarom niemand jarenlang zag dat de app een account toonde dat git
+      // nooit had gekregen.
+      mislukt.push(stap.soort)
+      fouten[stap.soort] = String((e && e.stderr) || (e && e.message) || '').trim().slice(0, 300)
+    }
   }
-  return { ok: !!gedaan.length, gedaan, mislukt }
+  return { ok: !!gedaan.length, gedaan, mislukt, fouten }
+})
+
+// ── Klopt wat de app zegt met wat git doet? ──────────────────────────────────
+// Drie vragen die het paneel niet stelde en die alle drie fout stonden:
+//
+//   wie commit hier      -> user.name/user.email van déze map
+//   wie pusht hier       -> welk account de credential helper teruggeeft
+//   mag die ook pushen   -> `git ls-remote` zegt dat niet, dat is lezen
+//
+// Alles wat niet te meten is komt als null terug; daar hoort het paneel dan
+// ook over te zwijgen.
+ipcMain.handle('git:koppelingDiagnose', (_, dir) => {
+  if (!padToegestaan(dir)) return null
+  const leeg = {
+    identiteit: { naam: '', email: '' }, credentialGebruiker: '',
+    ghActief: '', viaGh: false, pushRecht: null, remote: '',
+  }
+  if (!dir || !fs.existsSync(dir) || !heeftGit()) return leeg
+
+  const ident = GitTools.parseIdentiteit(gitUit(dir, ['config', '--get-regexp', '^user\\.(name|email)$']))
+  const helpers = String(gitUit(dir, ['config', '--get-all', 'credential.https://github.com.helper']) || '')
+    + String(gitUit(dir, ['config', '--get-all', 'credential.helper']) || '')
+  const viaGh = /gh(\.exe)?['"]? auth git-credential/i.test(helpers)
+
+  // Wie zou git zijn als hij nú naar github.com ging? Dat is de vraag die de
+  // 403 verklaarde. Nooit om een wachtwoord vragen: dit draait onzichtbaar.
+  let credentialGebruiker = ''
+  try {
+    const uit = execFileSync('git', ['credential', 'fill'], {
+      cwd: dir, encoding: 'utf8', timeout: 8000, windowsHide: true,
+      input: 'protocol=https\nhost=github.com\n\n',
+      env: childEnv({ GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' }),
+      stdio: ['pipe', 'pipe', 'ignore'],
+    })
+    const m = String(uit || '').match(/^username=(.*)$/m)
+    credentialGebruiker = m ? m[1].trim() : ''
+  } catch { credentialGebruiker = '' }
+
+  let ghActief = ''
+  let pushRecht = null
+  const remote = String(gitUit(dir, ['remote', 'get-url', 'origin']) || '').trim()
+  if (ghBeschikbaar()) {
+    try {
+      const uit = execFileSync('gh', ['auth', 'status', '--hostname', 'github.com'], {
+        encoding: 'utf8', timeout: 8000, windowsHide: true, env: childEnv(),
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+      const m = String(uit || '').match(/account\s+([A-Za-z0-9-]+)/i)
+      ghActief = m ? m[1] : ''
+    } catch { ghActief = '' }
+
+    const rp = GitTools.ghRepoUitUrl(remote)
+    if (rp) {
+      try {
+        const uit = execFileSync('gh', ['api', `repos/${rp.eigenaar}/${rp.repo}`, '--jq', '.permissions.push'], {
+          encoding: 'utf8', timeout: 8000, windowsHide: true, env: childEnv(),
+          stdio: ['ignore', 'pipe', 'ignore'],
+        })
+        const t = String(uit || '').trim()
+        pushRecht = t === 'true' ? true : t === 'false' ? false : null
+      } catch { pushRecht = null }
+    }
+  }
+
+  return { identiteit: ident, credentialGebruiker, ghActief, viaGh, pushRecht, remote }
+})
+
+// Git zijn inloggegevens bij gh laten ophalen. Dat is de enige manier om er
+// één account van te maken: zonder dit houdt de Windows-kluis zijn eigen
+// account bij en pusht git als iemand anders dan de app laat zien.
+ipcMain.handle('git:viaGhInloggen', () => {
+  if (!ghBeschikbaar()) return { ok: false, reden: 'geen-gh' }
+  try {
+    execFileSync('gh', ['auth', 'setup-git'], {
+      cwd: os.homedir(), encoding: 'utf8', timeout: 15000, windowsHide: true,
+      env: childEnv(), stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, reden: 'mislukt', fout: String((e && e.stderr) || (e && e.message) || '').trim().slice(0, 300) }
+  }
 })
 
 // Wie ben je volgens GitHub? Na het inloggen weet gh dat, dus hoeft niemand

@@ -1008,23 +1008,13 @@ function cmdGridHtml(p, sectie) {
 
   return ids.map((id, i) => {
     if (!isMapId(id)) return knop(id, i, ids.length)
+    // Een dichte map is alleen zijn naam. Die hoort niet in het raster maar in
+    // de kopregel, naast de schakelaar -- zie dichteMappenHtml().
+    if (!mapIsOpen(p, id)) return ''
     const f = folderOp(p, mapIdVan(id))
     if (!f) return ''
     const kinderen = inhoud[id] || []
-    const open = f.open !== false
-    const kop = `<button class="cmd-map-kop ${open ? '' : 'dicht'}" data-map="${esc(f.id)}" title="${esc(I18N.t('folder.toggleTitle'))}">
-      <i class="ti ${open ? 'ti-folder-open' : 'ti-folder'}"></i>
-      <span class="cmd-map-naam">${esc(f.label)}</span>
-      <span class="cmd-map-aantal">${kinderen.length}</span>
-    </button>`
-    const kopDeel = sorteren
-      ? `<span class="cmd-sort-item cmd-map-regel" data-volgorde-id="${esc(id)}">${pijlenHtml(i === 0, i === ids.length - 1, true)}${kop}</span>`
-      : kop
-    // Dicht is de map niet meer dan zijn naam: een chip die naast de andere
-    // dichte mappen past. Open wordt het een blok over de hele breedte, met de
-    // naam erboven -- anders is bij een lange rij niet te zien waar de map
-    // ophoudt en de gewone knoppen weer beginnen.
-    if (!open) return kopDeel
+    const kopDeel = mapKopHtml(p, f, kinderen.length, sorteren ? { i, aantal: ids.length } : null)
     const leeg = sorteren ? `<span class="cmd-map-leeg">${esc(I18N.t('folder.emptyHint'))}</span>` : ''
     const binnen = kinderen.map((kid, ki) => knop(kid, ki, kinderen.length)).join('') || leeg
     return `<div class="cmd-map-groep" data-map-groep="${esc(f.id)}">
@@ -1032,6 +1022,37 @@ function cmdGridHtml(p, sectie) {
       <div class="cmd-map-inhoud">${binnen}</div>
     </div>`
   }).join('')
+}
+
+// De naam van een map, als knop. `plek` is alleen in de sorteermodus gevuld:
+// dan komen de pijltjes erbij en hangt het id eraan waar het slepen mee rekent.
+function mapKopHtml(p, f, aantal, plek = null) {
+  const open = f.open !== false
+  const kop = `<button class="cmd-map-kop ${open ? '' : 'dicht'}" data-map="${esc(f.id)}" title="${esc(I18N.t('folder.toggleTitle'))}">
+    <i class="ti ${open ? 'ti-folder-open' : 'ti-folder'}"></i>
+    <span class="cmd-map-naam">${esc(f.label)}</span>
+    <span class="cmd-map-aantal">${aantal}</span>
+  </button>`
+  if (!plek) return kop
+  return `<span class="cmd-sort-item cmd-map-regel" data-volgorde-id="${esc(MAP_PREFIX + f.id)}">`
+    + `${pijlenHtml(plek.i === 0, plek.i === plek.aantal - 1, true)}${kop}</span>`
+}
+
+// Dichte mappen staan in de kopregel, naast de schakelaar. Ze zijn klein en
+// zeggen alleen "hier zit nog meer"; onder de knoppen namen ze een hele regel
+// in beslag voor drie woorden. Past het niet meer naast elkaar, dan lopen ze
+// vanzelf door naar de volgende regel.
+function dichteMappenHtml(p, sectie) {
+  const ids = rijVolgorde(p, sectie)
+  const sorteren = cmdSorteerModus === sectie
+  const dicht = ids.filter(id => isMapId(id) && !mapIsOpen(p, id))
+  if (!dicht.length) return ''
+  return `<span class="cmd-kop-mappen">` + dicht.map(id => {
+    const f = folderOp(p, mapIdVan(id))
+    if (!f) return ''
+    const aantal = knoppenInMap(p, sectie, mapIdVan(id)).length
+    return mapKopHtml(p, f, aantal, sorteren ? { i: ids.indexOf(id), aantal: ids.length } : null)
+  }).join('') + `</span>`
 }
 
 function modalProjectCtx() {
@@ -2982,11 +3003,11 @@ function bedraadMapKoppen(p, sectie, grid) {
   })
 }
 
-function bedraadKnopSlepen(p, sectie, grid) {
+function bedraadKnopSlepen(p, sectie, blok, grid) {
   const bewaar = () => { saveProjects(); renderMain() }
   const gesleept = () => (sleepKnop && sleepKnop.sectie === sectie ? sleepKnop.id : null)
 
-  grid.querySelectorAll('.cmd-sort-item[data-volgorde-id]').forEach(item => {
+  blok.querySelectorAll('.cmd-sort-item[data-volgorde-id]').forEach(item => {
     const id = item.dataset.volgordeId
     item.draggable = true
     item.ondragstart = (e) => {
@@ -3030,7 +3051,7 @@ function bedraadKnopSlepen(p, sectie, grid) {
 
   // In de lege ruimte van een map laten vallen hoort ook gewoon "erin" te
   // betekenen. Precies mikken op de kop is geen bediening.
-  grid.querySelectorAll('[data-map-groep]').forEach(groep => {
+  blok.querySelectorAll('[data-map-groep]').forEach(groep => {
     groep.ondragover = (e) => { if (gesleept()) e.preventDefault() }
     groep.ondrop = (e) => {
       const bron = gesleept()
@@ -3212,8 +3233,10 @@ function bedraadCmdKnopVolgorde(p) {
     }
 
     bedraadMapMenu(p, sectie, blok)
-    bedraadMapKoppen(p, sectie, grid)
-    if (sorteren) bedraadKnopSlepen(p, sectie, grid)
+    // Op het hele blok en niet alleen het raster: de dichte mappen staan in de
+    // kopregel, en die moeten net zo goed open kunnen en dingen kunnen ontvangen.
+    bedraadMapKoppen(p, sectie, blok)
+    if (sorteren) bedraadKnopSlepen(p, sectie, blok, grid)
 
     grid.querySelectorAll('.cmd-btn').forEach(btn => {
       let timer = null
@@ -3551,6 +3574,7 @@ function renderMain() {
           <input type="checkbox" id="toggle-sectie-run" ${runAan ? 'checked' : ''} />
           <span class="toggle-slider"></span>
         </label>
+        ${dichteMappenHtml(p, 'run')}
         ${kopActiesHtml('run')}
       </div>
       <div class="cmd-grid ${cmdSorteerModus === 'run' ? 'cmd-sorteren' : ''}">
@@ -8393,9 +8417,16 @@ async function activeerGitVoorAccount() {
   try {
     const r = await window.api.gitAccountActiveren(prof)
     if (r && r.mislukt && r.mislukt.includes('gh-wissel')) {
-      // Alleen melden als het écht iets uitmaakt: naam en adres staan dan wel
-      // goed, maar pushen kan alsnog met het verkeerde GitHub-account.
+      // Naam en adres staan dan wel goed, maar pushen kan alsnog met het
+      // verkeerde GitHub-account.
       showToast(I18N.t('accounts.ghWisselMislukt', { naam: prof.ghGebruiker || '' }))
+    }
+    // De rest werd hier weggeslikt. Juist die stappen faalden jarenlang stil,
+    // en dat is waarom de app een account bleef tonen dat git nooit kreeg.
+    const stil = (r && r.mislukt ? r.mislukt : []).filter(x => x !== 'gh-wissel')
+    if (stil.length) {
+      console.warn('git-account activeren mislukt:', stil, (r && r.fouten) || {})
+      showToast(I18N.t('accounts.activerenMislukt', { stappen: stil.join(', ') }))
     }
     return r
   } catch { return null }
@@ -14448,6 +14479,9 @@ function buildEmojiPicker() {
 // project met twee mappen heeft twee repo's, en die kunnen los van elkaar stuk
 // zijn.
 let gitSectieProject = null
+// Wat git in deze map werkelijk doet, per pad. Los van gitStaten omdat het
+// alleen nodig is als je dit paneel openslaat -- er zit een netwerkvraag bij.
+let gitDiagnoses = {}
 
 function toonGitSectie(p) {
   const vak = document.getElementById('f-git-sectie')
@@ -14459,6 +14493,85 @@ function toonGitSectie(p) {
   tekenGitSectie()
   // De staat kan oud zijn; opnieuw ophalen en dan nog een keer tekenen.
   ververesGitStaat(p, true).then(() => tekenGitSectie())
+  ververesGitDiagnose(actieveLocPad(p))
+}
+
+// Wie commit hier, wie pusht hier, en mag die dat ook. Drie vragen die het
+// paneel niet stelde -- en die alle drie fout stonden terwijl er "koppeling
+// werkt" naast stond.
+async function ververesGitDiagnose(pad) {
+  if (!pad) return
+  try {
+    const d = await window.api.gitKoppelingDiagnose(pad)
+    if (d) { gitDiagnoses[pad] = d; tekenGitSectie() }
+  } catch {}
+}
+
+function accountAlsProfiel() {
+  const acc = huidigAccount()
+  if (!acc) return {}
+  return { naam: acc.gitNaam || '', email: acc.gitEmail || '', ghGebruiker: acc.ghGebruiker || '' }
+}
+
+// Eerst uitleggen wat er aan de hand is, dan pas de keuzes. Wie hier komt
+// heeft net een push zien mislukken en weet niet waarom; een knop zonder verhaal
+// is dan alleen maar een tweede raadsel. Niets gebeurt uit zichzelf -- stil
+// ingrijpen is precies hoe dit probleem zo lang verborgen kon blijven.
+//
+// Geeft true terug als er iets veranderd is en het paneel opnieuw moet.
+async function legKoppelProbleemUit(project, pad, pr) {
+  const van = pr.van || '—'
+  const naar = pr.naar || '—'
+
+  if (pr.actie === 'via-gh') {
+    const keuze = await vraagKeuze({
+      titel: I18N.t('gitset.viaGhTitel'),
+      tekst: I18N.t('gitset.viaGhTekst'),
+      regels: [I18N.t('gitset.inlog-anders', { van, naar })],
+      knoppen: [
+        { label: I18N.t('gitset.nietsDoen'), waarde: '' },
+        { label: I18N.t('gitset.viaGhKnop'), waarde: 'doen', soort: 'primair' },
+      ],
+    })
+    if (keuze !== 'doen') return false
+    const r = await window.api.gitViaGhInloggen()
+    showToast(r && r.ok ? I18N.t('gitset.viaGhGelukt')
+      : I18N.t('gitset.viaGhMislukt', { fout: (r && r.fout) || (r && r.reden) || '' }))
+    if (r && r.ok) await ververesGitDiagnose(pad)
+    return !!(r && r.ok)
+  }
+
+  if (pr.actie === 'gh-wissel') {
+    const keuze = await vraagKeuze({
+      titel: I18N.t('gitset.ghWisselTitel'),
+      tekst: I18N.t('gitset.ghWisselTekst', { van, naar }),
+      knoppen: [
+        { label: I18N.t('gitset.nietsDoen'), waarde: '' },
+        { label: I18N.t('gitset.ghWisselKnop', { naar }), waarde: 'doen', soort: 'primair' },
+      ],
+    })
+    if (keuze !== 'doen') return false
+    await activeerGitVoorAccount()
+    await ververesGitDiagnose(pad)
+    return true
+  }
+
+  if (pr.actie === 'identiteit') {
+    const keuze = await vraagKeuze({
+      titel: I18N.t('gitset.identFixTitel'),
+      tekst: I18N.t('gitset.identFixTekst', { van, naar }),
+      knoppen: [
+        { label: I18N.t('gitset.nietsDoen'), waarde: '' },
+        { label: I18N.t('gitset.identFixKnop'), waarde: 'doen', soort: 'primair' },
+      ],
+    })
+    if (keuze !== 'doen') return false
+    const prof = gitStandaardProfiel()
+    if (prof) await pasProfielToe(project, prof, { stil: true })
+    await ververesGitDiagnose(pad)
+    return true
+  }
+  return false
 }
 
 function tekenGitSectie() {
@@ -14479,28 +14592,64 @@ function tekenGitSectie() {
     : I18N.t('gitset.kopGeenRepo')
   const koppelTekst = !staat.isRepo ? ''
     : staat.koppeling === 'geen'     ? I18N.t('gitset.koppelGeen')
-    : staat.koppeling === 'ok'       ? I18N.t('gitset.koppelOk')
+    : staat.koppeling === 'ok'       ? I18N.t('gitset.koppelOk')  // zie hieronder: dit zegt alleen dat het adres antwoordt
     : staat.koppeling === 'stuk'     ? I18N.t('gitset.koppelStuk')
     :                                  I18N.t('gitset.koppelOnbekend')
 
+  // De identiteit die hier stond kwam uit het accountbestand van de app. Dat
+  // is een wens, geen feit: git kan in deze map iets heel anders hebben staan,
+  // en dat is precies wat er misging. Dus tonen we wat git zelf zegt, en pas
+  // als we dat nog niet weten vallen we terug op het account.
   const acc = huidigAccount()
-  const identTekst = acc && acc.gitCompleet
+  const diag = gitDiagnoses[pad] || null
+  const gitIdent = (diag && diag.identiteit) || null
+  const identTekst = gitIdent && (gitIdent.naam || gitIdent.email)
     ? I18N.t('gitset.identiteit', {
-        naam: acc.gitNaam, email: acc.gitEmail,
-        gh: acc.ghGebruiker ? ' · ' + acc.ghGebruiker : '',
+        naam: gitIdent.naam || '—', email: gitIdent.email || '—',
+        gh: diag.credentialGebruiker ? ' · ' + diag.credentialGebruiker : '',
       })
-    : I18N.t('gitset.identiteitOnaf')
+    : acc && acc.gitCompleet
+      ? I18N.t('gitset.identiteit', {
+          naam: acc.gitNaam, email: acc.gitEmail,
+          gh: acc.ghGebruiker ? ' · ' + acc.ghGebruiker : '',
+        })
+      : I18N.t('gitset.identiteitOnaf')
+
+  const koppelProblemen = diag
+    ? GitTools.koppelingProblemen({ ...diag, account: accountAlsProfiel() })
+    : []
+
+  // `git ls-remote` bewijst alleen dat het adres te lézen is. Een publieke repo
+  // antwoordt ook als je er niets in mag zetten, en dan stond hier groen naast
+  // een push die stukliep. Weten we het echte antwoord, dan telt dat.
+  const pushRecht = diag ? diag.pushRecht : null
+  const koppelSoort = pushRecht === false ? 'stuk' : pushRecht === true ? 'ok' : staat.koppeling
+  const koppelBadge = pushRecht === false ? I18N.t('gitset.koppelGeenPush')
+    : pushRecht === true ? I18N.t('gitset.koppelPushOk')
+    : koppelTekst
 
   const delen = [`<div class="git-set-kop ${ernst ? 'e-' + ernst : ''}">
       <i class="ti ti-git-branch"></i>
       <span>${esc(kop)}</span>
-      ${koppelTekst ? `<span class="git-set-status s-${esc(staat.koppeling)}">${esc(koppelTekst)}</span>` : ''}
+      ${koppelBadge ? `<span class="git-set-status s-${esc(koppelSoort)}">${esc(koppelBadge)}</span>` : ''}
     </div>`,
     `<div class="git-set-ident ${acc && acc.gitCompleet ? '' : 'onaf'}">
       <i class="ti ti-brand-github"></i>
       <span>${esc(identTekst)}</span>
       <button class="btn-ghost btn-mini" id="git-set-identiteit">${esc(I18N.t('gitset.identiteitKnop'))}</button>
     </div>`]
+
+  // Eerst zeggen wát er niet klopt, met de twee namen erbij. De knop legt uit
+  // en biedt de keuzes; hier direct iets veranderen zou hetzelfde stille
+  // gedrag zijn waar dit hele probleem uit voortkwam.
+  if (koppelProblemen.length) {
+    delen.push(`<div class="git-set-waarschuwingen">` + koppelProblemen.map(pr => `
+      <div class="git-set-waarschuwing e-${esc(pr.ernst)}">
+        <i class="ti ti-alert-triangle"></i>
+        <span>${esc(I18N.t('gitset.' + pr.id, { van: pr.van || '', naar: pr.naar || '' }))}</span>
+        <button class="btn-ghost btn-mini" data-koppel-fix="${esc(pr.actie)}">${esc(I18N.t('gitset.bekijken'))}</button>
+      </div>`).join('') + `</div>`)
+  }
 
   // 2. Elk adres apart, met een knop om het te wijzigen of weg te halen. Bij
   //    twee remotes waarvan er één dood is, is dit de plek waar je ziet welke.
@@ -14562,6 +14711,12 @@ function bindGitSectie(p, pad, staat) {
   doel.querySelector('#git-set-koppel')?.addEventListener('click', async () => {
     await koppelGithub(p)
     await naAfloop()
+  })
+  doel.querySelectorAll('[data-koppel-fix]').forEach(knop => {
+    const pr = koppelProblemen.find(x => x.actie === knop.dataset.koppelFix)
+    knop.addEventListener('click', async () => {
+      if (pr && await legKoppelProbleemUit(p, pad, pr)) await naAfloop()
+    })
   })
   doel.querySelector('#git-set-identiteit')?.addEventListener('click', async () => {
     const a = huidigAccount()
