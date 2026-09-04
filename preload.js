@@ -44,6 +44,7 @@ contextBridge.exposeInMainWorld('api', {
   projectSoort:  (p)     => ipcRenderer.invoke('fs:projectSoort', p),
   isMap:         (p)     => ipcRenderer.invoke('fs:isMap', p),
   leesTekst:     (p)     => ipcRenderer.invoke('fs:leesTekst', p),
+  schrijfTekst:  (o)     => ipcRenderer.invoke('fs:schrijfTekst', o || {}),
   zoekSite:      (d)     => ipcRenderer.invoke('web:zoekSite', d),
   siteStart:     (o)     => ipcRenderer.invoke('web:start', o || {}),
   siteStop:      (id)    => ipcRenderer.invoke('web:stop', id),

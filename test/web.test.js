@@ -80,6 +80,25 @@ t('een map die er alleen op lijkt niet',
 t('en ernaast al helemaal niet',
   !W.binnenWortel('C:\\site', 'C:\\anders\\a.css', '\\'))
 
+// ── Opslaan zonder te verminken ──────────────────────────────────────────────
+// bat:save dwingt CRLF af; hier hoort het bestand te blijven zoals het was.
+t('LF blijft LF', W.tekstVoorSchrijf('a\nb', { crlf: false }) === 'a\nb')
+t('CRLF blijft CRLF', W.tekstVoorSchrijf('a\nb', { crlf: true }) === 'a\r\nb')
+t('gemengde eindes worden één soort',
+  W.tekstVoorSchrijf('a\r\nb\rc\nd', { crlf: true }) === 'a\r\nb\r\nc\r\nd')
+t('BOM komt terug vooraan',
+  W.tekstVoorSchrijf('x', { bom: true }).charCodeAt(0) === 0xfeff)
+t('zonder vlag geen BOM',
+  W.tekstVoorSchrijf('x', { bom: false }).charCodeAt(0) !== 0xfeff)
+t('geldige utf-8 wordt herkend', W.isGeldigUtf8(Buffer.from('café', 'utf8')))
+t('ongeldige bytes niet', !W.isGeldigUtf8(Buffer.from([0xc3, 0x28])))
+
+t('zoeken vindt ongeacht hoofdletters',
+  W.zoekInTekst('Abc abc', 'ABC').length === 2)
+t('lege naald geeft niets', W.zoekInTekst('abc', '').length === 0)
+t('hoofdlettergevoelig kan aan',
+  W.zoekInTekst('Abc abc', 'ABC', { hoofdlettergevoelig: true }).length === 0)
+
 // ── De bedrading ─────────────────────────────────────────────────────────────
 const main = fs.readFileSync(path.join(APP, 'main.js'), 'utf8')
 const pre = fs.readFileSync(path.join(APP, 'preload.js'), 'utf8')
@@ -87,10 +106,15 @@ const ren = fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8')
 const html = fs.readFileSync(path.join(APP, 'index.html'), 'utf8')
 const css = fs.readFileSync(path.join(APP, 'style.css'), 'utf8')
 
-t('main kan een site zoeken, lezen en serveren',
+t('main kan een site zoeken, lezen, schrijven en serveren',
   /ipcMain\.handle\('web:zoekSite'/.test(main)
   && /ipcMain\.handle\('fs:leesTekst'/.test(main)
+  && /ipcMain\.handle\('fs:schrijfTekst'/.test(main)
   && /ipcMain\.handle\('web:start'/.test(main))
+t('opslaan gebruikt tekstVoorSchrijf, niet de CRLF-dwang van bat',
+  /fs:schrijfTekst'[\s\S]{0,500}tekstVoorSchrijf/.test(main)
+  && !/ipcMain\.handle\('fs:schrijfTekst'[\s\S]{0,400}replace\(\/\\r\?\\n/.test(main))
+t('lezen weigert niet-utf8', /'geen-utf8'/.test(main))
 t('de server luistert alleen op deze pc',
   /server\.listen\(0, '127\.0\.0\.1'/.test(main))
 t('en gaat dicht als de app weg is',
@@ -102,13 +126,24 @@ t('elke aanvraag wordt op insluiting getoetst',
 t('groot en binair worden geweigerd bij het lezen',
   /'te-groot'/.test(main) && /'binair'/.test(main))
 t('preload geeft de nieuwe wegen door',
-  /zoekSite:/.test(pre) && /leesTekst:/.test(pre) && /siteStart:/.test(pre))
+  /zoekSite:/.test(pre) && /leesTekst:/.test(pre)
+  && /schrijfTekst:/.test(pre) && /siteStart:/.test(pre))
 
 t('index.html laadt web-tools.js vóór renderer.js',
   html.includes('src="web-tools.js"')
   && html.indexOf('src="web-tools.js"') < html.indexOf('src="renderer.js"'))
-t('en heeft een leesvenster', /id="modal-lezer"/.test(html) && /id="lezer-inhoud"/.test(html))
-t('met opmaak', css.includes('.lezer-inhoud {') && css.includes('.modal.modal-groot {'))
+t('en heeft een bewerkbaar leesvenster',
+  /id="modal-lezer"/.test(html)
+  && /id="lezer-inhoud"/.test(html)
+  && /<textarea[^>]*id="lezer-inhoud"/.test(html)
+  && /id="lezer-opslaan"/.test(html)
+  && /id="lezer-regels"/.test(html)
+  && /id="lezer-zoek"/.test(html))
+t('met opmaak voor regels en zoeken',
+  css.includes('.lezer-inhoud {')
+  && css.includes('.lezer-regels')
+  && css.includes('.lezer-zoek')
+  && css.includes('.modal.modal-groot {'))
 
 t('slepen gaat langs één plek die kijkt wat het is',
   /async function verwerkGesleept\(/.test(ren))
@@ -122,7 +157,15 @@ t('een map die al een project is wordt herkend',
 t('het projectvenster krijgt het pad al ingevuld',
   /function openNieuwProjectMet\(/.test(ren))
 t('escape sluit het leesvenster',
-  /modal-lezer'\)\.hidden\)\s*\{ e\.preventDefault\(\); sluitLezer\(\)/.test(ren))
+  /modal-lezer'\)\.hidden\)[\s\S]{0,280}sluitLezer\(/.test(ren))
+t('niet-opgeslagen werk hangt aan de bestaande haak',
+  /controleerOnveiligWerk[\s\S]{0,200}controleerLezerWerk/.test(ren)
+  && /async function selectProject\(/.test(ren)
+  && /controleerLezerWerk\('wisselen'\)/.test(ren))
+t('tab springt in, niet naar de volgende knop',
+  /e\.key === 'Tab'/.test(ren) && /\\t'/.test(ren))
+t('ctrl\+s slaat op',
+  /e\.key === 's'/.test(ren) && /slaLezerOp\(/.test(ren))
 
 for (const sleutel of ['sleep.titel', 'sleep.tekst', 'sleep.tekstBestaand', 'sleep.alProject',
                        'sleep.htmlGevonden', 'sleep.inVerkenner', 'sleep.alsProject', 'sleep.alsSite',
@@ -130,11 +173,81 @@ for (const sleutel of ['sleep.titel', 'sleep.tekst', 'sleep.tekstBestaand', 'sle
                        'sleep.siteMisluktTitel', 'sleep.siteMisluktTekst', 'sleep.nietsMeeTeDoen',
                        'lezer.kopieer', 'lezer.inMap', 'lezer.metWindows', 'lezer.gekopieerd',
                        'lezer.info', 'lezer.nietGelukt', 'lezer.teGroot', 'lezer.binair',
-                       'lezer.onleesbaar']) {
+                       'lezer.onleesbaar', 'lezer.geenUtf8', 'lezer.nietOpgeslagen',
+                       'lezer.bestand', 'lezer.opgeslagen', 'lezer.opslaanMislukt',
+                       'lezer.opslaanMisluktTekst', 'lezer.eldersTitel', 'lezer.eldersTekst',
+                       'lezer.opnieuwInlezen', 'lezer.overschrijven', 'lezer.wisselTitel',
+                       'lezer.wisselTekst', 'lezer.afsluitTitel', 'lezer.afsluitTekst',
+                       'lezer.nietOpslaan', 'lezer.zoeken', 'lezer.zoekPlaceholder',
+                       'lezer.zoekVorige', 'lezer.zoekVolgende',
+                       'lezer.zoekTreffers', 'lezer.zoekNiets']) {
   t('tekst ' + sleutel + ' bestaat in nl en en', !!nl[sleutel] && !!en[sleutel])
 }
 t('de sleep-overlay noemt niet meer alleen bat',
   !/\.bat/i.test(nl['dropOverlay.subtitle']))
 
-console.log(ok ? '\nALLE WEB-TESTS OK' : '\nER ZIJN WEB-TESTS GEZAKT')
-process.exit(ok ? 0 : 1)
+// ── Opslaan op schijf (ipc) ──────────────────────────────────────────────────
+// Zonder Electron, met dezelfde handlers als bat.test.js. Bewijst dat CRLF en
+// BOM blijven, en dat bat:save níét per ongeluk wordt gebruikt.
+const Module = require('module'), os = require('os')
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'web-schrijf-'))
+const handlers = {}
+const fake = {
+  app: { getPath: () => TMP, whenReady: () => ({ then: () => {} }), on: () => {},
+         relaunch: () => {}, quit: () => {}, exit: () => {}, isPackaged: false,
+         getAppPath: () => APP },
+  BrowserWindow: function () {
+    this.on = () => {}; this.close = () => {}; this.loadFile = () => {}
+    this.webContents = { send: () => {} }; this.isDestroyed = () => false
+  },
+  ipcMain: { on: () => {}, handle: (n, f) => { handlers[n] = f } },
+  dialog: { showOpenDialog: async () => ({ canceled: true }) },
+  shell: { openPath: () => {} },
+}
+const origLoad = Module._load
+Module._load = function (r) {
+  if (r === 'electron') return fake
+  return origLoad.apply(this, arguments)
+}
+require(path.join(APP, 'main.js'))
+Module._load = origLoad
+const call = (n, a) => handlers[n](null, a)
+
+;(async () => {
+  const lf = path.join(TMP, 'lf.css')
+  fs.writeFileSync(lf, 'a\nb\n', 'utf8')
+  let r = await call('fs:leesTekst', lf)
+  t('lezen ziet LF', r.ok && r.crlf === false && r.inhoud === 'a\nb\n')
+  r = await call('fs:schrijfTekst', { pad: lf, inhoud: 'x\ny', bom: false, crlf: false })
+  t('opslaan met LF blijft LF', r.ok && fs.readFileSync(lf, 'utf8') === 'x\ny')
+
+  const crlf = path.join(TMP, 'crlf.html')
+  fs.writeFileSync(crlf, 'a\r\nb\r\n', 'utf8')
+  r = await call('fs:leesTekst', crlf)
+  t('lezen ziet CRLF', r.ok && r.crlf === true)
+  r = await call('fs:schrijfTekst', { pad: crlf, inhoud: 'p\nq', bom: false, crlf: true })
+  t('opslaan met CRLF blijft CRLF',
+    r.ok && fs.readFileSync(crlf, 'utf8') === 'p\r\nq')
+
+  const bom = path.join(TMP, 'bom.js')
+  fs.writeFileSync(bom, '\uFEFFconst x = 1\n', 'utf8')
+  r = await call('fs:leesTekst', bom)
+  t('lezen ziet de BOM en haalt hem uit het venster',
+    r.ok && r.bom === true && !r.inhoud.startsWith('\uFEFF'))
+  r = await call('fs:schrijfTekst', { pad: bom, inhoud: r.inhoud, bom: true, crlf: false })
+  t('opslaan zet de BOM terug',
+    r.ok && fs.readFileSync(bom, 'utf8').charCodeAt(0) === 0xfeff)
+
+  const bin = path.join(TMP, 'bin.css')
+  fs.writeFileSync(bin, Buffer.from([0x61, 0x00, 0x62]))
+  r = await call('fs:leesTekst', bin)
+  t('binair wordt geweigerd', r.ok === false && r.reden === 'binair')
+
+  const slecht = path.join(TMP, 'win1252.css')
+  fs.writeFileSync(slecht, Buffer.from([0x63, 0x6f, 0x6c, 0x6f, 0x75, 0x72, 0x3a, 0x20, 0xe9]))
+  r = await call('fs:leesTekst', slecht)
+  t('geen utf-8 wordt geweigerd', r.ok === false && r.reden === 'geen-utf8')
+
+  console.log(ok ? '\nALLE WEB-TESTS OK' : '\nER ZIJN WEB-TESTS GEZAKT')
+  process.exit(ok ? 0 : 1)
+})().catch(e => { console.error(e); process.exit(1) })

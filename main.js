@@ -1237,9 +1237,11 @@ ipcMain.handle('fs:leesTekst', (_, bestand) => {
     }
     const rauw = fs.readFileSync(bestand)
     if (rauw.subarray(0, 1024).includes(0)) return { ok: false, reden: 'binair' }
+    // Geen UTF-8 liever weigeren dan stilletjes verminken bij opslaan.
+    if (!WebTools.isGeldigUtf8(rauw)) return { ok: false, reden: 'geen-utf8' }
     let tekst = rauw.toString('utf8')
-    // Een BOM hoort niet in het venster; bij het opslaan (ronde 2) hoort hij
-    // er weer voor. Daarom melden we dat hij er was.
+    // Een BOM hoort niet in het venster; bij het opslaan hoort hij er weer
+    // voor. Daarom melden we dat hij er was.
     const bom = tekst.charCodeAt(0) === 0xfeff
     if (bom) tekst = tekst.slice(1)
     return {
@@ -1248,6 +1250,23 @@ ipcMain.handle('fs:leesTekst', (_, bestand) => {
       // het was, en bat:save doet dat juist níét (die dwingt CRLF af).
       crlf: /\r\n/.test(tekst),
     }
+  } catch (e) {
+    return { ok: false, reden: String((e && e.message) || 'onbekend') }
+  }
+})
+
+// Opslaan mét de regeleindes en BOM van het origineel. Niet bat:save hergebruiken:
+// die dwingt \r\n af. Geen padToegestaan hier — net als bij lezen en bat:save,
+// want een gesleept bestand hoort bij geen project.
+ipcMain.handle('fs:schrijfTekst', (_, { pad, inhoud, bom, crlf } = {}) => {
+  try {
+    if (!pad) return { ok: false, reden: 'geen-pad' }
+    const dir = path.dirname(pad)
+    if (!fs.existsSync(dir)) return { ok: false, reden: 'geen-map' }
+    const tekst = WebTools.tekstVoorSchrijf(inhoud, { bom: !!bom, crlf: !!crlf })
+    fs.writeFileSync(pad, tekst, 'utf8')
+    const st = fs.statSync(pad)
+    return { ok: true, mtime: st.mtimeMs, bytes: st.size }
   } catch (e) {
     return { ok: false, reden: String((e && e.message) || 'onbekend') }
   }

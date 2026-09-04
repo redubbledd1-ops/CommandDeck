@@ -153,9 +153,53 @@
     return p === w || p.startsWith(w + teken)
   }
 
+  // ── Opslaan zonder het bestand te verminken ────────────────────────────────
+  // bat:save dwingt \r\n af omdat cmd.exe daarover struikelt. Voor html/css/js
+  // hoort het bestand te blijven zoals het was: zelfde regeleindes, zelfde BOM.
+  // Eerst alles naar \n, anders krijg je bij gemengde eindes een wirwar.
+  function tekstVoorSchrijf(inhoud, opties) {
+    const o = opties || {}
+    let t = String(inhoud == null ? '' : inhoud)
+    t = t.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+    if (o.crlf) t = t.replace(/\n/g, '\r\n')
+    if (o.bom) t = '\uFEFF' + t
+    return t
+  }
+
+  // Ronde-trip: wat toString('utf8') ervan maakt moet weer dezelfde bytes zijn.
+  // Anders zou opslaan stilletjes � zetten waar een Windows-1252-letter stond.
+  function isGeldigUtf8(bytes) {
+    if (!bytes || typeof bytes.length !== 'number') return false
+    try {
+      const alsTekst = Buffer.from(bytes).toString('utf8')
+      return Buffer.compare(Buffer.from(alsTekst, 'utf8'), Buffer.from(bytes)) === 0
+    } catch { return false }
+  }
+
+  // Zoeken in één bestand. Case-insensitive standaard: je zoekt een woord, niet
+  // een exacte spelling. Geeft startposities terug zodat de UI erdoorheen kan.
+  function zoekInTekst(tekst, naald, opties) {
+    const bron = String(tekst == null ? '' : tekst)
+    const q = String(naald == null ? '' : naald)
+    if (!q) return []
+    const gevoelig = !!(opties && opties.hoofdlettergevoelig)
+    const bronL = gevoelig ? bron : bron.toLowerCase()
+    const qL = gevoelig ? q : q.toLowerCase()
+    const hits = []
+    let van = 0
+    while (van <= bronL.length) {
+      const i = bronL.indexOf(qL, van)
+      if (i < 0) break
+      hits.push(i)
+      van = i + Math.max(1, qL.length)
+    }
+    return hits
+  }
+
   return {
     START_NAMEN, START_MAPPEN, startKandidaten, besteStart,
     TEKST_EXT, WEB_EXT, extensieVan, isTekstBestand, isWebBestand,
     MAX_TEKST_BYTES, MIME, mimeVoor, padUitUrl, doelPad, binnenWortel,
+    tekstVoorSchrijf, isGeldigUtf8, zoekInTekst,
   }
 })

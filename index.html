@@ -401,8 +401,7 @@
 </div>
 
 <!-- Overlay bij het slepen van een bestand -->
-<!-- Een bestand bekijken zonder de app te verlaten. Ronde 1 is lezen;
-     opslaan komt in ronde 2 (zie TODO-web.md). -->
+<!-- Snel iets aanpassen in html/css/js — geen IDE. Zie TODO-web.md ronde 2. -->
 <div class="modal-backdrop" id="modal-lezer" hidden>
   <div class="modal modal-groot">
     <div class="modal-header">
@@ -410,12 +409,24 @@
       <button class="modal-close" id="lezer-sluit"><i class="ti ti-x"></i></button>
     </div>
     <div class="lezer-pad mono" id="lezer-pad"></div>
-    <div class="lezer-vak"><pre class="lezer-inhoud mono" id="lezer-inhoud"></pre></div>
+    <div class="lezer-zoek" id="lezer-zoek" hidden>
+      <input class="lezer-zoek-invoer mono" id="lezer-zoek-invoer" type="text" data-i18n-placeholder="lezer.zoekPlaceholder" placeholder="zoeken…" autocomplete="off" spellcheck="false">
+      <span class="lezer-zoek-info" id="lezer-zoek-info"></span>
+      <button class="btn-ghost" id="lezer-zoek-vorige" data-i18n-title="lezer.zoekVorige" title="vorige"><i class="ti ti-chevron-up"></i></button>
+      <button class="btn-ghost" id="lezer-zoek-volgende" data-i18n-title="lezer.zoekVolgende" title="volgende"><i class="ti ti-chevron-down"></i></button>
+      <button class="btn-ghost" id="lezer-zoek-dicht" data-i18n-title="common.close" title="sluiten"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="lezer-vak">
+      <pre class="lezer-regels mono" id="lezer-regels" aria-hidden="true"></pre>
+      <textarea class="lezer-inhoud mono" id="lezer-inhoud" spellcheck="false" wrap="off"></textarea>
+    </div>
     <div class="modal-footer">
       <span class="lezer-info" id="lezer-info"></span>
+      <button class="btn-ghost" id="lezer-zoek-knop" data-i18n="lezer.zoeken">zoeken</button>
       <button class="btn-ghost" id="lezer-kopieer" data-i18n="lezer.kopieer">kopiëren</button>
       <button class="btn-ghost" id="lezer-map" data-i18n="lezer.inMap">map openen</button>
-      <button class="btn-primary" id="lezer-windows" data-i18n="lezer.metWindows">openen met Windows</button>
+      <button class="btn-ghost" id="lezer-windows" data-i18n="lezer.metWindows">openen met Windows</button>
+      <button class="btn-primary" id="lezer-opslaan" data-i18n="common.save">opslaan</button>
     </div>
   </div>
 </div>

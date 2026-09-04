@@ -3055,7 +3055,11 @@ function renderSidebar() {
   settingsBtn.onclick = toggleSettings
 }
 
-function selectProject(id) {
+async function selectProject(id) {
+  // Niet-opgeslagen tekst in het leesvenster hoort niet stil te verdwijnen
+  // als je van project wisselt — zelfde vraag als bij account/afsluiten.
+  if (await controleerLezerWerk('wisselen') === 'blijven') return
+
   cmdSorteerModus = ''
   bergVerkennerOp()
   activeId = id
@@ -8248,13 +8252,83 @@ async function openBatUitSleep(bat) {
   }
 }
 
-// ── Een bestand bekijken ─────────────────────────────────────────────────────
-// Ronde 1 is lezen. Opslaan komt in ronde 2; tot die tijd staat de knop naar
-// je eigen editor ernaast, zodat dit venster nooit een doodlopende weg is.
-let lezerPad = ''
+// ── Een bestand bekijken en bewerken ─────────────────────────────────────────
+// Snel iets aanpassen — een kleur, een zin — geen IDE. Opslaan houdt regeleindes
+// en BOM van het origineel; bat:save doet dat juist níét (die dwingt CRLF af).
+const lezerStaat = {
+  pad: '', naam: '', inhoud: '', mtime: null, bom: false, crlf: false,
+  dirty: false, bytes: 0,
+  zoekHits: [], zoekIdx: -1,
+}
+
+function lezerOpen() {
+  return !document.getElementById('modal-lezer').hidden
+}
+
+function lezerInhoudEl() {
+  return document.getElementById('lezer-inhoud')
+}
+
+function lezerTitelBijwerken() {
+  const t = document.getElementById('lezer-titel')
+  if (!t) return
+  t.textContent = (lezerStaat.naam || '') + (lezerStaat.dirty ? ' •' : '')
+}
+
+// Buffer bestaat in de renderer niet altijd; TextEncoder wel. Bytes kloppen
+// pas weer precies na opslaan — voor de infobalk is een schatting genoeg.
+function lezerGrootteSchatting(tekst) {
+  try {
+    if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(tekst).length
+  } catch {}
+  return String(tekst || '').length
+}
+
+function lezerInfoBijwerken() {
+  const el = document.getElementById('lezer-info')
+  if (!el) return
+  const tekst = lezerInhoudEl()?.value ?? lezerStaat.inhoud
+  const regels = tekst ? tekst.split('\n').length : 0
+  const grootte = lezerStaat.dirty ? lezerGrootteSchatting(tekst) : (lezerStaat.bytes || 0)
+  el.textContent = I18N.t('lezer.info', { regels, grootte: toonBytes(grootte) })
+    + (lezerStaat.dirty ? ' · ' + I18N.t('lezer.nietOpgeslagen') : '')
+  el.classList.toggle('vuil', !!lezerStaat.dirty)
+}
+
+function lezerRegelsBijwerken() {
+  const vak = lezerInhoudEl()
+  const kolom = document.getElementById('lezer-regels')
+  if (!vak || !kolom) return
+  const n = Math.max(1, (vak.value.match(/\n/g) || []).length + 1)
+  // Alleen opnieuw opbouwen als het aantal regels veranderde — anders
+  // flikkert de kolom bij elke toetsaanslag.
+  if (kolom.dataset.regels === String(n)) {
+    kolom.scrollTop = vak.scrollTop
+    return
+  }
+  kolom.dataset.regels = String(n)
+  let html = ''
+  for (let i = 1; i <= n; i++) html += '<span>' + i + '</span>'
+  kolom.innerHTML = html
+  kolom.scrollTop = vak.scrollTop
+}
+
+function lezerMarkeerVuil() {
+  const vak = lezerInhoudEl()
+  if (!vak) return
+  const nu = vak.value
+  lezerStaat.dirty = nu !== lezerStaat.inhoud
+  lezerTitelBijwerken()
+  lezerInfoBijwerken()
+  lezerRegelsBijwerken()
+}
 
 async function toonBestand(pad) {
   if (!pad) return
+  // Ander bestand terwijl er nog iets openstaat: eerst dat wegzetten.
+  if (lezerOpen() && lezerStaat.pad && lezerStaat.pad !== pad) {
+    if (await controleerLezerWerk('bestand') === 'blijven') return
+  }
   const naam = String(pad).split(/[\\/]/).pop()
 
   if (!WebTools.isTekstBestand(pad)) {
@@ -8270,43 +8344,274 @@ async function toonBestand(pad) {
     await meldKort(I18N.t('lezer.nietGelukt'), I18N.t(
       reden === 'te-groot' ? 'lezer.teGroot'
       : reden === 'binair' ? 'lezer.binair'
+      : reden === 'geen-utf8' ? 'lezer.geenUtf8'
       : 'lezer.onleesbaar', { max: Math.round(WebTools.MAX_TEKST_BYTES / 1024 / 1024) }))
     return
   }
 
-  lezerPad = pad
-  document.getElementById('lezer-titel').textContent = naam
+  lezerStaat.pad = pad
+  lezerStaat.naam = naam
+  lezerStaat.inhoud = r.inhoud
+  lezerStaat.mtime = r.mtime ?? null
+  lezerStaat.bom = !!r.bom
+  lezerStaat.crlf = !!r.crlf
+  lezerStaat.bytes = r.bytes || 0
+  lezerStaat.dirty = false
+  lezerStaat.zoekHits = []
+  lezerStaat.zoekIdx = -1
+
   document.getElementById('lezer-pad').textContent = pad
-  document.getElementById('lezer-inhoud').textContent = r.inhoud
-  document.getElementById('lezer-info').textContent = I18N.t('lezer.info', {
-    regels: r.inhoud ? r.inhoud.split('\n').length : 0,
-    grootte: toonBytes(r.bytes || 0),
-  })
-  document.getElementById('lezer-inhoud').scrollTop = 0
+  const vak = lezerInhoudEl()
+  vak.value = r.inhoud
+  delete document.getElementById('lezer-regels').dataset.regels
+  lezerTitelBijwerken()
+  lezerInfoBijwerken()
+  lezerRegelsBijwerken()
+  verbergLezerZoek()
+  vak.scrollTop = 0
   document.getElementById('modal-lezer').hidden = false
+  // Focus na openen, anders blijft Tab naar de knoppen springen i.p.v. inspringen.
+  requestAnimationFrame(() => { vak.focus(); vak.setSelectionRange(0, 0) })
 }
 
-function sluitLezer() {
-  document.getElementById('modal-lezer').hidden = true
-  lezerPad = ''
+async function lezerVeranderdOpSchijf() {
+  if (!lezerStaat.pad || lezerStaat.mtime == null) return false
+  const st = await window.api.bestandInfo(lezerStaat.pad).catch(() => null)
+  return !!(st && st.ok && st.gewijzigd !== lezerStaat.mtime)
+}
+
+async function slaLezerOp({ negeerSchijf = false } = {}) {
+  if (!lezerStaat.pad) return false
+  const vak = lezerInhoudEl()
+  const inhoud = vak ? vak.value : lezerStaat.inhoud
+
+  // Elders bijgewerkt terwijl je hier zat: niet stilletjes overschrijven.
+  // Twee keuzes — overschrijven óf opnieuw inlezen — want alleen "toch opslaan"
+  // (zoals bij bat) laat je zonder weg terug naar wat er op schijf stond.
+  if (!negeerSchijf && await lezerVeranderdOpSchijf()) {
+    const keuze = await vraagKeuze({
+      titel: I18N.t('lezer.eldersTitel', { naam: lezerStaat.naam }),
+      tekst: I18N.t('lezer.eldersTekst'),
+      knoppen: [
+        { label: I18N.t('common.cancel'), waarde: '' },
+        { label: I18N.t('lezer.opnieuwInlezen'), waarde: 'herladen' },
+        { label: I18N.t('lezer.overschrijven'), waarde: 'overschrijven', soort: 'gevaar' },
+      ],
+    })
+    if (keuze === 'herladen') {
+      lezerStaat.dirty = false
+      await toonBestand(lezerStaat.pad)
+      return false
+    }
+    if (keuze !== 'overschrijven') return false
+  }
+
+  const r = await window.api.schrijfTekst({
+    pad: lezerStaat.pad,
+    inhoud,
+    bom: lezerStaat.bom,
+    crlf: lezerStaat.crlf,
+  }).catch(() => null)
+  if (!r || !r.ok) {
+    await meldKort(I18N.t('lezer.opslaanMislukt'), I18N.t('lezer.opslaanMisluktTekst', {
+      reden: (r && r.reden) || I18N.t('common.unknownError'),
+    }))
+    return false
+  }
+
+  lezerStaat.inhoud = inhoud
+  lezerStaat.mtime = r.mtime ?? null
+  lezerStaat.bytes = r.bytes || lezerGrootteSchatting(inhoud)
+  lezerStaat.dirty = false
+  lezerTitelBijwerken()
+  lezerInfoBijwerken()
+  showToast(I18N.t('lezer.opgeslagen', { naam: lezerStaat.naam }))
+  return true
+}
+
+// Geeft 'door' of 'blijven'. Zelfde vorm als de git-afsluitcontrole, zodat
+// accountwisselen en afsluiten er één haak voor hebben in plaats van twee.
+async function controleerLezerWerk(reden) {
+  if (!lezerStaat.dirty) return 'door'
+  const prefix = reden === 'afsluiten' ? 'lezer.afsluit' : 'lezer.wissel'
+  const keuze = await vraagKeuze({
+    titel: I18N.t(prefix + 'Titel', { naam: lezerStaat.naam || I18N.t('lezer.bestand') }),
+    tekst: I18N.t(prefix + 'Tekst'),
+    knoppen: [
+      { label: I18N.t('common.cancel'), waarde: 'blijven' },
+      { label: I18N.t('lezer.nietOpslaan'), waarde: 'door' },
+      { label: I18N.t('common.save'), waarde: 'opslaan', soort: 'primair' },
+    ],
+  })
+  if (!keuze || keuze === 'blijven') return 'blijven'
+  if (keuze === 'opslaan') {
+    const ok = await slaLezerOp()
+    return ok ? 'door' : 'blijven'
+  }
+  // Weggooien: dirty uit, anders vraagt de volgende haak het opnieuw.
+  lezerStaat.dirty = false
+  return 'door'
+}
+
+function verbergLezerZoek() {
+  const balk = document.getElementById('lezer-zoek')
+  if (balk) balk.hidden = true
+  lezerStaat.zoekHits = []
+  lezerStaat.zoekIdx = -1
+  const info = document.getElementById('lezer-zoek-info')
+  if (info) info.textContent = ''
+}
+
+function toonLezerZoek() {
+  const balk = document.getElementById('lezer-zoek')
+  if (!balk) return
+  balk.hidden = false
+  const invoer = document.getElementById('lezer-zoek-invoer')
+  invoer?.focus()
+  invoer?.select()
+  if (invoer && invoer.value) voerLezerZoekUit()
+}
+
+function voerLezerZoekUit() {
+  const naald = document.getElementById('lezer-zoek-invoer')?.value || ''
+  const vak = lezerInhoudEl()
+  const info = document.getElementById('lezer-zoek-info')
+  if (!vak) return
+  lezerStaat.zoekHits = WebTools.zoekInTekst(vak.value, naald)
+  lezerStaat.zoekIdx = lezerStaat.zoekHits.length ? 0 : -1
+  if (info) {
+    info.textContent = !naald ? ''
+      : lezerStaat.zoekHits.length
+        ? I18N.t('lezer.zoekTreffers', { n: lezerStaat.zoekIdx + 1, totaal: lezerStaat.zoekHits.length })
+        : I18N.t('lezer.zoekNiets')
+  }
+  if (lezerStaat.zoekIdx >= 0) selecteerLezerZoekHit()
+}
+
+function selecteerLezerZoekHit() {
+  const vak = lezerInhoudEl()
+  const naald = document.getElementById('lezer-zoek-invoer')?.value || ''
+  const start = lezerStaat.zoekHits[lezerStaat.zoekIdx]
+  if (!vak || start == null) return
+  vak.focus()
+  vak.setSelectionRange(start, start + naald.length)
+  // In beeld brengen: selectie alleen is niet genoeg in een lang bestand.
+  const voor = vak.value.slice(0, start)
+  const regel = (voor.match(/\n/g) || []).length
+  const lh = parseFloat(getComputedStyle(vak).lineHeight) || 18
+  vak.scrollTop = Math.max(0, regel * lh - vak.clientHeight / 3)
+  document.getElementById('lezer-regels').scrollTop = vak.scrollTop
+  const info = document.getElementById('lezer-zoek-info')
+  if (info) {
+    info.textContent = I18N.t('lezer.zoekTreffers', {
+      n: lezerStaat.zoekIdx + 1, totaal: lezerStaat.zoekHits.length,
+    })
+  }
+}
+
+function lezerZoekStap(delta) {
+  if (!lezerStaat.zoekHits.length) { voerLezerZoekUit(); return }
+  const n = lezerStaat.zoekHits.length
+  lezerStaat.zoekIdx = (lezerStaat.zoekIdx + delta + n) % n
+  selecteerLezerZoekHit()
+}
+
+async function sluitLezer() {
+  if (await controleerLezerWerk('sluiten') === 'blijven') return
+  sluitLezerStil()
   focusTerminalInput()
+}
+
+function sluitLezerStil() {
+  verbergLezerZoek()
+  document.getElementById('modal-lezer').hidden = true
+  lezerStaat.pad = ''
+  lezerStaat.naam = ''
+  lezerStaat.inhoud = ''
+  lezerStaat.mtime = null
+  lezerStaat.dirty = false
+  const vak = lezerInhoudEl()
+  if (vak) vak.value = ''
 }
 
 function bedraadLezer() {
   const sluit = document.getElementById('lezer-sluit')
   if (!sluit) return
-  sluit.onclick = sluitLezer
+  sluit.onclick = () => { void sluitLezer() }
+  document.getElementById('lezer-opslaan').onclick = () => { void slaLezerOp() }
   document.getElementById('lezer-kopieer').onclick = () => {
-    kopieer(document.getElementById('lezer-inhoud').textContent || '', I18N.t('lezer.gekopieerd'))
+    kopieer(lezerInhoudEl()?.value || '', I18N.t('lezer.gekopieerd'))
   }
-  document.getElementById('lezer-map').onclick = () => {
-    if (lezerPad) openInVerkenner(ouderVan(lezerPad), lezerPad)
-    sluitLezer()
+  document.getElementById('lezer-map').onclick = async () => {
+    if (await controleerLezerWerk('sluiten') === 'blijven') return
+    const pad = lezerStaat.pad
+    sluitLezerStil()
+    if (pad) openInVerkenner(ouderVan(pad), pad)
+    focusTerminalInput()
   }
-  document.getElementById('lezer-windows').onclick = () => {
-    if (lezerPad) window.api.openFolder(lezerPad)
-    sluitLezer()
+  document.getElementById('lezer-windows').onclick = async () => {
+    if (await controleerLezerWerk('sluiten') === 'blijven') return
+    const pad = lezerStaat.pad
+    sluitLezerStil()
+    if (pad) window.api.openFolder(pad)
+    focusTerminalInput()
   }
+  document.getElementById('lezer-zoek-knop').onclick = () => toonLezerZoek()
+  document.getElementById('lezer-zoek-dicht').onclick = () => {
+    verbergLezerZoek()
+    lezerInhoudEl()?.focus()
+  }
+  document.getElementById('lezer-zoek-vorige').onclick = () => lezerZoekStap(-1)
+  document.getElementById('lezer-zoek-volgende').onclick = () => lezerZoekStap(1)
+  document.getElementById('lezer-zoek-invoer').addEventListener('input', () => voerLezerZoekUit())
+  document.getElementById('lezer-zoek-invoer').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      lezerZoekStap(e.shiftKey ? -1 : 1)
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      e.stopPropagation()
+      verbergLezerZoek()
+      lezerInhoudEl()?.focus()
+    }
+  })
+
+  const vak = lezerInhoudEl()
+  vak.addEventListener('input', () => lezerMarkeerVuil())
+  vak.addEventListener('scroll', () => {
+    const kolom = document.getElementById('lezer-regels')
+    if (kolom) kolom.scrollTop = vak.scrollTop
+  })
+  // Tab hoort in te springen, niet naar de volgende knop te springen — anders
+  // is dit een formulier en geen editor.
+  vak.addEventListener('keydown', (e) => {
+    if (e.key === 'Tab') {
+      e.preventDefault()
+      const start = vak.selectionStart, end = vak.selectionEnd
+      const v = vak.value
+      vak.value = v.slice(0, start) + '\t' + v.slice(end)
+      vak.selectionStart = vak.selectionEnd = start + 1
+      lezerMarkeerVuil()
+      return
+    }
+    if (e.ctrlKey && (e.key === 's' || e.key === 'S')) {
+      e.preventDefault()
+      void slaLezerOp()
+      return
+    }
+    if (e.ctrlKey && (e.key === 'f' || e.key === 'F')) {
+      e.preventDefault()
+      toonLezerZoek()
+    }
+  })
+
+  // Ctrl+S / Ctrl+F ook als de focus op een knop in het venster staat.
+  document.getElementById('modal-lezer').addEventListener('keydown', (e) => {
+    if (!e.ctrlKey) return
+    if (e.key === 's' || e.key === 'S') { e.preventDefault(); void slaLezerOp() }
+    if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toonLezerZoek() }
+  })
 }
 
 // ── Een map die op de app is neergezet ───────────────────────────────────────
@@ -13399,6 +13704,13 @@ async function wachtOpOnveiligWerk() {
 
 // Geeft 'door' (verder: sluiten of wisselen) of 'blijven' (afbreken).
 async function controleerOnveiligWerk(reden) {
+  // Eerst het leesvenster: dat is óók niet-opgeslagen werk, en hoort op
+  // dezelfde haak als git — anders bouw je een tweede afsluitcontrole.
+  if (await controleerLezerWerk(reden) === 'blijven') return 'blijven'
+  // Bij wisselen/afsluiten hoort het venster dicht: het pad hing aan het
+  // vorige moment, en bij "niet opslaan" stond er nog vuile tekst in beeld.
+  if ((reden === 'wisselen' || reden === 'afsluiten') && lezerOpen()) sluitLezerStil()
+
   await ververesAlleGitStaten(true)
 
   const instelling = GitTools.afsluitInstelling((settings.git || {}).afsluiten)
@@ -15151,7 +15463,17 @@ function setupModalEvents() {
     if (e.key !== 'Escape') return
     if (!document.getElementById('modal-cmdset').hidden)   { e.preventDefault(); sluitCmdInstellingen(); return }
     if (!document.getElementById('modal-psset').hidden)    { e.preventDefault(); sluitPsInstellingen(); return }
-    if (!document.getElementById('modal-lezer').hidden)    { e.preventDefault(); sluitLezer(); return }
+    if (!document.getElementById('modal-lezer').hidden) {
+      e.preventDefault()
+      // Zoekbalk eerst dicht; anders verdwijnt het hele venster met Ctrl+F-werk.
+      if (!document.getElementById('lezer-zoek').hidden) {
+        verbergLezerZoek()
+        lezerInhoudEl()?.focus()
+        return
+      }
+      void sluitLezer()
+      return
+    }
     if (!document.getElementById('modal-vraag').hidden)    { e.preventDefault(); sluitVraag(false); return }
     if (!document.getElementById('modal-klembord').hidden) { e.preventDefault(); sluitKlembordVenster() }
   })

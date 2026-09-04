@@ -138,6 +138,10 @@ let gitignoreGeschreven = []
 let ghRepoVragen = []
 let webMappen = []
 let webTekst = {}
+let webTekstMtime = {}
+let webTekstBom = {}
+let webTekstCrlf = {}
+let webTekstGeschreven = []
 let webSites = {}
 let siteGestart = []
 let geopendeUrls = []
@@ -155,7 +159,17 @@ const api = {
   gitAfsluitHartslag: () => {},
   gitGhRepos: async (o) => { ghRepoVragen.push(o); return ghRepoAntwoord },
   isMap:      async (p) => webMappen.includes(p),
-  leesTekst:  async (p) => webTekst[p] ? { ok: true, inhoud: webTekst[p], bytes: webTekst[p].length, mtime: 1, bom: false, crlf: false } : { ok: false, reden: 'bestaat-niet' },
+  leesTekst:  async (p) => webTekst[p] ? { ok: true, inhoud: webTekst[p], bytes: webTekst[p].length, mtime: webTekstMtime[p] || 1, bom: !!webTekstBom[p], crlf: !!webTekstCrlf[p] } : { ok: false, reden: 'bestaat-niet' },
+  schrijfTekst: async (o) => {
+    if (!o || !o.pad) return { ok: false, reden: 'geen-pad' }
+    let t = String(o.inhoud == null ? '' : o.inhoud).replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+    if (o.crlf) t = t.replace(/\n/g, '\r\n')
+    if (o.bom) t = '\uFEFF' + t
+    webTekst[o.pad] = o.inhoud
+    webTekstGeschreven.push({ ...o, weggeschreven: t })
+    webTekstMtime[o.pad] = (webTekstMtime[o.pad] || 1) + 1
+    return { ok: true, mtime: webTekstMtime[o.pad], bytes: t.length }
+  },
   zoekSite:   async (d) => ({ ok: true, gevonden: (webSites[d] || []).map(rel => ({ pad: d + '\\\\' + rel.replace(/\//g, '\\\\'), relatief: rel, map: rel.includes('/') ? rel.split('/')[0] : '' })) }),
   siteStart:  async (o) => { siteGestart.push(o); return { ok: true, id: 'site1', url: 'http://127.0.0.1:1234/' } },
   siteStop:   async () => ({ ok: true }),
@@ -314,7 +328,11 @@ const api = {
     return { ok: true, path: pad, hernoemd: false }
   },
   maakZip: async ({ paden, doel }) => { gezipt.push({ paden, doel }); return { ok: true, path: doel, aantal: paden.length, grootte: 1234 } },
-  bestandInfo: async (p) => ({ ok: true, path: p, naam: p.split('\\').pop(), map: false, size: 2048, gemaakt: 1, gewijzigd: 2, alleenLezen: false }),
+  bestandInfo: async (p) => ({
+    ok: true, path: p, naam: p.split('\\').pop(), map: false,
+    size: (webTekst[p] || '').length || 2048,
+    gemaakt: 1, gewijzigd: webTekstMtime[p] || 2, alleenLezen: false,
+  }),
   conflicten: async ({ bronnen, doelMap }) => ({
     ok: true,
     namen: bronnen.map(b => b.split('\\').pop())
@@ -4577,14 +4595,58 @@ function startVraagAutomaat() {
     // Een tekstbestand gaat naar het leesvenster.
     webMappen = []
     webTekst = { 'C:\\site\\stijl.css': 'body { color: red }\nh1 { }' }
+    webTekstMtime = { 'C:\\site\\stijl.css': 1 }
+    webTekstGeschreven = []
     await sleep(['C:\\site\\stijl.css'])
     check('een gesleept bestand komt in het leesvenster',
       $('#modal-lezer').hidden === false
-      && $('#lezer-inhoud').textContent.includes('color: red'))
+      && $('#lezer-inhoud').value.includes('color: red'))
     check('met het pad en de grootte erbij',
       $('#lezer-pad').textContent === 'C:\\site\\stijl.css'
       && $('#lezer-info').textContent.includes('2'))
-    $('#lezer-sluit').click(); await tick()
+    check('en met regelnummers ernaast',
+      $('#lezer-regels').textContent.includes('1')
+      && $('#lezer-regels').textContent.includes('2'))
+
+    // Bewerken en opslaan — wat een mens doet, niet de functie erachter.
+    $('#lezer-inhoud').value = 'body { color: blue }\nh1 { }'
+    $('#lezer-inhoud').dispatchEvent(new window.Event('input', { bubbles: true }))
+    await tick()
+    check('typen markeert als niet-opgeslagen',
+      $('#lezer-titel').textContent.includes('•')
+      && $('#lezer-info').textContent.includes('niet opgeslagen'))
+    $('#lezer-opslaan').click(); await tick(); await tick()
+    check('opslaan schrijft via fs:schrijfTekst',
+      webTekstGeschreven.length === 1
+      && webTekstGeschreven[0].pad === 'C:\\site\\stijl.css'
+      && webTekstGeschreven[0].inhoud.includes('color: blue'))
+    check('en wist de vuile markering',
+      !$('#lezer-titel').textContent.includes('•'))
+
+    // Tab springt in, niet naar de volgende knop.
+    const vak = $('#lezer-inhoud')
+    vak.focus()
+    vak.setSelectionRange(0, 0)
+    vak.dispatchEvent(new window.KeyboardEvent('keydown', {
+      key: 'Tab', bubbles: true, cancelable: true,
+    }))
+    await tick()
+    check('tab voegt een tabteken in', vak.value.startsWith('\t'))
+
+    // Zoeken binnen het bestand.
+    $('#lezer-zoek-knop').click(); await tick()
+    check('zoeken opent de balk', $('#lezer-zoek').hidden === false)
+    $('#lezer-zoek-invoer').value = 'blue'
+    $('#lezer-zoek-invoer').dispatchEvent(new window.Event('input', { bubbles: true }))
+    await tick()
+    check('zoeken vindt de treffer',
+      $('#lezer-zoek-info').textContent.includes('1')
+      && vak.selectionStart >= 0
+      && vak.value.slice(vak.selectionStart, vak.selectionEnd).toLowerCase() === 'blue')
+
+    // Tab heeft het bestand weer vuil gemaakt — weggooien en dicht.
+    kiesKnop('niet opslaan')
+    $('#lezer-sluit').click(); await tick(); await tick()
     check('en het gaat weer dicht', $('#modal-lezer').hidden === true)
 
     // Iets waar niets mee kan zegt dat, in plaats van stil te blijven.
@@ -4592,6 +4654,23 @@ function startVraagAutomaat() {
     await sleep(['C:\\site\\plaatje.png'])
     check('een plaatje levert een melding op, geen leeg venster',
       $('#modal-lezer').hidden === true)
+
+    // Niet-opgeslagen werk bij sluiten: de vraag verschijnt.
+    webTekst = { 'C:\\site\\a.html': '<p>hallo</p>' }
+    webTekstMtime = { 'C:\\site\\a.html': 1 }
+    await sleep(['C:\\site\\a.html'])
+    $('#lezer-inhoud').value = '<p>dag</p>'
+    $('#lezer-inhoud').dispatchEvent(new window.Event('input', { bubbles: true }))
+    await tick()
+    laatsteVraag = null
+    kiesKnop('annuleren')
+    $('#lezer-sluit').click(); await tick(); await tick()
+    check('sluiten met vuil werk vraagt eerst',
+      !!laatsteVraag && laatsteVraag.titel.includes('niet opgeslagen'))
+    check('en annuleren laat het venster open', $('#modal-lezer').hidden === false)
+    kiesKnop('niet opslaan')
+    $('#lezer-sluit').click(); await tick(); await tick()
+    check('niet opslaan gooit weg en sluit', $('#modal-lezer').hidden === true)
 
     api.getFilePath = echtePad
   }

@@ -157,9 +157,9 @@ onthouden zodra het irritant wordt.
 
 ---
 
-## Ronde 2 — bewerken
+## Ronde 2 — bewerken — **gedaan**
 
-### 2.1 Opslaan
+### 2.1 Opslaan — **gedaan**
 
 `bat:save` doet bijna alles goed, met één ding dat níét mee mag: hij dwingt
 `\r\n` af omdat cmd.exe daarover struikelt. Voor html en js hoort het bestand
@@ -169,19 +169,19 @@ opslaan teruggeven, of de bestaande dwang achter een vlag zetten.
 Let ook op de BOM en op bestanden die geen UTF-8 zijn; die laatste liever
 weigeren dan stilletjes verminken.
 
-### 2.2 Veranderd op schijf
+### 2.2 Veranderd op schijf — **gedaan**
 
 Het bat-paneel controleert de wijzigingstijd vóór het opslaan. Dat gedrag
 overnemen: is het bestand ondertussen door je editor aangeraakt, dan vragen —
 overschrijven, of opnieuw inlezen. Niet stilletjes de ander overschrijven.
 
-### 2.3 Niet-opgeslagen werk
+### 2.3 Niet-opgeslagen werk — **gedaan**
 
 Wisselen van bestand, van project, van account, en het afsluiten van de app:
 overal hoort de vraag te komen. De afsluitcontrole van de git-kant is hier het
 model — en de haak bestaat al, dus dit is aanhaken en niet opnieuw bouwen.
 
-### 2.4 De kleine dingen die het bruikbaar maken
+### 2.4 De kleine dingen die het bruikbaar maken — **gedaan**
 
 Regelnummers, Tab die inspringt in plaats van naar de volgende knop springt,
 Ctrl+S, zoeken binnen het bestand. Zonder deze vier is een tekstvak geen

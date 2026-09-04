@@ -37,15 +37,42 @@
    moeten onthouden. */
 [hidden] { display: none !important; }
 
-/* Het leesvenster voor html, css en js. Breed en hoog, want code lezen in een
-   smal vakje is geen lezen. */
+/* Het lees-/bewerkvenster voor html, css en js. Breed en hoog, want code
+   lezen in een smal vakje is geen lezen. Regelnummers zitten naast het vak;
+   zonder die kolom springt de tekst bij elke wijziging heen en weer. */
 .modal.modal-groot { width: min(1100px, 92vw); max-width: none; }
 .lezer-pad { font-size: 11px; color: var(--muted); margin: 0 0 8px; word-break: break-all; }
-.lezer-vak { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg);
-  max-height: 62vh; overflow: auto; }
-.lezer-inhoud { margin: 0; padding: 12px 14px; font-size: 12px; line-height: 1.5;
-  color: var(--text); white-space: pre; tab-size: 2; }
+.lezer-zoek {
+  display: flex; align-items: center; gap: 6px; margin: 0 0 8px;
+  padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--s1);
+}
+.lezer-zoek[hidden] { display: none !important; }
+.lezer-zoek-invoer {
+  flex: 1; min-width: 0; background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 4px 8px; font-size: 12px;
+}
+.lezer-zoek-info { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.lezer-vak {
+  display: flex; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg); max-height: 62vh; overflow: hidden;
+}
+.lezer-regels {
+  margin: 0; padding: 12px 0; min-width: 3.2em; text-align: right;
+  font-size: 12px; line-height: 1.5; color: var(--muted);
+  background: var(--s1); border-right: 1px solid var(--border);
+  overflow: hidden; user-select: none; flex-shrink: 0;
+}
+.lezer-regels span { display: block; padding: 0 10px; }
+.lezer-inhoud {
+  margin: 0; padding: 12px 14px; font-size: 12px; line-height: 1.5;
+  color: var(--text); white-space: pre; tab-size: 2;
+  flex: 1; min-width: 0; border: 0; outline: none; resize: none;
+  background: transparent; overflow: auto; font-family: inherit;
+}
 .lezer-info { font-size: 11px; color: var(--muted); margin-right: auto; align-self: center; }
+.lezer-info.vuil { color: var(--amber); }
 
 /* ── Scrollbalken ──
    Overal dezelfde: de breedte van de standaardbalk (fijner om te pakken) maar
