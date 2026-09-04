@@ -14820,12 +14820,25 @@ function setupModalEvents() {
   document.getElementById('modal-del-close').onclick   = closeDel
   document.getElementById('del-cancel').onclick        = closeDel
   document.getElementById('del-confirm').onclick       = () => {
+    const weg = projects.find(p => p.id === deleteId)
     projects = projects.filter(p => p.id !== deleteId)
+    // Alles wat over dit project onthouden was gaat mee weg. Bleef die
+    // git-toestand staan, dan telde zijn repo daarna nog steeds als bezet en
+    // was hij niet meer te kiezen voor een nieuw project -- tot je de app
+    // herstartte, want dan is de cache leeg.
+    for (const loc of projectLocaties(weg || {})) {
+      delete gitStaten[loc.pad]
+      gitRemoteGedaan.delete(loc.pad)
+      delete gitLaatsteFetch[loc.pad]
+    }
     if (activeId === deleteId) {
       activeId = null
       document.getElementById('main').innerHTML = `<div class="empty-state"><i class="ti ti-layout-sidebar-left-expand"></i><p>${esc(I18N.t('main.emptyState'))}</p></div>`
     }
-    saveProjects(); renderSidebar()
+    saveProjects()
+    meldGitPadenAanMain()
+    sidebarGetekend = false
+    renderSidebar()
     if (view === 'settings') renderSettingsPanel()
     document.getElementById('modal-del').hidden = true
     focusTerminalInput()
@@ -15210,6 +15223,9 @@ function focusField(id) {
 function closeProjectModal() {
   document.getElementById('modal-proj').hidden = true
   document.querySelector('#modal-proj .btn-delete')?.remove()
+  // Niet laten staan: zolang dit gevuld is telt dat project niet mee als
+  // "repo al bezet", ook als je allang klaar bent met bewerken.
+  editingId = null
   cmdvisSorteerModus = ''
   toonCloneVeld(false)
   focusTerminalInput()
@@ -15300,9 +15316,14 @@ async function wisselRepoKiezer() {
 // De adressen die al aan een project hangen. Best effort: alleen mappen die de
 // app heeft nagekeken staan in gitStaten, en dat is precies de verzameling waar
 // "die heb ik al" over gaat.
+// Welke repo's hangen al aan een ander project? Het project dat je op dit
+// moment bewerkt telt niet mee: dat filterde zichzelf uit zijn eigen
+// keuzelijst, en dan lijkt de repo verdwenen. Na een herstart leek dat over,
+// maar alleen omdat gitStaten dan nog leeg is en er niets te filteren valt.
 function gekoppeldeRepoAdressen() {
   const uit = []
   for (const p of projects) {
+    if (editingId && p.id === editingId) continue
     for (const loc of projectLocaties(p)) {
       const staat = gitStaten[loc.pad]
       if (!staat || !staat.isRepo) continue

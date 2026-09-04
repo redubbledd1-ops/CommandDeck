@@ -394,7 +394,8 @@ window.eval(fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8')
   + '\n  cmdIdsInBeeld, verplaatsCmdVolgorde, cmdGridHtml, knoppenInMap,'
   + '\n  autoMappen, hefMappenOp, legInMap, verplaatsKnopId,'
   + '\n  rijVolgorde, ordenProject, zetKnopInMap, folderVanKnop,'
-  + '\n  verwijderMap, folderOp };')
+  + '\n  verwijderMap, folderOp,'
+  + '\n  gekoppeldeRepoAdressen, zetBewerkt: (id) => { editingId = id } };')
 startVraagAutomaat()
 const W = window
 const inBevrorenPaneel = (el) => {
@@ -479,6 +480,32 @@ function startVraagAutomaat() {
   zijGreep.dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true }))
   await tick()
 
+  // ── Repo-keuzelijst: je eigen project telt niet als bezet ─────────────
+  // De lijst verbergt repo's die al aan een project hangen. Het project dat je
+  // op dat moment bewerkt hoorde daar niet bij: die filterde zichzelf weg, en
+  // dan lijkt de repo verdwenen. Na een herstart leek het over -- de git-cache
+  // is dan leeg en er valt niets te filteren.
+  W.__test.zetGitStaat('C:\\a', W.GitTools.maakStaat({
+    beschikbaar: true, isRepo: true, branch: 'main', commits: true, vuil: 0, stashes: 0,
+    remoteLijst: [{ naam: 'origin', url: 'https://github.com/x/CommandDeck' }],
+  }))
+  W.__test.zetBewerkt(null)
+  check('een repo die aan een project hangt geldt als bezet',
+    W.__test.gekoppeldeRepoAdressen().some(u => u.includes('CommandDeck')))
+  W.__test.zetBewerkt(projects[0].id)
+  check('maar niet voor het project dat je op dat moment bewerkt',
+    !W.__test.gekoppeldeRepoAdressen().some(u => u.includes('CommandDeck')))
+  W.__test.zetBewerkt(null)
+
+  // De verwijderknop wordt onderaan het venster bijgeprikt, ná de git-sectie.
+  // Loopt daar iets stuk, dan komt de code die hem toevoegt niet meer aan de
+  // beurt en is de knop stilletjes weg -- precies wat er gebeurde.
+  $$('.proj-edit')[0].click(); await tick(); await tick()
+  check('een project bewerken toont de verwijderknop', !!$('#modal-proj .btn-delete'))
+  check('en de git-sectie eronder is ook getekend',
+    ($('#git-sectie')?.innerHTML || '').length > 0)
+  $('#modal-proj-cancel').click(); await tick()
+
   // ── Logboek in de instellingen ────────────────────────────────────────
   // Zonder logboek was er van de push die stukliep niets terug te vinden: de
   // app gooide juist de foutregels weg. Dit hoort aan en uit te kunnen per soort.
@@ -498,11 +525,10 @@ function startVraagAutomaat() {
   // De knop wordt onderaan het venster bijgeprikt. Loopt er iets stuk in de
   // git-sectie erboven, dan komt de code die hem toevoegt niet meer aan de
   // beurt en is de knop stilletjes weg -- precies wat er gebeurde.
+  $$('.proj-edit')[0].click()
+  await tick(); await tick()
+  $('#modal-proj-cancel')?.click(); await tick()
   $$('.proj-edit')[0].click(); await tick(); await tick()
-  check('een project bewerken toont de verwijderknop',
-    !!$('#modal-proj .btn-delete'))
-  check('en de git-sectie eronder is ook getekend',
-    !!$('#git-sectie') && $('#git-sectie').innerHTML.length > 0)
   $('#modal-proj-cancel').click(); await tick()
 
   // ── CMD-sectie ─────────────────────────────────────────────────────────────
