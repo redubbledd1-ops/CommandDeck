@@ -521,6 +521,16 @@ check('zonder systeemprompt blijft het veld weg',
     bron.includes('function plaatsInSplit') &&
     bron.includes('werk-vlak') &&
     html.includes('id="werk"'))
+  check('woordenboek-split wordt niet per project onthouden',
+    bron.includes('function isGemengdeSplit') &&
+    bron.includes('function wisGemengdeProjectSplits') &&
+    /splitGemengd\(\)/.test(bron.slice(bron.indexOf('function selectProject'), bron.indexOf('function toggleSettings'))))
+  check('een derde project wringt niet in de split',
+    /splitTweeProjecten\(\)/.test(bron.slice(bron.indexOf('function selectProject'), bron.indexOf('function toggleSettings'))) &&
+    bron.includes('sluitSplitVoorView()'))
+  check('een projectklik sluit een woordenboek-split',
+    /v === 'project'/.test(bron.slice(bron.indexOf('function setView'), bron.indexOf('function rememberView'))) &&
+    /splitGemengd\(\)/.test(bron.slice(bron.indexOf('function setView'), bron.indexOf('function rememberView'))))
   check('setView leegt het andere vlak niet als de split gemengd is',
     /splitAan\(\)/.test(bron.slice(bron.indexOf('function setView'), bron.indexOf('function rememberView'))) &&
     bron.includes('function plaatsInSplit'))

@@ -196,6 +196,48 @@
     return 'onbekend'
   }
 
+  // GitHub zegt bij een 403 wíe er probeerde: "Permission to owner/repo.git
+  // denied to iemandAnders." Zonder die naam krijg je alleen "inloggen", en
+  // dan lijkt het of de koppeling stuk is terwijl het account verkeerd is.
+  function parseDeniedGebruiker(tekst) {
+    const m = String(tekst || '').match(/denied to\s+([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)/i)
+    return m ? m[1] : ''
+  }
+
+  // Eigenaar van een github.com-adres, of uit diezelfde 403-regel.
+  function githubEigenaarUitUrl(invoer) {
+    const s = String(invoer || '')
+    const uitFout = s.match(/permission to\s+([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)\//i)
+    if (uitFout) return uitFout[1]
+    const uitUrl = s.match(/github\.com[/:]([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)\//i)
+    return uitUrl ? uitUrl[1] : ''
+  }
+
+  function zelfdeGhNaam(a, b) {
+    const x = String(a || '').trim().toLowerCase()
+    const y = String(b || '').trim().toLowerCase()
+    return !!x && x === y
+  }
+
+  // Wat er mis is bij een geweigerde push, in één oordeel. `verwacht` is het
+  // GitHub-account van dit CommandDeck-account; ontbreekt dat, dan de eigenaar
+  // van de repo. `alsNu` is wie gh denkt dat je bent als de fouttekst dat niet
+  // zegt.
+  function pushInlogProbleem({ tekst = '', remoteUrl = '', verwacht = '', alsNu = '' } = {}) {
+    if (tekst && remoteFoutReden(tekst) !== 'inloggen') return null
+    const als = parseDeniedGebruiker(tekst) || String(alsNu || '').trim()
+    const eigenaar = githubEigenaarUitUrl(remoteUrl) || githubEigenaarUitUrl(tekst)
+    const doel = String(verwacht || '').trim() || eigenaar
+    if (!tekst && !als && !doel) return null
+    return {
+      reden: 'inloggen',
+      als,
+      eigenaar,
+      doel,
+      verkeerd: !!(als && doel && !zelfdeGhNaam(als, doel)),
+    }
+  }
+
   // De uitslag van één controle omzetten naar iets waar maakStaat mee verder
   // kan. `ok: null` betekent: we weten het nog steeds niet. Dat is geen fout,
   // dat is eerlijk — en het laat de knoppen staan.
@@ -1988,6 +2030,7 @@
     parseGhRepos, filterRepos, repoSleutel, zonderGekoppelde, gitSlotFout,
     KOPPELING_GEEN, KOPPELING_ONBEKEND, KOPPELING_OK, KOPPELING_STUK,
     remoteFoutReden, remoteUitslag, lsRemoteArgs, koppelingProbleem,
+    parseDeniedGebruiker, githubEigenaarUitUrl, zelfdeGhNaam, pushInlogProbleem,
     herstelCommando, ontkoppelCommando, KOPPEL_HERSTEL,
     parseRemoteRegels, remoteWegCommando, remoteUrlCommando,
     projectSoorten, gitignoreVoor, bouwrommel, NEGEER_BLOKKEN, langePadenCommando,

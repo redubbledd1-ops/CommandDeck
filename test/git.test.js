@@ -1606,6 +1606,31 @@ t('geen toegang is wel een oordeel', G.remoteUitslag(128, 'could not read Userna
 t('een netwerkfout laat de staat op onbekend',
   repoMetRemote({ remoteOk: G.remoteUitslag(128, 'Could not resolve host').ok }).koppeling === 'onbekend')
 
+// ── Verkeerd GitHub-account (403 denied to …) ────────────────────────────────
+const fout403 = "remote: Permission to redubbledd1-ops/CommandDeck.git denied to redubbledD.\n"
+  + "fatal: unable to access 'https://github.com/redubbledd1-ops/CommandDeck/': The requested URL returned error: 403"
+t('403 is inloggen, geen dood adres', G.remoteFoutReden(fout403) === 'inloggen')
+t('denied to levert de verkeerde gebruiker', G.parseDeniedGebruiker(fout403) === 'redubbledD')
+t('zonder die zin geen naam', G.parseDeniedGebruiker('fatal: Authentication failed') === '')
+t('eigenaar uit de 403-regel', G.githubEigenaarUitUrl(fout403) === 'redubbledd1-ops')
+t('eigenaar uit een https-adres',
+  G.githubEigenaarUitUrl('https://github.com/redubbledd1-ops/CommandDeck.git') === 'redubbledd1-ops')
+t('eigenaar uit ssh', G.githubEigenaarUitUrl('git@github.com:redubbledd1-ops/CommandDeck.git') === 'redubbledd1-ops')
+t('geen github-adres levert geen eigenaar', G.githubEigenaarUitUrl('https://gitlab.com/x/y.git') === '')
+t('github-namen zijn hoofdletterongevoelig', G.zelfdeGhNaam('redubbledD', 'redubbledd') === true)
+t('lege namen zijn niet gelijk', G.zelfdeGhNaam('', '') === false)
+
+{
+  const p = G.pushInlogProbleem({ tekst: fout403, verwacht: 'redubbledd1-ops' })
+  t('push-inlog ziet het verkeerde account', p && p.verkeerd === true)
+  t('en noemt wie er probeerde', p.als === 'redubbledD')
+  t('en wie het moet zijn', p.doel === 'redubbledd1-ops')
+  t('een netwerkfout is geen inlogprobleem',
+    G.pushInlogProbleem({ tekst: 'Could not resolve host: github.com' }) === null)
+  t('zonder fouttekst blijft het oordeel staan als we de namen al weten',
+    G.pushInlogProbleem({ alsNu: 'redubbledD', verwacht: 'redubbledd1-ops' }).verkeerd === true)
+}
+
 t('ls-remote vraagt niet om tags', G.lsRemoteArgs('origin').join(' ') === 'ls-remote -h -- origin')
 t('en gebruikt de meegegeven remote', G.lsRemoteArgs('github').includes('github'))
 
@@ -1682,7 +1707,10 @@ t('pushen kan niet zonder werkende koppeling',
 for (const sleutel of ['git.ind.broken', 'git.ind.brokenTitle', 'git.repair.title',
                        'git.repair.new', 'git.repair.url', 'git.repair.drop',
                        'git.repair.dropTitle', 'git.repair.dropText',
-                       'git.koppel.stuk.weg', 'git.koppel.stuk.inloggen']) {
+                       'git.koppel.stuk.weg', 'git.koppel.stuk.inloggen',
+                       'git.push.inlogTitel', 'git.push.inlogTekstVerkeerd',
+                       'git.push.inlogTekstGeenGh', 'git.push.inlogInstalleren',
+                       'git.push.inlogUitlegTekst', 'git.push.inlogOpnieuw']) {
   t('tekst ' + sleutel + ' staat in nl en en', !!nl[sleutel] && !!en[sleutel])
 }
 t('de kapotte-koppeling-indicator heeft opmaak in style.css',
@@ -1731,7 +1759,16 @@ t('de kapotte-koppeling-indicator heeft opmaak in style.css',
   t('en biedt een nieuwe repo of een ander adres', ren.includes('GitTools.herstelCommando'))
   t('eerste opzet regelt gh zelf', ren.includes('async function zorgVoorGithub'))
   t('na een mislukte push wordt opnieuw gekeken',
-    /git-push[\s\S]{0,200}controleerKoppeling/.test(ren))
+    ren.includes('async function naMislukteRemote') && /git-push/.test(ren)
+    && ren.includes('herstelVerkeerdeGithub'))
+  t('een 403 opent niet meteen een nieuwe repo',
+    /reden === 'inloggen'/.test(ren) && ren.includes('slaInlogOver'))
+  t('gh wordt aangeboden, nooit stiekem geïnstalleerd',
+    ren.includes('git.push.inlogInstalleren') && ren.includes('toonGhZelfDoen'))
+  t('inloggen na 403 gebruikt een kopieerbare link, niet de standaardbrowser',
+    /herstelVerkeerdeGithub[\s\S]*?kopieerLink: true/.test(ren))
+  t('vóór een push wordt het GitHub-account rechtgezet',
+    ren.includes('zorgVoorJuisteGithubPush'))
   t('bij het wisselen van account vervalt wat we wisten', ren.includes('gitRemoteGedaan.clear()'))
 }
 
