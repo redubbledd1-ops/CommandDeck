@@ -295,8 +295,36 @@
     return gedaan
   }
 
+  // ── Van de oude vorm naar deze ──────────────────────────────────────────────
+  // De cmd- en powershell-snelrij bewaarden hun volgorde in `quickVolgorde` en
+  // wat uit stond in `quickUit`. Dat waren dezelfde twee dingen als bij een
+  // project, maar met andere namen, en dus met eigen code eromheen. Hier
+  // verhuizen ze eenmalig naar de vier velden die elke rij gebruikt.
+  //
+  // Geeft terug of er iets te verhuizen viel, zodat de aanroeper weet of hij
+  // moet opslaan.
+  function migreer(cfg, sectie) {
+    if (!cfg) return false
+    let gedaan = false
+    if (Array.isArray(cfg.quickVolgorde)) {
+      cfg.cmdVolgorde = { ...(cfg.cmdVolgorde || {}), [sectie]: [...cfg.quickVolgorde] }
+      delete cfg.quickVolgorde
+      gedaan = true
+    }
+    if (Array.isArray(cfg.quickUit)) {
+      // Wat er al in cmdVisibility staat wint: dat is van na de verhuizing.
+      cfg.cmdVisibility = {
+        ...Object.fromEntries(cfg.quickUit.map(id => [id, false])),
+        ...(cfg.cmdVisibility || {}),
+      }
+      delete cfg.quickUit
+      gedaan = true
+    }
+    return gedaan
+  }
+
   return {
-    MAP_PREFIX, isMapId, mapIdVan, nieuwMapId, verschuif,
+    MAP_PREFIX, isMapId, mapIdVan, nieuwMapId, verschuif, migreer,
     mappenVan, mapOp, mapOpen, zetInMap,
     mapVanKnop, mapIdVanKnop, autoMapVoor,
     zichtbaar, volgorde, zichtbareIds, knoppenInMap, idsInBeeld, rijVolgorde, knopRij,

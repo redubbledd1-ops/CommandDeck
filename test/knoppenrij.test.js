@@ -181,6 +181,25 @@ function rij(b, ids, extra) {
   const bron2 = fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8')
   t('de renderer houdt er geen tweede kopie van na',
     !/const MAP_PREFIX = 'map:'/.test(bron2) && bron2.includes('Knoppenrij.'))
+
+  // De drie rijen tekenen met dezelfde tekenaar en bewaren in dezelfde velden.
+  // Gaat dat uit elkaar lopen, dan is de winst van dit bestand weg.
+  t('cmd en powershell tekenen met dezelfde tekenaar als een project',
+    /function cmdSnelGridHtml\(\)\s*\{\s*return cmdGridHtml\(null, SNEL_SECTIE\.cmd\)/.test(bron2)
+    && /function psSnelGridHtml\(\)\s*\{\s*return cmdGridHtml\(null, SNEL_SECTIE\.ps\)/.test(bron2))
+  t('en worden op dezelfde manier bedraad',
+    (bron2.match(/bedraadCmdKnopVolgorde\(null, paneel\)/g) || []).length === 2)
+  t('de oude velden worden nergens meer gelezen',
+    !/\.quickUit\b/.test(bron2) && !/\.quickVolgorde\b/.test(bron2))
+  t('automatisch mappen kent groepen voor de snelrijen',
+    ['fav', 'eigen', 'standaard', 'ai'].every(a => bron2.includes("auto: '" + a + "'")))
+
+  const hoofd = fs.readFileSync(path.join(APP, 'main.js'), 'utf8')
+  const stand = hoofd.slice(hoofd.indexOf('const DEFAULT_SETTINGS'), hoofd.indexOf('mapGroottes'))
+  t('de standaardinstellingen leveren de vier velden voor beide snelrijen',
+    (stand.match(/cmdVolgorde: \{\}, cmdVisibility: \{\}, cmdFolders: \[\], cmdFolderVan: \{\}/g) || []).length === 2)
+  t('en dragen de oude velden niet meer aan',
+    !/quickUit/.test(stand) && !/quickVolgorde/.test(stand))
 }
 
 console.log(ok ? '\nALLE KNOPPENRIJ-TESTS GESLAAGD' : '\nER ZIJN TESTS GEFAALD')

@@ -395,6 +395,7 @@ window.eval(fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8')
   + '\n  cmdIdsInBeeld, verplaatsCmdVolgorde, cmdGridHtml, knoppenInMap,'
   + '\n  autoMappen, hefMappenOp, legInMap, verplaatsKnopId,'
   + '\n  rijVolgorde, ordenProject, zetKnopInMap, folderVanKnop,'
+  + '\n  snelRij, migreerSnelRijen, zetRijSorteerModus, rijVoor,'
   + '\n  verwijderMap, folderOp,'
   + '\n  gekoppeldeRepoAdressen, zetBewerkt: (id) => { editingId = id } };')
 startVraagAutomaat()
@@ -1174,7 +1175,9 @@ function startVraagAutomaat() {
 
   $('[data-tab="output"]').click(); await tick()
   $('[data-split="right"]').click(); await tick(); await tick()
-  $$('.proj-item')[0].click(); await tick(); await tick()
+  // Het andere project, niet het project dat al in beeld staat: dat laatste
+  // focust alleen zijn eigen vlak en dan blijft het één project.
+  $$('.proj-item')[1].click(); await tick(); await tick()
   check('het eerste andere project mag nog in het tweede vlak',
     $('.terminal-wrap')?.classList.contains('twee-projecten'))
   $('#btn-add-proj').click(); await tick()
@@ -1193,6 +1196,10 @@ function startVraagAutomaat() {
   $$('.proj-edit')[drieEdit].click(); await tick()
   $('#modal-proj .btn-delete').click(); await tick()
   $('#del-confirm').click(); await tick(); await tick()
+  // Het project dat je bekeek is net weg; dan is er niets om tabs op te tonen.
+  check('na het verwijderen van het actieve project staat er een leeg scherm',
+    !$('[data-tab="output"]') && !!$('#main .empty-state'))
+  $$('.proj-item')[0].click(); await tick(); await tick()
   $('[data-tab="output"]').click(); await tick()
   $('[data-split="right"]').click(); await tick(); await tick()
   $$('.proj-item')[1].click(); await tick(); await tick()
@@ -3721,6 +3728,7 @@ function startVraagAutomaat() {
     Object.defineProperty(w.navigator, 'clipboard', { value: { writeText: () => {} }, configurable: true })
     w.eval(fs.readFileSync(path.join(APP, 'i18n.js'), 'utf8') + '\nglobalThis.I18N = I18N;')
     w.eval(fs.readFileSync(path.join(APP, 'git-tools.js'), 'utf8'))
+    w.eval(fs.readFileSync(path.join(APP, 'knoppenrij.js'), 'utf8'))
     w.eval(fs.readFileSync(path.join(APP, 'accounts.js'), 'utf8'))
     w.eval(fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8'))
     w.document.dispatchEvent(new w.Event('DOMContentLoaded'))
@@ -4185,6 +4193,67 @@ function startVraagAutomaat() {
     const breek = rijHtml.indexOf('cmd-rij-breek')
     check('er staat een regelbreek na de open mappen', breek > laatsteGroep)
     check('en de losse knoppen komen daarna', rijHtml.indexOf('cmd-btn', breek) > breek)
+  }
+
+  // ── Snelrijen van cmd en powershell ──────────────────────────
+  // Ze draaien op dezelfde motor als de rij bij een project: dezelfde vier
+  // velden, hetzelfde blok, dezelfde mappen. Alleen de bron verschilt -- die
+  // staat in de instellingen en niet in een project.
+  {
+    $('#btn-nav-cmd').click(); await tick(); await tick()
+    const blok = $('[data-sectieblok="snel"]')
+    check('de cmd-snelrij is een gewoon knoppenblok', !!blok && !!blok.querySelector('.cmd-grid'))
+    check('en de knoppen dragen hun id, niet hun plek',
+      !!blok.querySelector('.cmd-btn[data-volgorde-id]'))
+
+    // De oude vorm (quickVolgorde/quickUit) verhuist eenmalig.
+    settings.cmd.quickVolgorde = ['quick:e3', 'quick:e1']
+    settings.cmd.quickUit = ['quick:e3']
+    check('er valt iets te verhuizen', W.__test.migreerSnelRijen() === true)
+    check('de volgorde staat nu in de sectie van deze rij',
+      ((settings.cmd.cmdVolgorde || {}).snel || []).join() === 'quick:e3,quick:e1')
+    check('en wat uit stond staat als uit', settings.cmd.cmdVisibility['quick:e3'] === false)
+    check('de oude velden zijn opgeruimd',
+      settings.cmd.quickVolgorde === undefined && settings.cmd.quickUit === undefined)
+    check('een tweede keer valt er niets meer te doen', W.__test.migreerSnelRijen() === false)
+
+    settings.cmd.cmdVisibility = {}
+    W.__test.zetRijSorteerModus('snel', true)
+    $('#btn-nav-cmd').click(); await tick(); await tick()
+    check('in de verplaatsmodus staat de mappenknop in de kop van de snelrij',
+      !!$('[data-map-sectie="snel"]'))
+    // Hint en klaar-knop komen uit dezelfde bedrading als bij een project.
+    check('met de uitleg erbij', !!$('#cmd-panel .cmd-sort-hint'))
+    check('en een knop om te stoppen', !!$('#cmd-panel .sort-klaar'))
+
+    const rij = W.__test.snelRij('snel')
+    const f = window.Knoppenrij.nieuweMap(rij, 'testmap')
+    check('een nieuwe map belandt in de instellingen, niet in een project',
+      (settings.cmd.cmdFolders || []).some(x => x.id === f.id && x.sectie === 'snel'))
+    const eerste = window.Knoppenrij.zichtbareIds(W.__test.snelRij('snel'))[0]
+    window.Knoppenrij.legInMap(W.__test.snelRij('snel'), eerste, f.id)
+    $('#btn-nav-cmd').click(); await tick(); await tick()
+    const groep = $('.cmd-map-groep')
+    check('de map staat in de rij', !!groep)
+    check('en de knop die erin ligt staat erbinnen',
+      !!groep && !!groep.querySelector('[data-volgorde-id="' + eerste + '"]'))
+    const losse = [...$$('#cmd-snel-grid > .cmd-sort-item[data-volgorde-id]')]
+    check('en niet meer los ernaast', !losse.some(el => el.dataset.volgordeId === eerste))
+    W.__test.zetRijSorteerModus('snel', false)
+
+    // Powershell krijgt dezelfde rij, met zijn eigen bron. Daar is wél genoeg
+    // van één soort om automatisch te mappen: de standaardknoppen.
+    $('#btn-nav-ps').click(); await tick(); await tick()
+    check('de powershell-snelrij is hetzelfde blok', !!$('[data-sectieblok="ps-snel"]'))
+    W.__test.autoMappen(null, 'ps-snel')
+    const psMap = (settings.ps.cmdFolders || []).find(x => x.auto === 'standaard')
+    check('automatisch mappen maakt een map voor de standaardknoppen', !!psMap)
+    check('en die hoort bij de powershell-rij', !!psMap && psMap.sectie === 'ps-snel')
+    const erin = window.Knoppenrij.knoppenInMap(W.__test.snelRij('ps-snel'), psMap.id)
+    check('er liggen alleen standaardknoppen in',
+      erin.length > 1 && erin.every(id => id.indexOf('pscmd:') === 0))
+    check('en het project krijgt er niets van mee',
+      (projects[0].cmdFolders || []).every(x => x.sectie === 'run' && x.auto !== 'standaard'))
   }
 
   console.log(ok ? '\n✓ ALLE UI-TESTS GESLAAGD' : '\n✗ ER ZIJN TESTS GEFAALD')

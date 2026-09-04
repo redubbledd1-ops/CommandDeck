@@ -280,14 +280,19 @@ const DEFAULT_SETTINGS = {
     maxRecent:   300,    // hoeveel losse uitvoeringen bewaard blijven voor de pijltjes
     maxEntries:  2000,   // hoeveel unieke commando's in het woordenboek passen
   },
-  // Losse CMD-sectie: onthoudt de laatst gebruikte map, ook na afsluiten
-  // Werkmap van de losse cmd-sectie, plus welke snelkoppelingen daar staan
-  // en in welke volgorde. Die rij hangt niet aan een project, dus dat hoort
-  // hier en niet in projects.json.
-  cmd: { cwd: '', recentCwds: [], quickUit: [], quickVolgorde: [] },
-  // Losse PowerShell-sectie: eigen werkmap, los van cmd
+  // Losse CMD-sectie: onthoudt de laatst gebruikte map, ook na afsluiten.
+  // Daarnaast de knoppenrij van die sectie: volgorde, wat verborgen is en de
+  // mappen. Dat zijn dezelfde vier velden als bij een project (zie
+  // knoppenrij.js), zodat er maar één soort rij bestaat. Die rij hangt niet aan
+  // een project, dus hij hoort hier en niet in projects.json.
+  cmd: {
+    cwd: '', recentCwds: [],
+    cmdVolgorde: {}, cmdVisibility: {}, cmdFolders: [], cmdFolderVan: {},
+  },
+  // Losse PowerShell-sectie: eigen werkmap en eigen knoppenrij, los van cmd
   ps: {
-    cwd: '', recentCwds: [], quickUit: [], quickVolgorde: [],
+    cwd: '', recentCwds: [],
+    cmdVolgorde: {}, cmdVisibility: {}, cmdFolders: [], cmdFolderVan: {},
     exe: 'powershell', noProfile: true, executionPolicy: '',
   },
   // Mapgroottes in de verkenner op de achtergrond uitrekenen

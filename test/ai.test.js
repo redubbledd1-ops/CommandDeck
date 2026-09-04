@@ -365,7 +365,8 @@ check('zonder systeemprompt blijft het veld weg',
   // niets bewaard om uit te herstellen.
   const herstel = bron.slice(bron.indexOf('async function herstelVerborgenKnoppen'), bron.indexOf('function wisKnopHtml'))
   check('er is een knop om weggehaalde knoppen terug te zetten',
-    /p\.cmdVisibility = Object\.fromEntries/.test(herstel) && /quickUit: \[\]/.test(herstel))
+    /p\.cmdVisibility = Object\.fromEntries/.test(herstel)
+    && /for \(const soort of \['cmd', 'ps'\]\)/.test(herstel))
   // Sinds knoppen standaard uit kunnen staan is "alles wissen" niet meer goed
   // genoeg: een knop die je juist expliciet hebt aangezet is geen verborgen
   // knop, en zou anders verdwijnen bij een handeling die knoppen terugbrengt.
@@ -384,8 +385,10 @@ check('zonder systeemprompt blijft het veld weg',
   const css = fs.readFileSync(path.join(REAL, 'style.css'), 'utf8')
   const regel = css.slice(css.indexOf('.knop-wis {'), css.indexOf('}', css.indexOf('.knop-wis {')))
   check('en is niet doorzichtig gemaakt', !/opacity:\s*0/.test(regel))
-  check('de wisknop staat in beide sectiekoppen',
-    (bron.match(/(wisKnopHtml|kopActiesHtml)\('(run|snel)'\)/g) || []).length === 2)
+  // Elke rij heeft zijn eigen kop met dezelfde knoppen erin: het project, cmd
+  // en powershell.
+  check('de wisknop staat in elke sectiekop',
+    (bron.match(/kopActiesHtml\((?:'run'|SNEL_SECTIE\.(?:cmd|ps))\)/g) || []).length === 3)
 
   // Weghalen hoort bij het herschikken, niet bij dagelijks gebruik: anders
   // staat er permanent een knop waarmee je per ongeluk iets weggooit.
@@ -394,10 +397,11 @@ check('zonder systeemprompt blijft het veld weg',
       const i = bron.indexOf('function ' + n + '(')
       return bron.slice(i, bron.indexOf('\n}', i) + 2)
     }
-    const bouw = (sorteer, snel) => new Function(
-      'cmdSorteerModus', 'cmdSnelSorteerModus', 'knopWisModus', 'I18N', 'esc',
+    const bouw = (sorteer, snel, psSnel = false) => new Function(
+      'cmdSorteerModus', 'cmdSnelSorteerModus', 'psSnelSorteerModus', 'SNEL_SECTIE',
+      'knopWisModus', 'I18N', 'esc',
       [pk('sorteertSectie'), pk('wisKnopHtml')].join('\n') + '; return wisKnopHtml'
-    )(sorteer, snel, '', { t: () => 'x' }, (x) => x)
+    )(sorteer, snel, psSnel, { cmd: 'snel', ps: 'ps-snel' }, '', { t: () => 'x' }, (x) => x)
 
     const rust = bouw('', false)
     check('buiten de verplaatsmodus is de wisknop er niet',

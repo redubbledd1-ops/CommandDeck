@@ -51,6 +51,11 @@ function cmdContext() {
   }
 }
 
+// De twee snelrijen die niet aan een project hangen. De naam is de sectie
+// binnen hun eigen bron (settings.cmd en settings.ps), net zoals 'run' dat is
+// binnen een project.
+const SNEL_SECTIE = { cmd: 'snel', ps: 'ps-snel' }
+
 const PS_CTX_ID = '__ps__'
 function psContext() {
   return {
@@ -795,7 +800,21 @@ function projectRij(bron, sectie) {
     toonbaar: (ids) => gitToonbaar(bron, ids),
     sorteert: sorteertSectie(sectie),
     autoSoorten: autoSoorten(),
+    knopHtml: () => cmdKnopHtmlMap(bron),
+    extraKop: (f) => mapExtraHtml(bron, f),
+    kleurBron: bron,
+    herteken: () => renderMain(),
+    bewaar: () => { saveProjects(); renderMain() },
   }
+}
+
+// Welke rij hoort bij deze sectie? De snelrijen van cmd en powershell hangen
+// niet aan een project, dus daar is `bron` niet ingevuld -- de sectienaam zegt
+// al genoeg. Alles wat over een rij gaat loopt hierlangs, zodat tekenen,
+// slepen en mappen niet hoeven te weten waar ze staan.
+function rijVoor(bron, sectie) {
+  if (sectie === SNEL_SECTIE.cmd || sectie === SNEL_SECTIE.ps) return snelRij(sectie)
+  return projectRij(bron, sectie)
 }
 
 // Een niet-gekoppeld project ziet alleen de koppelknop; een gekoppeld project
@@ -899,17 +918,18 @@ function mapExtraHtml(p, f) {
 }
 
 function cmdGridHtml(p, sectie) {
-  const knopHtml = cmdKnopHtmlMap(p)
-  const ids = rijVolgorde(p, sectie)
-  const sorteren = cmdSorteerModus === sectie
+  const rij = rijVoor(p, sectie)
+  const knopHtml = rij.knopHtml()
+  const ids = Knoppenrij.rijVolgorde(rij)
+  const sorteren = sorteertSectie(sectie)
   const inhoud = {}
-  for (const id of ids) if (isMapId(id)) inhoud[id] = knoppenInMap(p, sectie, mapIdVan(id))
+  for (const id of ids) if (isMapId(id)) inhoud[id] = Knoppenrij.knoppenInMap(rij, mapIdVan(id))
 
   // Kleuren worden op de buren gekozen, dus ze moeten lopen over de knoppen
   // zoals je ze ziet staan. Een mapkop telt niet mee: die heeft geen kleur en
   // zou er anders eentje opeten.
   const opVolgorde = ids.flatMap(id => (isMapId(id) ? inhoud[id] : [id]))
-  const kleuren = kleurKlassenVoorIds(opVolgorde.map(id => knopKleurSpec(id, p)))
+  const kleuren = kleurKlassenVoorIds(opVolgorde.map(id => knopKleurSpec(id, rij.kleurBron)))
   const kleurVan = Object.fromEntries(opVolgorde.map((id, i) => [id, kleuren[i]]))
 
   // In de sorteermodus krijgt elk ding zijn eigen pijltjes. Het id staat op de
@@ -925,15 +945,15 @@ function cmdGridHtml(p, sectie) {
     if (!isMapId(id)) return knop(id, i, ids.length)
     // Een dichte map is alleen zijn naam. Die hoort niet in het raster maar in
     // de kopregel, naast de schakelaar -- zie dichteMappenHtml().
-    if (!mapIsOpen(p, id)) return ''
-    const f = folderOp(p, mapIdVan(id))
+    if (!Knoppenrij.mapOpen(rij.bron, id)) return ''
+    const f = folderOp(rij.bron, mapIdVan(id))
     if (!f) return ''
     const kinderen = inhoud[id] || []
-    const kopDeel = mapKopHtml(p, f, kinderen.length, sorteren ? { i, aantal: ids.length } : null)
+    const kopDeel = mapKopHtml(f, kinderen.length, sorteren ? { i, aantal: ids.length } : null)
     const leeg = sorteren ? `<span class="cmd-map-leeg">${esc(I18N.t('folder.emptyHint'))}</span>` : ''
     const binnen = kinderen.map((kid, ki) => knop(kid, ki, kinderen.length)).join('') || leeg
     return `<div class="cmd-map-groep" data-map-groep="${esc(f.id)}">
-      <div class="cmd-map-regelrij">${kopDeel}${mapExtraHtml(p, f)}</div>
+      <div class="cmd-map-regelrij">${kopDeel}${rij.extraKop ? rij.extraKop(f) : ''}</div>
       <div class="cmd-map-inhoud">${binnen}</div>
     </div>`
   })
@@ -942,7 +962,7 @@ function cmdGridHtml(p, sectie) {
   // hulp schuift de eerste losse knop dus naast de laatste map, en dan staat
   // "los" ineens op dezelfde regel als "in een map". Dit lege blok van een
   // hele regel breed dwingt de knoppen eronder.
-  const laatsteOpen = ids.reduce((n, id, i) => (isMapId(id) && mapIsOpen(p, id) ? i : n), -1)
+  const laatsteOpen = ids.reduce((n, id, i) => (isMapId(id) && Knoppenrij.mapOpen(rij.bron, id) ? i : n), -1)
   if (laatsteOpen >= 0 && ids.some(id => !isMapId(id))) {
     delen.splice(laatsteOpen + 1, 0, '<span class="cmd-rij-breek" aria-hidden="true"></span>')
   }
@@ -951,7 +971,7 @@ function cmdGridHtml(p, sectie) {
 
 // De naam van een map, als knop. `plek` is alleen in de sorteermodus gevuld:
 // dan komen de pijltjes erbij en hangt het id eraan waar het slepen mee rekent.
-function mapKopHtml(p, f, aantal, plek = null) {
+function mapKopHtml(f, aantal, plek = null) {
   const open = f.open !== false
   const kop = `<button class="cmd-map-kop ${open ? '' : 'dicht'}" data-map="${esc(f.id)}" title="${esc(I18N.t('folder.toggleTitle'))}">
     <i class="ti ${open ? 'ti-folder-open' : 'ti-folder'}"></i>
@@ -968,15 +988,16 @@ function mapKopHtml(p, f, aantal, plek = null) {
 // in beslag voor drie woorden. Past het niet meer naast elkaar, dan lopen ze
 // vanzelf door naar de volgende regel.
 function dichteMappenHtml(p, sectie) {
-  const ids = rijVolgorde(p, sectie)
-  const sorteren = cmdSorteerModus === sectie
-  const dicht = ids.filter(id => isMapId(id) && !mapIsOpen(p, id))
+  const rij = rijVoor(p, sectie)
+  const ids = Knoppenrij.rijVolgorde(rij)
+  const sorteren = sorteertSectie(sectie)
+  const dicht = ids.filter(id => isMapId(id) && !Knoppenrij.mapOpen(rij.bron, id))
   if (!dicht.length) return ''
   return `<span class="cmd-kop-mappen">` + dicht.map(id => {
-    const f = folderOp(p, mapIdVan(id))
+    const f = folderOp(rij.bron, mapIdVan(id))
     if (!f) return ''
-    const aantal = knoppenInMap(p, sectie, mapIdVan(id)).length
-    return mapKopHtml(p, f, aantal, sorteren ? { i: ids.indexOf(id), aantal: ids.length } : null)
+    const aantal = Knoppenrij.knoppenInMap(rij, mapIdVan(id)).length
+    return mapKopHtml(f, aantal, sorteren ? { i: ids.indexOf(id), aantal: ids.length } : null)
   }).join('') + `</span>`
 }
 
@@ -1032,7 +1053,8 @@ window.addEventListener('DOMContentLoaded', async () => {
   // projecten en git-instellingen je ziet.
   await laadAccounts()
 
-  if (migreerStandaardEditors() || ontdubbelCustomEditors() || normaliseerEditorKleuren()) window.api.saveSettings(settings)
+  if (migreerStandaardEditors() || ontdubbelCustomEditors() || normaliseerEditorKleuren()
+      || migreerSnelRijen()) window.api.saveSettings(settings)
 
   await I18N.init(settings.language)
   // Pas na I18N: de Flutter-map krijgt een naam uit de taalbestanden.
@@ -2933,21 +2955,21 @@ function legInMap(p, sectie, knopId, mapId) {
 }
 
 function bedraadMapKoppen(p, sectie, grid) {
+  const rij = rijVoor(p, sectie)
   grid.querySelectorAll('[data-map]').forEach(kop => {
-    const f = folderOp(p, kop.dataset.map)
+    const f = folderOp(rij.bron, kop.dataset.map)
     if (!f) return
     kop.onclick = (e) => {
       e.preventDefault()
       e.stopPropagation()
       f.open = f.open === false
-      saveProjects()
-      renderMain()
+      rij.bewaar()
     }
     kop.oncontextmenu = (e) => {
       e.preventDefault()
       e.stopPropagation()
       toonContextMenu(e.clientX, e.clientY, [
-        { label: I18N.t('folder.rename'), icoon: 'ti-pencil', doe: () => hernoemMap(p, f.id) },
+        { label: I18N.t('folder.rename'), icoon: 'ti-pencil', doe: () => hernoemMap(p, sectie, f.id) },
         { label: I18N.t('folder.dissolve'), icoon: 'ti-folder-off', doe: () => hefMappenOp(p, sectie, [f.id]) },
       ])
     }
@@ -2955,7 +2977,8 @@ function bedraadMapKoppen(p, sectie, grid) {
 }
 
 function bedraadKnopSlepen(p, sectie, blok, grid) {
-  const bewaar = () => { saveProjects(); renderMain() }
+  const rij = rijVoor(p, sectie)
+  const bewaar = () => rij.bewaar()
   const gesleept = () => (sleepKnop && sleepKnop.sectie === sectie ? sleepKnop.id : null)
 
   blok.querySelectorAll('.cmd-sort-item[data-volgorde-id]').forEach(item => {
@@ -2978,11 +3001,11 @@ function bedraadKnopSlepen(p, sectie, blok, grid) {
       if (!bron || bron === id) return
       // Op een mapkop laten vallen betekent: erin. Op een knop betekent: op
       // die plek, en dus in dezelfde map als die knop.
-      if (isMapId(id) && !isMapId(bron)) legInMap(p, sectie, bron, mapIdVan(id))
+      if (isMapId(id) && !isMapId(bron)) Knoppenrij.legInMap(rij, bron, mapIdVan(id))
       else {
-        const rij = knopRij(p, sectie, id)
-        const vanaf = rij.indexOf(bron)
-        verplaatsKnopId(p, sectie, bron, id, mapVanKnop(p, sectie, id), vanaf >= 0 && vanaf < rij.indexOf(id))
+        const lijst = Knoppenrij.knopRij(rij, id)
+        const vanaf = lijst.indexOf(bron)
+        Knoppenrij.verplaatsKnop(rij, bron, id, Knoppenrij.mapIdVanKnop(rij, id), vanaf >= 0 && vanaf < lijst.indexOf(id))
       }
       bewaar()
     }
@@ -2990,11 +3013,11 @@ function bedraadKnopSlepen(p, sectie, blok, grid) {
       pijl.onclick = (e) => {
         e.preventDefault()
         e.stopPropagation()
-        const rij = knopRij(p, sectie, id)
-        const i = rij.indexOf(id)
+        const lijst = Knoppenrij.knopRij(rij, id)
+        const i = lijst.indexOf(id)
         const doel = sortPijlDoel(i, pijl.dataset.op, true)
-        if (i < 0 || doel < 0 || doel >= rij.length) return
-        verplaatsKnopId(p, sectie, id, rij[doel], mapVanKnop(p, sectie, id), doel > i)
+        if (i < 0 || doel < 0 || doel >= lijst.length) return
+        Knoppenrij.verplaatsKnop(rij, id, lijst[doel], Knoppenrij.mapIdVanKnop(rij, id), doel > i)
         bewaar()
       }
     })
@@ -3010,7 +3033,7 @@ function bedraadKnopSlepen(p, sectie, blok, grid) {
       e.preventDefault()
       e.stopPropagation()
       sleepKnop = null
-      legInMap(p, sectie, bron, groep.dataset.mapGroep)
+      Knoppenrij.legInMap(rij, bron, groep.dataset.mapGroep)
       bewaar()
     }
   })
@@ -3021,9 +3044,9 @@ function bedraadKnopSlepen(p, sectie, blok, grid) {
   grid.ondrop = (e) => {
     const bron = gesleept()
     sleepKnop = null
-    if (!bron || isMapId(bron) || !folderVanKnop(p, sectie, bron)) return
+    if (!bron || isMapId(bron) || !Knoppenrij.mapVanKnop(rij, bron)) return
     e.preventDefault()
-    verplaatsKnopId(p, sectie, bron, null, null, false)
+    Knoppenrij.verplaatsKnop(rij, bron, null, null, false)
     bewaar()
   }
 }
@@ -3036,14 +3059,15 @@ async function nieuweMap(p, sectie) {
     okLabel: I18N.t('folder.newButton'),
   })
   if (naam == null) return
-  Knoppenrij.nieuweMap(projectRij(p, sectie), naam.trim() || I18N.t('folder.defaultName'))
-  saveProjects()
-  cmdSorteerModus = sectie
-  renderMain()
+  const rij = rijVoor(p, sectie)
+  Knoppenrij.nieuweMap(rij, naam.trim() || I18N.t('folder.defaultName'))
+  zetRijSorteerModus(sectie, true)
+  rij.bewaar()
 }
 
-async function hernoemMap(p, mapId) {
-  const f = folderOp(p, mapId)
+async function hernoemMap(p, sectie, mapId) {
+  const rij = rijVoor(p, sectie)
+  const f = folderOp(rij.bron, mapId)
   if (!f) return
   const naam = await vraagTekst({
     titel: I18N.t('folder.renameTitle'), waarde: f.label, okLabel: I18N.t('common.save'),
@@ -3053,17 +3077,16 @@ async function hernoemMap(p, mapId) {
   // Zelf een naam gekozen: dan hoort automatisch mappen die niet meer te
   // overschrijven.
   f.auto = ''
-  saveProjects()
-  renderMain()
+  rij.bewaar()
 }
 
 // De map gaat weg, de knoppen blijven. Ze stonden al op hun eigen plek in de
 // volgorde, dus ze komen daar gewoon weer tevoorschijn.
 function hefMappenOp(p, sectie, mapIds) {
-  const aantal = Knoppenrij.hefMappen(projectRij(p, sectie), mapIds)
+  const rij = rijVoor(p, sectie)
+  const aantal = Knoppenrij.hefMappen(rij, mapIds)
   if (!aantal) { showToast(I18N.t('folder.noneToast')); return }
-  saveProjects()
-  renderMain()
+  rij.bewaar()
   showToast(I18N.t('folder.dissolvedToast', { count: aantal }))
 }
 
@@ -3085,14 +3108,14 @@ function autoSoorten() {
 }
 
 function maakAutoMappen(p, sectie) {
-  return Knoppenrij.maakAutoMappen(projectRij(p, sectie))
+  return Knoppenrij.maakAutoMappen(rijVoor(p, sectie))
 }
 
 function autoMappen(p, sectie) {
-  const gedaan = maakAutoMappen(p, sectie)
+  const rij = rijVoor(p, sectie)
+  const gedaan = Knoppenrij.maakAutoMappen(rij)
   if (!gedaan) { showToast(I18N.t('folder.autoNothingToast')); return }
-  saveProjects()
-  renderMain()
+  rij.bewaar()
   showToast(I18N.t('folder.autoDoneToast', { count: gedaan }))
 }
 
@@ -3105,6 +3128,12 @@ function ordenProject(p) {
   p.knoppenGeordend = true
   maakAutoMappen(p, 'run')
   return true
+}
+
+// De mappen van deze rij, waar hij ook staat.
+function mappenVanSectie(p, sectie) {
+  const rij = rijVoor(p, sectie)
+  return Knoppenrij.mappenVan(rij.bron, sectie)
 }
 
 function bedraadMapMenu(p, sectie, blok) {
@@ -3120,18 +3149,24 @@ function bedraadMapMenu(p, sectie, blok) {
       { label: I18N.t('folder.auto'), icoon: 'ti-wand', doe: () => autoMappen(p, sectie) },
       { scheiding: true },
       { label: I18N.t('folder.dissolveAll'), icoon: 'ti-folder-off',
-        uit: !foldersVan(p, sectie).length,
-        doe: () => hefMappenOp(p, sectie, foldersVan(p, sectie).map(f => f.id)) },
+        uit: !mappenVanSectie(p, sectie).length,
+        doe: () => hefMappenOp(p, sectie, mappenVanSectie(p, sectie).map(f => f.id)) },
     ])
   }
 }
 
-function bedraadCmdKnopVolgorde(p) {
-  document.querySelectorAll('[data-sectieblok]').forEach(blok => {
+// Elk blok met knoppen wordt op dezelfde manier bediend: de hint en de
+// klaar-knop in de kop, het mappenmenu, de mapkoppen, het slepen en lang
+// drukken. `wortel` bepaalt welke blokken: bij een project het hele scherm, bij
+// cmd en powershell alleen dat paneel -- anders bedraadt een paneel de blokken
+// van een project dat er nog naast staat.
+function bedraadCmdKnopVolgorde(p, wortel = document) {
+  wortel.querySelectorAll('[data-sectieblok]').forEach(blok => {
     const sectie = blok.dataset.sectieblok
     const grid = blok.querySelector('.cmd-grid')
     if (!grid) return
-    const sorteren = cmdSorteerModus === sectie
+    const rij = rijVoor(p, sectie)
+    const sorteren = sorteertSectie(sectie)
 
     blok.querySelector('.cmd-sort-hint')?.remove()
     blok.querySelector('.sort-klaar')?.remove()
@@ -3149,7 +3184,7 @@ function bedraadCmdKnopVolgorde(p) {
       klaar.className = 'sort-klaar'
       klaar.title = I18N.t('common.sortDoneTitle')
       klaar.innerHTML = '<i class="ti ti-check"></i>'
-      klaar.onclick = () => { cmdSorteerModus = ''; knopWisModus = ''; renderMain() }
+      klaar.onclick = () => { zetRijSorteerModus(sectie, false); knopWisModus = ''; rij.herteken() }
       // Achter de prullenbak in hetzelfde hoekje, niet ergens los in de kop.
       ;(kop?.querySelector('.kop-acties') || kop)?.appendChild(klaar)
     }
@@ -3163,12 +3198,12 @@ function bedraadCmdKnopVolgorde(p) {
     grid.querySelectorAll('.cmd-btn').forEach(btn => {
       let timer = null
       btn.onmousedown = (e) => {
-        if (e.button !== 0 || cmdSorteerModus === sectie) return
+        if (e.button !== 0 || sorteertSectie(sectie)) return
         timer = setTimeout(() => {
-          cmdSorteerModus = sectie
+          zetRijSorteerModus(sectie, true)
           knopWisModus = ''
           showToast(I18N.t('project.cmdSortToast'))
-          renderMain()
+          rij.herteken()
         }, LANG_DRUKKEN_MS)
       }
       btn.onmouseup = () => { clearTimeout(timer); timer = null }
@@ -3358,9 +3393,10 @@ function bedraadKnopWissen(ctx, sectie, grid) {
 // leegmaken. Wie de knoppen wil houden maar de map niet, heeft "map opheffen"
 // in het rechtermuismenu -- die laat de knoppen staan.
 function verwijderMap(p, sectie, mapId) {
-  const f = folderOp(p, mapId)
+  const rij = rijVoor(p, sectie)
+  const f = folderOp(rij.bron, mapId)
   if (!f) return
-  if (knoppenInMap(p, sectie, mapId).length) {
+  if (Knoppenrij.knoppenInMap(rij, mapId).length) {
     showToast(I18N.t('folder.notEmptyToast', { name: f.label }))
     return
   }
@@ -3376,10 +3412,9 @@ function kopActiesHtml(sectie) {
 
 // Mappen maak je terwijl je de rij ordent, niet ertussendoor: de knop staat
 // daarom in hetzelfde hoekje als de prullenbak en komt in dezelfde modus
-// tevoorschijn. Snelknoppen hebben geen mappen -- die rij is er juist om kort
-// te blijven.
+// tevoorschijn. Elke rij heeft hem, ook de snelrijen van cmd en powershell --
+// die worden net zo goed lang.
 function mapKnopHtml(sectie) {
-  if (sectie !== 'run') return ''
   if (!sorteertSectie(sectie)) return ''
   return `<button class="knop-map" data-map-sectie="${esc(sectie)}" title="${esc(I18N.t('folder.menuTitle'))}"><i class="ti ti-folder"></i></button>`
 }
@@ -3388,9 +3423,17 @@ function mapKnopHtml(sectie) {
 // gebruik ervan. De prullenbak verschijnt daarom pas in de verplaatsmodus —
 // anders staat er permanent een knop waarmee je per ongeluk iets weggooit.
 function sorteertSectie(sectie) {
-  if (sectie === 'snel') return cmdSnelSorteerModus
-  if (sectie === 'ps-snel') return psSnelSorteerModus
+  if (sectie === SNEL_SECTIE.cmd) return cmdSnelSorteerModus
+  if (sectie === SNEL_SECTIE.ps) return psSnelSorteerModus
   return cmdSorteerModus === sectie
+}
+
+// De verplaatsmodus staat per rij ergens anders opgeslagen. Wie hem aan- of
+// uitzet gaat hierlangs, zodat dat verschil op één plek zit.
+function zetRijSorteerModus(sectie, aan) {
+  if (sectie === SNEL_SECTIE.cmd) cmdSnelSorteerModus = !!aan
+  else if (sectie === SNEL_SECTIE.ps) psSnelSorteerModus = !!aan
+  else cmdSorteerModus = aan ? sectie : ''
 }
 
 // Hoeveel knoppen staan er nu verborgen? Alleen wat "alleen hier" weggehaald
@@ -3398,8 +3441,9 @@ function sorteertSectie(sectie) {
 function verborgenKnopAantal() {
   let n = 0
   for (const p of projects) n += Object.values(p.cmdVisibility || {}).filter(v => v === false).length
-  n += (((settings.cmd || {}).quickUit) || []).length
-  n += (((settings.ps  || {}).quickUit) || []).length
+  for (const soort of ['cmd', 'ps']) {
+    n += Object.values((settings[soort] || {}).cmdVisibility || {}).filter(v => v === false).length
+  }
   return n
 }
 
@@ -3418,8 +3462,12 @@ async function herstelVerborgenKnoppen() {
       Object.entries(p.cmdVisibility || {}).filter(([, v]) => v === true))
   })
   saveProjects()
-  settings.cmd = { ...(settings.cmd || {}), quickUit: [] }
-  settings.ps  = { ...(settings.ps  || {}), quickUit: [] }
+  for (const soort of ['cmd', 'ps']) {
+    const bron = settings[soort]
+    if (!bron) continue
+    bron.cmdVisibility = Object.fromEntries(
+      Object.entries(bron.cmdVisibility || {}).filter(([, v]) => v === true))
+  }
   window.api.saveSettings(settings)
 
   showToast(I18N.t('wis.restoredToast', { count: n }))
@@ -3871,7 +3919,16 @@ function verkennerPid() {
   if (verkennerTekenPid) return verkennerTekenPid
   if (view === 'cmd') return CMD_CTX_ID
   if (view === 'ps') return PS_CTX_ID
-  if (splitTweeProjecten() && werkSlots) return werkSlots[werkSlotFocus].projectId
+  // In een split hoort de verkenner bij het project dat in beeld staat, niet bij
+  // activeId. Staat het woordenboek ernaast, dan loopt activeId achter op het
+  // project in het vlak, en werd de map van het ene project onder het andere
+  // weggeschreven -- daarna opende dat project in de map van zijn buurman.
+  if (splitAan() && werkSlots) {
+    const gericht = werkSlots[werkSlotFocus]
+    if (gericht && gericht.view === 'project' && gericht.projectId) return gericht.projectId
+    const ander = werkSlots.find(s => s && s.view === 'project' && s.projectId)
+    if (ander) return ander.projectId
+  }
   return activeId || activeTermId
 }
 
@@ -5781,12 +5838,88 @@ function quickCmds() {
     .slice(0, 12)
 }
 
-// ── Snelkoppelingen in de cmd-sectie ──────────────────────────────────────────
+// ── Snelkoppelingen in de cmd- en powershell-sectie ───────────────────────────
 // Dezelfde rij als "uitvoeren" bij een project, maar die hangt niet aan een
-// project. Volgorde en zichtbaarheid staan daarom in de instellingen en niet
-// in projects.json. Ids: `quick:<id>` voor een commando uit het woordenboek,
-// `ai:<dienst>` voor een AI-knop.
+// project. Volgorde, zichtbaarheid en mappen staan daarom in de instellingen en
+// niet in projects.json -- in dezelfde vier velden als bij een project, zodat
+// knoppenrij.js er niets van hoeft te weten. Ids: `quick:<id>` voor een
+// commando uit het woordenboek, `pscmd:<cmd>` voor een standaard
+// powershell-knop, `ai:<dienst>` voor een AI-knop.
 let cmdSnelSorteerModus = false
+
+function snelBron(soort) {
+  if (!settings[soort] || typeof settings[soort] !== 'object') settings[soort] = {}
+  return settings[soort]
+}
+
+// De regel uit het woordenboek achter een `quick:`-knop. Nodig om te weten of
+// het een favoriet is of iets dat je zelf hebt toegevoegd.
+function snelEntry(id) {
+  return (history.entries || []).find(e => 'quick:' + e.id === id) || null
+}
+
+// Waar hoort een snelknop vanzelf thuis? Op soort, net als bij een project:
+// wat je met een ster hebt aangewezen, wat je zelf hebt toegevoegd, wat de app
+// meelevert, en de AI-knoppen.
+const SNEL_AUTO_MAPPEN = [
+  { auto: 'fav',       sleutel: 'folder.autoFav',      toets: (id) => id.startsWith('quick:') && !!(snelEntry(id) || {}).favorite },
+  { auto: 'eigen',     sleutel: 'folder.autoOwn',      toets: (id) => id.startsWith('quick:') && !(snelEntry(id) || {}).favorite },
+  { auto: 'standaard', sleutel: 'folder.autoStandard', toets: (id) => id.startsWith('pscmd:') },
+  { auto: 'ai',        sleutel: 'folder.autoAi',       toets: (id) => id.startsWith('ai:') },
+]
+
+function snelAutoSoorten() {
+  return SNEL_AUTO_MAPPEN.map(x => ({ auto: x.auto, label: I18N.t(x.sleutel), toets: x.toets }))
+}
+
+// Eenmalig: quickVolgorde en quickUit worden de vier velden die elke rij
+// gebruikt. Geeft terug of er iets te verhuizen viel.
+function migreerSnelRijen() {
+  let gedaan = false
+  for (const soort of ['cmd', 'ps']) {
+    if (settings[soort] && Knoppenrij.migreer(settings[soort], SNEL_SECTIE[soort])) gedaan = true
+  }
+  return gedaan
+}
+
+function snelRij(sectie) {
+  const soort = sectie === SNEL_SECTIE.ps ? 'ps' : 'cmd'
+  const bron = snelBron(soort)
+  return {
+    bron,
+    sectie,
+    // Een map staat in dezelfde lijst als de knoppen, precies zoals bij een
+    // project: zo houdt hij zijn plek in de volgorde zonder een tweede lijst.
+    alle: () => [
+      ...(soort === 'ps' ? psSnelIds() : cmdSnelIds()),
+      ...Knoppenrij.mappenVan(bron, sectie).map(f => Knoppenrij.MAP_PREFIX + f.id),
+    ],
+    sorteert: sorteertSectie(sectie),
+    autoSoorten: snelAutoSoorten(),
+    knopHtml: () => (soort === 'ps' ? psSnelKnopMap() : cmdSnelKnopMap()),
+    herteken: () => { if (soort === 'ps') renderPsPanel(); else renderCmdPanel() },
+    bewaar: () => {
+      window.api.saveSettings(settings)
+      if (soort === 'ps') renderPsPanel(); else renderCmdPanel()
+    },
+  }
+}
+
+// Onder deze namen gebruikt de rest van het bestand de rij. Ze doen alle drie
+// hetzelfde voor cmd en powershell; het verschil zit alleen in de sectie.
+function snelVolgorde(sectie) {
+  return Knoppenrij.volgorde(snelRij(sectie))
+}
+
+function snelZichtbaar(sectie, id) {
+  return Knoppenrij.zichtbaar(snelRij(sectie), id)
+}
+
+function zetSnelZichtbaar(sectie, id, aan) {
+  const bron = snelRij(sectie).bron
+  bron.cmdVisibility = { ...(bron.cmdVisibility || {}), [id]: !!aan }
+  window.api.saveSettings(settings)
+}
 
 function cmdSnelIds() {
   const ids = quickCmds().map(e => 'quick:' + e.id)
@@ -5797,36 +5930,15 @@ function cmdSnelIds() {
 }
 
 function cmdSnelVolgorde() {
-  const alle = cmdSnelIds()
-  const opgeslagen = ((settings.cmd || {}).quickVolgorde || []).filter(id => alle.includes(id))
-  return [...opgeslagen, ...alle.filter(id => !opgeslagen.includes(id))]
+  return snelVolgorde(SNEL_SECTIE.cmd)
 }
 
 function cmdSnelZichtbaar(id) {
-  return !(((settings.cmd || {}).quickUit) || []).includes(id)
-}
-
-function cmdSnelZichtbareVolgorde() {
-  return cmdSnelVolgorde().filter(cmdSnelZichtbaar)
+  return snelZichtbaar(SNEL_SECTIE.cmd, id)
 }
 
 function zetCmdSnelZichtbaar(id, aan) {
-  const uit = new Set(((settings.cmd || {}).quickUit) || [])
-  if (aan) uit.delete(id); else uit.add(id)
-  settings.cmd = { ...(settings.cmd || {}), quickUit: [...uit] }
-  window.api.saveSettings(settings)
-}
-
-// Verslepen gaat over wat je ziet; wat verborgen is blijft op zijn plek staan.
-function verplaatsCmdSnel(van, naar) {
-  const volledig = cmdSnelVolgorde()
-  const zichtbaar = volledig.filter(cmdSnelZichtbaar)
-  if (!verschuif(zichtbaar, van, naar)) return false
-  let zi = 0
-  const nieuw = volledig.map(id => (cmdSnelZichtbaar(id) ? zichtbaar[zi++] : id))
-  settings.cmd = { ...(settings.cmd || {}), quickVolgorde: nieuw }
-  window.api.saveSettings(settings)
-  return true
+  zetSnelZichtbaar(SNEL_SECTIE.cmd, id, aan)
 }
 
 function cmdSnelKnopMap() {
@@ -5853,16 +5965,7 @@ function cmdSnelLabel(id) {
 }
 
 function cmdSnelGridHtml() {
-  const map = cmdSnelKnopMap()
-  const ids = cmdSnelZichtbareVolgorde()
-  const kleuren = kleurKlassenVoorIds(ids.map(id => knopKleurSpec(id)))
-  return ids.map((id, i) => {
-    let btn = map[id]
-    if (!btn) return ''
-    btn = zetBtnKleur(btn, kleuren[i])
-    if (!cmdSnelSorteerModus) return btn
-    return `<span class="cmd-sort-item" data-volgorde-index="${i}">${pijlenHtml(i === 0, i === ids.length - 1, true)}${btn}</span>`
-  }).join('')
+  return cmdGridHtml(null, SNEL_SECTIE.cmd)
 }
 
 // ── Instellingenvenster van de cmd-sectie ─────────────────────────────────────
@@ -5995,47 +6098,12 @@ function sluitPsInstellingen() {
   focusTerminalInput()
 }
 
+// De snelrij wordt precies zo bediend als de rij bij een project: hetzelfde
+// blok, dezelfde wiring. Alleen de knoppen erin verschillen, en die komen uit
+// de rij-beschrijving.
 function bedraadCmdSnel() {
-  const klaar = document.getElementById('cmd-snel-sorteer-klaar')
-  if (klaar) klaar.onclick = () => {
-    cmdSnelSorteerModus = false
-    knopWisModus = ''
-    renderCmdPanel()
-  }
-
-  const grid = document.getElementById('cmd-snel-grid')
-  if (!grid) return
-
-  grid.querySelectorAll('.cmd-sort-item').forEach((item, index) => {
-    item.dataset.volgordeIndex = String(index)
-    maakSleepbaar(item, index, (van, naar) => {
-      if (verplaatsCmdSnel(van, naar)) renderCmdPanel()
-    })
-    item.querySelectorAll('.sort-pijl:not(.uit)').forEach(pijl => {
-      pijl.onclick = (e) => {
-        e.preventDefault()
-        e.stopPropagation()
-        const idx = parseInt(item.dataset.volgordeIndex)
-        if (verplaatsCmdSnel(idx, sortPijlDoel(idx, pijl.dataset.op, true))) renderCmdPanel()
-      }
-    })
-  })
-
-  // Lang drukken zet de volgorde-modus aan, net als bij een project.
-  grid.querySelectorAll('.cmd-btn').forEach(btn => {
-    let timer = null
-    btn.onmousedown = (e) => {
-      if (e.button !== 0 || cmdSnelSorteerModus) return
-      timer = setTimeout(() => {
-        cmdSnelSorteerModus = true
-        knopWisModus = ''
-        showToast(I18N.t('project.cmdSortToast'))
-        renderCmdPanel()
-      }, LANG_DRUKKEN_MS)
-    }
-    btn.onmouseup = () => { clearTimeout(timer); timer = null }
-    btn.onmouseleave = () => { clearTimeout(timer); timer = null }
-  })
+  const paneel = document.getElementById('cmd-panel')
+  if (paneel) bedraadCmdKnopVolgorde(null, paneel)
 }
 
 function renderCmdPanel() {
@@ -6052,14 +6120,11 @@ function renderCmdPanel() {
   const snelGrid = cmdSnelGridHtml()
   const heeftSnel = !!cmdSnelVolgorde().length
   const quickMarkup = `
-    <div class="cmd-section">
+    <div class="cmd-section" data-sectieblok="${SNEL_SECTIE.cmd}">
       <div class="cmd-section-label-row">
         <div class="cmd-section-label">${esc(I18N.t('cmd.quickCmdsLabel'))}</div>
-        ${cmdSnelSorteerModus ? `<div class="cmd-sort-hint sort-hint">${esc(I18N.t('project.cmdSortHint'))}</div>` : ''}
-        <span class="kop-acties">
-          ${wisKnopHtml('snel')}
-          ${cmdSnelSorteerModus ? `<button class="sort-klaar" id="cmd-snel-sorteer-klaar" title="${esc(I18N.t('common.sortDoneTitle'))}"><i class="ti ti-check"></i></button>` : ''}
-        </span>
+        ${dichteMappenHtml(null, SNEL_SECTIE.cmd)}
+        ${kopActiesHtml(SNEL_SECTIE.cmd)}
       </div>
       <div class="cmd-grid ${cmdSnelSorteerModus ? 'cmd-sorteren' : ''}" id="cmd-snel-grid">${snelGrid}${cmdSnelSorteerModus ? '' : aiShellKnop(CMD_CTX_ID)}</div>
       ${snelGrid ? '' : `<div class="hint-row">${esc(heeftSnel ? I18N.t('cmd.quickAllHiddenHint') : I18N.t('cmd.quickCmdsEmptyHint'))}</div>`}
@@ -6179,7 +6244,7 @@ function psSnelItems() {
   // Een verborgen favoriet mag de standaardknop niet terugbrengen: anders
   // duikt Get-ChildItem weer op zodra je die ster-knop hebt weggehaald.
   for (const e of entries) {
-    if (isPsEntry(e) && (((settings.ps || {}).quickUit) || []).includes('quick:' + e.id)) {
+    if (isPsEntry(e) && ((settings.ps || {}).cmdVisibility || {})['quick:' + e.id] === false) {
       gezien.add(String(e.cmd).toLowerCase())
     }
   }
@@ -6208,35 +6273,15 @@ function psSnelIds() {
 }
 
 function psSnelVolgorde() {
-  const alle = psSnelIds()
-  const opgeslagen = ((settings.ps || {}).quickVolgorde || []).filter(id => alle.includes(id))
-  return [...opgeslagen, ...alle.filter(id => !opgeslagen.includes(id))]
+  return snelVolgorde(SNEL_SECTIE.ps)
 }
 
 function psSnelZichtbaar(id) {
-  return !(((settings.ps || {}).quickUit) || []).includes(id)
-}
-
-function psSnelZichtbareVolgorde() {
-  return psSnelVolgorde().filter(psSnelZichtbaar)
+  return snelZichtbaar(SNEL_SECTIE.ps, id)
 }
 
 function zetPsSnelZichtbaar(id, aan) {
-  const uit = new Set(((settings.ps || {}).quickUit) || [])
-  if (aan) uit.delete(id); else uit.add(id)
-  settings.ps = { ...(settings.ps || {}), quickUit: [...uit] }
-  window.api.saveSettings(settings)
-}
-
-function verplaatsPsSnel(van, naar) {
-  const volledig = psSnelVolgorde()
-  const zichtbaar = volledig.filter(psSnelZichtbaar)
-  if (!verschuif(zichtbaar, van, naar)) return false
-  let zi = 0
-  const nieuw = volledig.map(id => (psSnelZichtbaar(id) ? zichtbaar[zi++] : id))
-  settings.ps = { ...(settings.ps || {}), quickVolgorde: nieuw }
-  window.api.saveSettings(settings)
-  return true
+  zetSnelZichtbaar(SNEL_SECTIE.ps, id, aan)
 }
 
 function psSnelLabel(id) {
@@ -6264,58 +6309,12 @@ function psSnelKnopMap() {
 }
 
 function psSnelGridHtml() {
-  const map = psSnelKnopMap()
-  const ids = psSnelZichtbareVolgorde()
-  const kleuren = kleurKlassenVoorIds(ids.map(id => knopKleurSpec(id)))
-  return ids.map((id, i) => {
-    let btn = map[id]
-    if (!btn) return ''
-    btn = zetBtnKleur(btn, kleuren[i])
-    if (!psSnelSorteerModus) return btn
-    return `<span class="cmd-sort-item" data-volgorde-index="${i}">${pijlenHtml(i === 0, i === ids.length - 1, true)}${btn}</span>`
-  }).join('')
+  return cmdGridHtml(null, SNEL_SECTIE.ps)
 }
 
 function bedraadPsSnel() {
-  const klaar = document.getElementById('ps-snel-sorteer-klaar')
-  if (klaar) klaar.onclick = () => {
-    psSnelSorteerModus = false
-    knopWisModus = ''
-    renderPsPanel()
-  }
-
-  const grid = document.getElementById('ps-snel-grid')
-  if (!grid) return
-
-  grid.querySelectorAll('.cmd-sort-item').forEach((item, index) => {
-    item.dataset.volgordeIndex = String(index)
-    maakSleepbaar(item, index, (van, naar) => {
-      if (verplaatsPsSnel(van, naar)) renderPsPanel()
-    })
-    item.querySelectorAll('.sort-pijl:not(.uit)').forEach(pijl => {
-      pijl.onclick = (e) => {
-        e.preventDefault()
-        e.stopPropagation()
-        const idx = parseInt(item.dataset.volgordeIndex)
-        if (verplaatsPsSnel(idx, sortPijlDoel(idx, pijl.dataset.op, true))) renderPsPanel()
-      }
-    })
-  })
-
-  grid.querySelectorAll('.cmd-btn').forEach(btn => {
-    let timer = null
-    btn.onmousedown = (e) => {
-      if (e.button !== 0 || psSnelSorteerModus) return
-      timer = setTimeout(() => {
-        psSnelSorteerModus = true
-        knopWisModus = ''
-        showToast(I18N.t('project.cmdSortToast'))
-        renderPsPanel()
-      }, LANG_DRUKKEN_MS)
-    }
-    btn.onmouseup = () => { clearTimeout(timer); timer = null }
-    btn.onmouseleave = () => { clearTimeout(timer); timer = null }
-  })
+  const paneel = document.getElementById('ps-panel')
+  if (paneel) bedraadCmdKnopVolgorde(null, paneel)
 }
 
 // ── PowerShell panel ──────────────────────────────────────────────────────────
@@ -6337,14 +6336,11 @@ function renderPsPanel() {
   const snelGrid = psSnelGridHtml()
   const heeftSnel = !!psSnelVolgorde().length
   const quickMarkup = `
-    <div class="cmd-section">
+    <div class="cmd-section" data-sectieblok="${SNEL_SECTIE.ps}">
       <div class="cmd-section-label-row">
         <div class="cmd-section-label">${esc(I18N.t('cmd.quickCmdsLabel'))}</div>
-        ${psSnelSorteerModus ? `<div class="cmd-sort-hint sort-hint">${esc(I18N.t('project.cmdSortHint'))}</div>` : ''}
-        <span class="kop-acties">
-          ${wisKnopHtml('ps-snel')}
-          ${psSnelSorteerModus ? `<button class="sort-klaar" id="ps-snel-sorteer-klaar" title="${esc(I18N.t('common.sortDoneTitle'))}"><i class="ti ti-check"></i></button>` : ''}
-        </span>
+        ${dichteMappenHtml(null, SNEL_SECTIE.ps)}
+        ${kopActiesHtml(SNEL_SECTIE.ps)}
       </div>
       <div class="cmd-grid ${psSnelSorteerModus ? 'cmd-sorteren' : ''}" id="ps-snel-grid">${snelGrid}${psSnelSorteerModus ? '' : aiShellKnop(PS_CTX_ID)}</div>
       ${snelGrid ? '' : `<div class="hint-row">${esc(heeftSnel ? I18N.t('cmd.quickAllHiddenHint') : I18N.t('cmd.quickCmdsEmptyHint'))}</div>`}
@@ -8645,6 +8641,7 @@ async function wisselAccount(id, pin = null, opties = {}) {
   actiefAccount = id
   projects = r.projects || []
   settings = r.settings || settings
+  if (migreerSnelRijen()) window.api.saveSettings(settings)
   migreerAlleProjecten()
   gitStaten = {}
   gitRemoteGedaan.clear()
