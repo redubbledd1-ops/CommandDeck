@@ -302,6 +302,25 @@ Module._load=orig
   await new Promise(r=>setTimeout(r,1700))
   check('app sluit zichzelf af nadat het script draait', quitCalled===true)
 
+  // ── De update-knop hoort er te staan ──────────────────────────────────────
+  // Weken gebruikt, en toen ineens weg. De knop stond in de html op `hidden` en
+  // werd alleen zichtbaar gemaakt in dev; dat het tóch werkte kwam doordat
+  // `.tbtn` zelf een display zette en het hidden-attribuut daarmee niets deed.
+  // Zodra dat werd rechtgezet viel de knop weg uit een gebouwde app — precies
+  // waar hij het meest gebruikt wordt. De voorwaarde hoort te zijn: is er een
+  // bronmap om vanaf te bouwen.
+  const mainBron = fs.readFileSync(path.join(REAL, 'main.js'), 'utf8')
+  const renBron  = fs.readFileSync(path.join(REAL, 'renderer.js'), 'utf8')
+  const htmlBron = fs.readFileSync(path.join(REAL, 'index.html'), 'utf8')
+
+  check('runtimeInfo vertelt of er een bronmap is',
+    /ipcMain\.handle\('app:runtimeInfo'[\s\S]{0,600}bronMap:/.test(mainBron))
+  check('en de knop komt tevoorschijn zodra die er is',
+    /info\.packaged === false \|\| info\.bronMap/.test(renBron))
+  check('de knop staat nog in de titelbalk', /id="btn-update"/.test(htmlBron))
+  check('en wordt niet meer alleen in dev getoond',
+    !/if \(info && info\.packaged === false\) updateBtn\.hidden = false/.test(renBron))
+
   console.log(ok?'\nALLE TESTS GESLAAGD':'\nER ZIJN TESTS GEFAALD')
   process.exit(ok?0:1)
 })()

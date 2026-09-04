@@ -136,6 +136,11 @@ let gitChecks = []
 let gitVergeten = []
 let gitignoreGeschreven = []
 let ghRepoVragen = []
+let webMappen = []
+let webTekst = {}
+let webSites = {}
+let siteGestart = []
+let geopendeUrls = []
 let ghRepoAntwoord = { ok: true, repos: [] }
 
 const api = {
@@ -149,6 +154,13 @@ const api = {
   gitProjecten: async () => true,
   gitAfsluitHartslag: () => {},
   gitGhRepos: async (o) => { ghRepoVragen.push(o); return ghRepoAntwoord },
+  isMap:      async (p) => webMappen.includes(p),
+  leesTekst:  async (p) => webTekst[p] ? { ok: true, inhoud: webTekst[p], bytes: webTekst[p].length, mtime: 1, bom: false, crlf: false } : { ok: false, reden: 'bestaat-niet' },
+  zoekSite:   async (d) => ({ ok: true, gevonden: (webSites[d] || []).map(rel => ({ pad: d + '\\\\' + rel.replace(/\//g, '\\\\'), relatief: rel, map: rel.includes('/') ? rel.split('/')[0] : '' })) }),
+  siteStart:  async (o) => { siteGestart.push(o); return { ok: true, id: 'site1', url: 'http://127.0.0.1:1234/' } },
+  siteStop:   async () => ({ ok: true }),
+  siteLijst:  async () => [],
+  openUrl:    async (u) => { geopendeUrls.push(u); return true },
   loadProjects: async () => JSON.parse(JSON.stringify(projects)),
   saveProjects: async (p) => { projects.length = 0; projects.push(...JSON.parse(JSON.stringify(p))); return true },
   loadLocale: async (code) => {
@@ -384,6 +396,7 @@ Object.defineProperty(window.navigator, 'clipboard', { value: { writeText: () =>
 window.Element.prototype.scrollIntoView = function (o) { inBeeldGehaald.push(this) }
 window.eval(fs.readFileSync(path.join(APP, 'i18n.js'), 'utf8') + '\nglobalThis.I18N = I18N;')
 window.eval(fs.readFileSync(path.join(APP, 'git-tools.js'), 'utf8'))
+window.eval(fs.readFileSync(path.join(APP, 'web-tools.js'), 'utf8'))
 window.eval(fs.readFileSync(path.join(APP, 'knoppenrij.js'), 'utf8'))
 window.eval(fs.readFileSync(path.join(APP, 'accounts.js'), 'utf8'))
 // Een handvat om iets in de projecten van de renderer te zetten. Elke
@@ -3797,6 +3810,7 @@ function startVraagAutomaat() {
     Object.defineProperty(w.navigator, 'clipboard', { value: { writeText: () => {} }, configurable: true })
     w.eval(fs.readFileSync(path.join(APP, 'i18n.js'), 'utf8') + '\nglobalThis.I18N = I18N;')
     w.eval(fs.readFileSync(path.join(APP, 'git-tools.js'), 'utf8'))
+    w.eval(fs.readFileSync(path.join(APP, 'web-tools.js'), 'utf8'))
     w.eval(fs.readFileSync(path.join(APP, 'knoppenrij.js'), 'utf8'))
     w.eval(fs.readFileSync(path.join(APP, 'accounts.js'), 'utf8'))
     w.eval(fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8'))
@@ -4515,6 +4529,71 @@ function startVraagAutomaat() {
     const cssKaal = cssGlobaal.replace(/\/\*[\s\S]*?\*\//g, '')
     check('en geen enkele regel zet een verborgen element weer zichtbaar',
       !/\[hidden\][^{]*\{[^}]*display:\s*(?!none)[a-z-]+/i.test(cssKaal))
+  }
+
+  // ── Een map of bestand op de app slepen ───────────────────────────────────
+  // Voorheen kon hier alleen een .bat op. Een map is de interessante: die kan
+  // een project worden, een site, of gewoon iets om even in te kijken — en de
+  // app weet niet welke, dus vraagt hij het.
+  {
+    const sleep = async (paden) => {
+      const ev = new window.Event('drop', { bubbles: true, cancelable: true })
+      ev.dataTransfer = { files: paden.map(p => ({ __pad: p })), types: ['Files'] }
+      window.document.dispatchEvent(ev)
+      await tick(); await tick(); await tick()
+    }
+    const echtePad = api.getFilePath
+    api.getFilePath = (f) => f.__pad
+
+    webMappen = ['C:\\site']
+    webSites = { 'C:\\site': ['index.html'] }
+    siteGestart.length = 0
+
+    // Een map met html erin: de site-knop hoort de aanbevolen te zijn.
+    kiesKnop('de site openen')
+    await sleep(['C:\\site'])
+    check('een map geeft een keuze in plaats van een gok',
+      !!laatsteVraag && laatsteVraag.alles.includes('site'))
+    check('en het gevonden startbestand staat erbij',
+      !!laatsteVraag && laatsteVraag.regels.includes('index.html'))
+    check('de site wordt gestart via het servertje',
+      siteGestart.length === 1 && siteGestart[0].dir === 'C:\\site')
+
+    // Zonder html valt die knop weg: geen knop die een foutmelding geeft.
+    webSites = { 'C:\\site': [] }
+    kiesKnop('annuleren')
+    await sleep(['C:\\site'])
+    check('zonder html is er niets te openen',
+      !!laatsteVraag && !laatsteVraag.alles.includes('de site openen'))
+
+    // Als project toevoegen vult het venster alvast in.
+    kiesKnop('als project toevoegen')
+    await sleep(['C:\\site'])
+    check('het projectvenster staat open met het pad erin',
+      $('#modal-proj').hidden === false && $$('#loc-list input.mono')[0].value === 'C:\\site')
+    check('en met een naam die uit de map komt', $('#f-name').value === 'site')
+    $('#modal-proj-cancel').click(); await tick()
+
+    // Een tekstbestand gaat naar het leesvenster.
+    webMappen = []
+    webTekst = { 'C:\\site\\stijl.css': 'body { color: red }\nh1 { }' }
+    await sleep(['C:\\site\\stijl.css'])
+    check('een gesleept bestand komt in het leesvenster',
+      $('#modal-lezer').hidden === false
+      && $('#lezer-inhoud').textContent.includes('color: red'))
+    check('met het pad en de grootte erbij',
+      $('#lezer-pad').textContent === 'C:\\site\\stijl.css'
+      && $('#lezer-info').textContent.includes('2'))
+    $('#lezer-sluit').click(); await tick()
+    check('en het gaat weer dicht', $('#modal-lezer').hidden === true)
+
+    // Iets waar niets mee kan zegt dat, in plaats van stil te blijven.
+    webTekst = {}
+    await sleep(['C:\\site\\plaatje.png'])
+    check('een plaatje levert een melding op, geen leeg venster',
+      $('#modal-lezer').hidden === true)
+
+    api.getFilePath = echtePad
   }
 
   console.log(ok ? '\n✓ ALLE UI-TESTS GESLAAGD' : '\n✗ ER ZIJN TESTS GEFAALD')

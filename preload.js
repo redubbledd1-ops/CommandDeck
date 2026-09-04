@@ -42,6 +42,12 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeListener('fs:zoekTreffers', h)
   },
   projectSoort:  (p)     => ipcRenderer.invoke('fs:projectSoort', p),
+  isMap:         (p)     => ipcRenderer.invoke('fs:isMap', p),
+  leesTekst:     (p)     => ipcRenderer.invoke('fs:leesTekst', p),
+  zoekSite:      (d)     => ipcRenderer.invoke('web:zoekSite', d),
+  siteStart:     (o)     => ipcRenderer.invoke('web:start', o || {}),
+  siteStop:      (id)    => ipcRenderer.invoke('web:stop', id),
+  siteLijst:     ()      => ipcRenderer.invoke('web:lijst'),
 
   gitInfo:       (p)     => ipcRenderer.invoke('git:info', p),
   gitGh:         ()      => ipcRenderer.invoke('git:gh'),

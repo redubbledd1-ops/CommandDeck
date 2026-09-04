@@ -37,6 +37,16 @@
    moeten onthouden. */
 [hidden] { display: none !important; }
 
+/* Het leesvenster voor html, css en js. Breed en hoog, want code lezen in een
+   smal vakje is geen lezen. */
+.modal.modal-groot { width: min(1100px, 92vw); max-width: none; }
+.lezer-pad { font-size: 11px; color: var(--muted); margin: 0 0 8px; word-break: break-all; }
+.lezer-vak { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg);
+  max-height: 62vh; overflow: auto; }
+.lezer-inhoud { margin: 0; padding: 12px 14px; font-size: 12px; line-height: 1.5;
+  color: var(--text); white-space: pre; tab-size: 2; }
+.lezer-info { font-size: 11px; color: var(--muted); margin-right: auto; align-self: center; }
+
 /* ── Scrollbalken ──
    Overal dezelfde: de breedte van de standaardbalk (fijner om te pakken) maar
    in de kleuren van de app. Het tekstvak in de bat-sectie had geen eigen regel

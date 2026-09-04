@@ -21,6 +21,7 @@
     "test:archive": "node test/archive.test.js",
     "test:flutter": "node test/fluttermissing.test.js && node test/flutter-devices.test.js",
     "test:git": "node test/git.test.js",
+    "test:web": "node test/web.test.js",
     "test:accounts": "node test/accounts.test.js",
     "test:ai": "node test/ai.test.js"
   },

@@ -1165,6 +1165,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   })
 
   setupBatDrop()
+  bedraadLezer()
 
   // Terug in de app: kijken of een geopend bat-bestand elders is bijgewerkt
   window.addEventListener('focus', () => { checkBatFreshness() })
@@ -1201,12 +1202,17 @@ async function setupTitlebar() {
   document.getElementById('btn-max').onclick   = () => window.api.maximize()
   document.getElementById('btn-close').onclick = () => window.api.close()
 
-  // Broncode-rebuild hoort alleen in development. Geïnstalleerde exe's krijgen
-  // later online updates; die knop daar tonen zou alleen verwarring zaaien.
+  // De knop staat er zodra er een bronmap is om vanaf te bouwen — of je nu
+  // vanuit de broncode draait of vanuit een gebouwde exe die naast zijn bron
+  // staat. Eerder stond hier `packaged === false`, en dat klopte niet: de
+  // update werkt juist óók vanuit een portable of uitgepakte build, en dat is
+  // waar hij gebruikt wordt. Dat het al die tijd goed ging kwam doordat het
+  // `hidden`-attribuut niets deed zolang `.tbtn` zelf een display zette; toen
+  // dat werd rechtgezet viel de knop weg. Dus staat de voorwaarde nu goed.
   const updateBtn = document.getElementById('btn-update')
   try {
     const info = await window.api.runtimeInfo?.()
-    if (info && info.packaged === false) updateBtn.hidden = false
+    if (info && (info.packaged === false || info.bronMap)) updateBtn.hidden = false
   } catch {}
 
   updateBtn.onclick = async () => {
@@ -5814,7 +5820,12 @@ async function openBrowserItem(item) {
     return
   }
 
-  // Bestanden openen met het programma dat Windows eraan gekoppeld heeft
+  // Alleen websitebestanden laten we hier zien. Elk tekstbestand afvangen zou
+  // veranderen wat dubbelklikken al jaren doet — een .yaml of .json hoort nog
+  // steeds naar het programma te gaan dat jij eraan gekoppeld hebt. Slepen kan
+  // wél alles: daar is geen gewoonte om te breken.
+  if (WebTools.isWebBestand(item.name)) { await toonBestand(item.path); return }
+
   window.api.openFolder(item.path)
   showToast(I18N.t('browser.openedToast', { name: item.name }))
 }
@@ -8199,24 +8210,192 @@ function setupBatDrop() {
     e.preventDefault()
 
     // Electron 32+ kent geen File.path meer; het pad komt uit de preload.
-    const paths = files.map(f => window.api.getFilePath(f)).filter(Boolean)
-    const bat   = paths.find(p => /\.(bat|cmd)$/i.test(p))
+    const paden = files.map(f => window.api.getFilePath(f)).filter(Boolean)
+    if (!paden.length) { showToast(I18N.t('bat.dropPathReadFailedToast')); return }
 
-    if (!bat) {
-      showToast(paths.length ? I18N.t('bat.dropOnlyBatCmdToast') : I18N.t('bat.dropPathReadFailedToast'))
-      return
-    }
-
-    // Naar de map van het gesleepte bestand, zodat de lijst ernaast klopt
-    const map = bat.slice(0, bat.length - bat.split(/[\\/]/).pop().length - 1)
-    if (map && map !== batCwd()) await setBatCwd(map)
-
-    await openBatView()
-    if (await loadBatFile(bat)) {
-      await refreshBatFiles()
-      showToast(I18N.t('browser.openedToast', { name: bat.split(/[\\/]/).pop() }))
-    }
+    await verwerkGesleept(paden)
   })
+}
+
+// Wat er gebeurt met wat je neerzet. Drie soorten, en elk heeft zijn eigen weg:
+// een .bat gaat naar de bat-editor (zoals altijd), een map geeft een keuze, en
+// een tekstbestand gaat open in het leesvenster.
+async function verwerkGesleept(paden) {
+  const bat = paden.find(p => /\.(bat|cmd)$/i.test(p))
+  if (bat) { await openBatUitSleep(bat); return }
+
+  // Eén map: dat is de interessante. Meerdere tegelijk is een vraag per map en
+  // dat is er één te veel, dus dan pakken we de eerste.
+  for (const pad of paden) {
+    if (await window.api.isMap(pad)) { await vraagOverMap(pad); return }
+  }
+
+  const tekst = paden.find(p => WebTools.isTekstBestand(p))
+  if (tekst) { await toonBestand(tekst); return }
+
+  showToast(I18N.t('sleep.nietsMeeTeDoen'))
+}
+
+async function openBatUitSleep(bat) {
+  // Naar de map van het gesleepte bestand, zodat de lijst ernaast klopt
+  const map = bat.slice(0, bat.length - bat.split(/[\\/]/).pop().length - 1)
+  if (map && map !== batCwd()) await setBatCwd(map)
+
+  await openBatView()
+  if (await loadBatFile(bat)) {
+    await refreshBatFiles()
+    showToast(I18N.t('browser.openedToast', { name: bat.split(/[\\/]/).pop() }))
+  }
+}
+
+// ── Een bestand bekijken ─────────────────────────────────────────────────────
+// Ronde 1 is lezen. Opslaan komt in ronde 2; tot die tijd staat de knop naar
+// je eigen editor ernaast, zodat dit venster nooit een doodlopende weg is.
+let lezerPad = ''
+
+async function toonBestand(pad) {
+  if (!pad) return
+  const naam = String(pad).split(/[\\/]/).pop()
+
+  if (!WebTools.isTekstBestand(pad)) {
+    // Geen tekst: dan is Windows nog steeds het goede antwoord.
+    window.api.openFolder(pad)
+    showToast(I18N.t('browser.openedToast', { name: naam }))
+    return
+  }
+
+  const r = await window.api.leesTekst(pad).catch(() => null)
+  if (!r || !r.ok) {
+    const reden = (r && r.reden) || 'onbekend'
+    await meldKort(I18N.t('lezer.nietGelukt'), I18N.t(
+      reden === 'te-groot' ? 'lezer.teGroot'
+      : reden === 'binair' ? 'lezer.binair'
+      : 'lezer.onleesbaar', { max: Math.round(WebTools.MAX_TEKST_BYTES / 1024 / 1024) }))
+    return
+  }
+
+  lezerPad = pad
+  document.getElementById('lezer-titel').textContent = naam
+  document.getElementById('lezer-pad').textContent = pad
+  document.getElementById('lezer-inhoud').textContent = r.inhoud
+  document.getElementById('lezer-info').textContent = I18N.t('lezer.info', {
+    regels: r.inhoud ? r.inhoud.split('\n').length : 0,
+    grootte: toonBytes(r.bytes || 0),
+  })
+  document.getElementById('lezer-inhoud').scrollTop = 0
+  document.getElementById('modal-lezer').hidden = false
+}
+
+function sluitLezer() {
+  document.getElementById('modal-lezer').hidden = true
+  lezerPad = ''
+  focusTerminalInput()
+}
+
+function bedraadLezer() {
+  const sluit = document.getElementById('lezer-sluit')
+  if (!sluit) return
+  sluit.onclick = sluitLezer
+  document.getElementById('lezer-kopieer').onclick = () => {
+    kopieer(document.getElementById('lezer-inhoud').textContent || '', I18N.t('lezer.gekopieerd'))
+  }
+  document.getElementById('lezer-map').onclick = () => {
+    if (lezerPad) openInVerkenner(ouderVan(lezerPad), lezerPad)
+    sluitLezer()
+  }
+  document.getElementById('lezer-windows').onclick = () => {
+    if (lezerPad) window.api.openFolder(lezerPad)
+    sluitLezer()
+  }
+}
+
+// ── Een map die op de app is neergezet ───────────────────────────────────────
+// Drie dingen die je ermee kunt willen, en de app weet niet welke. Dus vragen —
+// maar wel met de keuzes die bij déze map horen: zonder html geen site-knop.
+async function vraagOverMap(pad) {
+  const naam = pad.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || pad
+
+  // Hoort deze map al bij een project? Twee projecten op dezelfde map is een
+  // val, geen functie.
+  const bestaand = projects.find(p => projectLocaties(p).some(l => zelfdePad(l.pad, pad)))
+
+  const site = await window.api.zoekSite(pad).catch(() => null)
+  const gevonden = (site && site.gevonden) || []
+
+  const knoppen = [{ label: I18N.t('common.cancel'), waarde: '' }]
+  knoppen.push({ label: I18N.t('sleep.inVerkenner'), waarde: 'verkenner' })
+  if (!bestaand) knoppen.push({ label: I18N.t('sleep.alsProject'), waarde: 'project' })
+  if (gevonden.length) {
+    knoppen.push({ label: I18N.t('sleep.alsSite'), waarde: 'site', soort: 'primair' })
+  } else if (!bestaand) {
+    knoppen[knoppen.length - 1].soort = 'primair'
+  }
+
+  const regels = [pad]
+  if (bestaand) regels.push(I18N.t('sleep.alProject', { naam: bestaand.name }))
+  if (gevonden.length) regels.push(I18N.t('sleep.htmlGevonden', { bestand: gevonden[0].relatief }))
+
+  const keuze = await vraagKeuze({
+    titel: I18N.t('sleep.titel', { naam }),
+    tekst: I18N.t(bestaand ? 'sleep.tekstBestaand' : 'sleep.tekst'),
+    regels,
+    knoppen,
+  })
+  if (!keuze) return
+
+  if (keuze === 'verkenner') { openInVerkenner(pad); return }
+  if (keuze === 'project')   { openNieuwProjectMet(pad, naam); return }
+  if (keuze === 'site')      { await startSite(pad, gevonden); return }
+}
+
+function zelfdePad(a, b) {
+  const kaal = (x) => String(x || '').replace(/[\\/]+$/, '').replace(/\//g, '\\').toLowerCase()
+  return !!a && kaal(a) === kaal(b)
+}
+
+// Het projectvenster met het pad er al in. Zelf typen wat je net hebt
+// versleept is werk dat de app hoort te doen.
+function openNieuwProjectMet(pad, naam) {
+  openNewModal()
+  pendingLocs = [{ label: 'main', path: pad }]
+  refreshLocList()
+  const naamVeld = document.getElementById('f-name')
+  if (naamVeld && !naamVeld.value.trim()) naamVeld.value = naam
+  updateCloneDoelPreview()
+}
+
+// ── De site openen ───────────────────────────────────────────────────────────
+// Via een eigen servertje, niet via file://. Zie TODO-web.md 1.3: met file://
+// weigert de browser fetch, laden ES-modules niet en wijst /style.css naar de
+// wortel van je schijf.
+async function startSite(dir, gevonden) {
+  let start = gevonden && gevonden.length ? gevonden[0] : null
+
+  // Meer dan één beginpunt? Laten kiezen — de app weet niet welke jij bedoelt.
+  if (gevonden && gevonden.length > 1) {
+    const keuze = await vraagKeuze({
+      titel: I18N.t('sleep.welkeStart'),
+      tekst: I18N.t('sleep.welkeStartTekst'),
+      knoppen: [
+        { label: I18N.t('common.cancel'), waarde: '' },
+        ...gevonden.slice(0, 6).reverse().map((g, i) => ({
+          label: g.relatief, waarde: g.relatief,
+          soort: i === gevonden.slice(0, 6).length - 1 ? 'primair' : '',
+        })),
+      ],
+    })
+    if (!keuze) return
+    start = gevonden.find(g => g.relatief === keuze) || start
+  }
+
+  const r = await window.api.siteStart({ dir, start: start ? start.pad : '' }).catch(() => null)
+  if (!r || !r.ok) {
+    await meldKort(I18N.t('sleep.siteMisluktTitel'),
+      I18N.t('sleep.siteMisluktTekst', { reden: (r && r.reden) || '' }))
+    return
+  }
+  window.api.openUrl(r.url)
+  showToast(I18N.t('sleep.siteDraait', { url: r.url }))
 }
 
 // ── Commando als knop aan een project hangen ──────────────────────────────────
@@ -14972,6 +15151,7 @@ function setupModalEvents() {
     if (e.key !== 'Escape') return
     if (!document.getElementById('modal-cmdset').hidden)   { e.preventDefault(); sluitCmdInstellingen(); return }
     if (!document.getElementById('modal-psset').hidden)    { e.preventDefault(); sluitPsInstellingen(); return }
+    if (!document.getElementById('modal-lezer').hidden)    { e.preventDefault(); sluitLezer(); return }
     if (!document.getElementById('modal-vraag').hidden)    { e.preventDefault(); sluitVraag(false); return }
     if (!document.getElementById('modal-klembord').hidden) { e.preventDefault(); sluitKlembordVenster() }
   })

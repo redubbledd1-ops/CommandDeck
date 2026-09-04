@@ -12,6 +12,7 @@ const { BUILTIN_COMMANDS } = require('./cmd-library')
 const { psCommandLaunch, psWindowLaunch } = require('./ps-launch')
 const { EDITORS } = require('./editor-catalog')
 const GitTools = require('./git-tools')
+const WebTools = require('./web-tools')
 const Accounts = require('./accounts')
 const { maakAi } = require('./ai-runtime')
 const { SUPPORTED_LANGUAGES } = require('./locales/languages')
@@ -1188,6 +1189,149 @@ ipcMain.handle('fs:projectSoort', (_, dir) => {
   } catch (e) {
     return { ok: false, reason: e.message }
   }
+})
+
+// ── Websitebestanden ─────────────────────────────────────────────────────────
+// Een map met html erin openen als site, en tekstbestanden in beeld halen.
+// De volgorde waarin er gezocht wordt staat in web-tools.js, zodat die te
+// testen is zonder schijf.
+
+function zoekStartBestand(dir) {
+  const gevonden = []
+  for (const k of WebTools.startKandidaten()) {
+    const vol = k.map ? path.join(dir, k.map, k.naam) : path.join(dir, k.naam)
+    try {
+      if (fs.existsSync(vol) && fs.statSync(vol).isFile()) {
+        gevonden.push({ pad: vol, relatief: k.relatief, map: k.map })
+      }
+    } catch { /* onleesbaar: bestaat voor ons niet */ }
+  }
+  return gevonden
+}
+
+ipcMain.handle('web:zoekSite', (_, dir) => {
+  try {
+    if (!dir || !fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
+      return { ok: false, reden: 'geen map', gevonden: [] }
+    }
+    return { ok: true, gevonden: zoekStartBestand(dir) }
+  } catch (e) {
+    return { ok: false, reden: String((e && e.message) || ''), gevonden: [] }
+  }
+})
+
+ipcMain.handle('fs:isMap', (_, p) => {
+  try { return !!(p && fs.existsSync(p) && fs.statSync(p).isDirectory()) } catch { return false }
+})
+
+// Tekst in beeld halen, met twee grenzen. Te groot weigeren we, en iets wat
+// binair blijkt ook: een tekstvak met een video erin is een vastgelopen app.
+// Een nulbyte in de eerste kilobyte is daarvoor een betrouwbaar teken.
+ipcMain.handle('fs:leesTekst', (_, bestand) => {
+  try {
+    if (!bestand || !fs.existsSync(bestand)) return { ok: false, reden: 'bestaat-niet' }
+    const st = fs.statSync(bestand)
+    if (!st.isFile()) return { ok: false, reden: 'geen-bestand' }
+    if (st.size > WebTools.MAX_TEKST_BYTES) {
+      return { ok: false, reden: 'te-groot', bytes: st.size, max: WebTools.MAX_TEKST_BYTES }
+    }
+    const rauw = fs.readFileSync(bestand)
+    if (rauw.subarray(0, 1024).includes(0)) return { ok: false, reden: 'binair' }
+    let tekst = rauw.toString('utf8')
+    // Een BOM hoort niet in het venster; bij het opslaan (ronde 2) hoort hij
+    // er weer voor. Daarom melden we dat hij er was.
+    const bom = tekst.charCodeAt(0) === 0xfeff
+    if (bom) tekst = tekst.slice(1)
+    return {
+      ok: true, inhoud: tekst, bytes: st.size, mtime: st.mtimeMs, bom,
+      // Regeleindes onthouden: bij opslaan hoort het bestand te blijven zoals
+      // het was, en bat:save doet dat juist níét (die dwingt CRLF af).
+      crlf: /\r\n/.test(tekst),
+    }
+  } catch (e) {
+    return { ok: false, reden: String((e && e.message) || 'onbekend') }
+  }
+})
+
+// ── De site serveren ─────────────────────────────────────────────────────────
+// Met file:// weigert de browser fetch, laden ES-modules niet en wijst een
+// absoluut pad als /style.css naar de wortel van je schijf. Vandaar een eigen
+// servertje: alleen op 127.0.0.1, alleen bestanden binnen de gekozen map, en
+// het gaat weer dicht zodra de app dat zegt of afsluit.
+const http = require('http')
+const sites = new Map()          // id -> { server, dir, url }
+let siteTeller = 0
+
+function stuurBestand(res, bestand) {
+  fs.stat(bestand, (fout, st) => {
+    if (fout || !st.isFile()) { res.writeHead(404, { 'Content-Type': 'text/plain' }); res.end('404'); return }
+    res.writeHead(200, {
+      'Content-Type': WebTools.mimeVoor(bestand),
+      'Content-Length': st.size,
+      // Niets bewaren: je bent hier juist aan het sleutelen.
+      'Cache-Control': 'no-store',
+    })
+    fs.createReadStream(bestand).pipe(res)
+  })
+}
+
+ipcMain.handle('web:start', (_, { dir, start } = {}) => {
+  try {
+    if (!dir || !fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
+      return { ok: false, reden: 'geen map' }
+    }
+    // Dezelfde map twee keer openen hoort geen tweede server te maken.
+    for (const [id, s] of sites) if (s.dir === dir) return { ok: true, id, url: s.url, hergebruikt: true }
+
+    const wortel = fs.realpathSync(dir)
+    const server = http.createServer((req, res) => {
+      const doel = WebTools.doelPad(wortel, req.url, path.sep)
+      if (!doel) { res.writeHead(400, { 'Content-Type': 'text/plain' }); res.end('nee'); return }
+
+      // Buiten de map is buiten de map. realpath erbij, anders wijst een
+      // snelkoppeling alsnog naar je hele schijf.
+      let echt
+      try { echt = fs.realpathSync(doel) } catch { echt = doel }
+      if (!WebTools.binnenWortel(wortel, echt, path.sep)) {
+        res.writeHead(403, { 'Content-Type': 'text/plain' }); res.end('nee'); return
+      }
+
+      // Een map: dan de index erin, zoals elke server doet.
+      try { if (fs.statSync(echt).isDirectory()) echt = path.join(echt, 'index.html') } catch {}
+      stuurBestand(res, echt)
+    })
+
+    return new Promise((resolve) => {
+      server.on('error', (e) => resolve({ ok: false, reden: String((e && e.message) || 'server') }))
+      // Poort 0 = eentje die vrij is; die kiest het systeem beter dan wij.
+      server.listen(0, '127.0.0.1', () => {
+        const poort = server.address().port
+        const id = 'site' + (++siteTeller)
+        const relStart = start ? path.relative(wortel, start).replace(/\\/g, '/') : ''
+        const url = `http://127.0.0.1:${poort}/` + (relStart && !relStart.startsWith('..') ? relStart : '')
+        sites.set(id, { server, dir, url })
+        resolve({ ok: true, id, url, poort })
+      })
+    })
+  } catch (e) {
+    return { ok: false, reden: String((e && e.message) || 'onbekend') }
+  }
+})
+
+ipcMain.handle('web:stop', (_, id) => {
+  const s = sites.get(id)
+  if (!s) return { ok: true, alWeg: true }
+  try { s.server.close() } catch {}
+  sites.delete(id)
+  return { ok: true }
+})
+
+ipcMain.handle('web:lijst', () => [...sites].map(([id, s]) => ({ id, dir: s.dir, url: s.url })))
+
+// Niets laten luisteren nadat de app weg is.
+app.on('will-quit', () => {
+  for (const [, s] of sites) { try { s.server.close() } catch {} }
+  sites.clear()
 })
 
 // ── Git ───────────────────────────────────────────────────────────────────────
@@ -4026,6 +4170,11 @@ ipcMain.handle('app:relaunch', () => {
 ipcMain.handle('app:runtimeInfo', () => ({
   packaged: app.isPackaged,
   version: app.getVersion(),
+  // Is er een bronmap om vanaf te bouwen? Dat is wat bepaalt of de
+  // update-knop iets kán, en dus of hij er hoort te staan. `packaged` alleen
+  // zei daar niets over: findSourceDir vindt de bron ook vanuit een portable
+  // of uitgepakte build, en juist daar wordt de knop gebruikt.
+  bronMap: (() => { try { return findSourceDir() || '' } catch { return '' } })(),
 }))
 
 // ── Update & restart (npm install + npm run build, dan herstart) ─────────────

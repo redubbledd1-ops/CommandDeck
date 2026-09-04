@@ -401,11 +401,30 @@
 </div>
 
 <!-- Overlay bij het slepen van een bestand -->
+<!-- Een bestand bekijken zonder de app te verlaten. Ronde 1 is lezen;
+     opslaan komt in ronde 2 (zie TODO-web.md). -->
+<div class="modal-backdrop" id="modal-lezer" hidden>
+  <div class="modal modal-groot">
+    <div class="modal-header">
+      <span id="lezer-titel"></span>
+      <button class="modal-close" id="lezer-sluit"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="lezer-pad mono" id="lezer-pad"></div>
+    <div class="lezer-vak"><pre class="lezer-inhoud mono" id="lezer-inhoud"></pre></div>
+    <div class="modal-footer">
+      <span class="lezer-info" id="lezer-info"></span>
+      <button class="btn-ghost" id="lezer-kopieer" data-i18n="lezer.kopieer">kopiëren</button>
+      <button class="btn-ghost" id="lezer-map" data-i18n="lezer.inMap">map openen</button>
+      <button class="btn-primary" id="lezer-windows" data-i18n="lezer.metWindows">openen met Windows</button>
+    </div>
+  </div>
+</div>
+
 <div id="drop-overlay" hidden>
   <div class="drop-box">
     <i class="ti ti-file-code"></i>
     <div class="drop-title" data-i18n="dropOverlay.title">Laat los om te bewerken</div>
-    <div class="drop-sub" data-i18n="dropOverlay.subtitle">.bat- en .cmd-bestanden openen in de bat-editor</div>
+    <div class="drop-sub" data-i18n="dropOverlay.subtitle">Een map om als project of site te openen, of een bestand om te bekijken</div>
   </div>
 </div>
 
@@ -422,6 +441,7 @@
 <script src="node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
 <script src="i18n.js"></script>
 <script src="git-tools.js"></script>
+<script src="web-tools.js"></script>
 <script src="knoppenrij.js"></script>
 <script src="accounts.js"></script>
 <script src="renderer.js"></script>
