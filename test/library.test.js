@@ -21,6 +21,17 @@ t('er zijn netwerkcommando\'s', BUILTIN_COMMANDS.some(b => (b.tags || []).includ
 t('er zijn bestandscommando\'s', BUILTIN_COMMANDS.some(b => (b.tags || []).includes('bestanden')))
 t('er zijn Flutter-commando\'s', BUILTIN_COMMANDS.some(b => (b.tags || []).includes('flutter')))
 t('er zijn git-commando\'s', BUILTIN_COMMANDS.some(b => (b.tags || []).includes('git')))
+t('er zijn html-fragmenten', BUILTIN_COMMANDS.some(b => (b.tags || []).includes('html') && b.snippet))
+t('er zijn css-fragmenten', BUILTIN_COMMANDS.some(b => (b.tags || []).includes('css') && b.snippet))
+t('er zijn js-fragmenten', BUILTIN_COMMANDS.some(b => (b.tags || []).includes('js') && b.snippet))
+t('web-library hangt aan cmd-library',
+  fs.existsSync(path.join(REAL, 'web-library.js'))
+  && /require\('\.\/web-library'\)/.test(fs.readFileSync(path.join(REAL, 'cmd-library.js'), 'utf8')))
+t('html-skelet staat erin',
+  BUILTIN_COMMANDS.some(b => (b.tags || []).includes('html') && /<!DOCTYPE html>/i.test(b.cmd)))
+t('web-fragmenten gebruiken LF, geen CRLF',
+  BUILTIN_COMMANDS.filter(b => (b.tags || []).some(t => t === 'html' || t === 'css' || t === 'js') && b.snippet)
+    .every(b => !b.cmd.includes('\r')))
 t('er zijn adb/android-commando\'s', BUILTIN_COMMANDS.some(b => (b.tags || []).includes('adb')))
 t('flutter doctor staat erin', BUILTIN_COMMANDS.some(b => b.cmd === 'flutter doctor'))
 t('flutter build apk --release staat erin',
@@ -31,8 +42,9 @@ t('genoeg Flutter-gerelateerde regels',
 
 const fragmenten = BUILTIN_COMMANDS.filter(b => b.snippet)
 t('fragmenten zijn als zodanig gemarkeerd', fragmenten.length >= 40)
-t('fragmenten hebben het label bat of powershell',
-  fragmenten.every(b => (b.tags || []).includes('bat') || (b.tags || []).includes('powershell')))
+t('fragmenten hebben een taal-label (bat/ps/html/css/js)',
+  fragmenten.every(b => (b.tags || []).some(t =>
+    ['bat', 'powershell', 'html', 'css', 'js'].includes(t))))
 t('@echo off is een fragment, geen uitvoerbaar commando',
   BUILTIN_COMMANDS.find(b => b.cmd === '@echo off').snippet === true)
 t('dir is juist wel uitvoerbaar', !BUILTIN_COMMANDS.find(b => b.cmd === 'dir').snippet)

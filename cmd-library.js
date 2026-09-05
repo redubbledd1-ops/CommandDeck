@@ -5,8 +5,9 @@
 //
 // Drie kenmerken:
 //   - gewone commando's, die je kunt uitvoeren
-//   - fragmenten (`snippet: true`), die alleen ergens ín een bat-bestand horen.
-//     Die krijgen geen uitvoerknop, want los draaien slaat nergens op.
+//   - fragmenten (`snippet: true`), die alleen ergens ín een bestand horen
+//     (bat, html, css, js). Die krijgen geen uitvoerknop, want los draaien
+//     slaat nergens op.
 //   - ingrijpende commando's (`danger: true`), die schijven wissen, rechten
 //     omzetten of het systeem herstarten. Die vragen eerst om bevestiging.
 //   - sjablonen (`template: true`), waar je eerst een naam, pad of nummer in
@@ -606,5 +607,6 @@ const BUILTIN_COMMANDS = [
 ]
 
 const { PS_COMMANDS } = require('./ps-library')
+const { WEB_COMMANDS } = require('./web-library')
 
-module.exports = { BUILTIN_COMMANDS: BUILTIN_COMMANDS.concat(PS_COMMANDS) }
+module.exports = { BUILTIN_COMMANDS: BUILTIN_COMMANDS.concat(PS_COMMANDS, WEB_COMMANDS) }

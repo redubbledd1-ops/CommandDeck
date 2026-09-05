@@ -191,6 +191,38 @@ t('dubbel injecteren doet niets',
 t('zonder body komt het script achteraan',
   W.injecteerReload('<p>x</p>').endsWith(W.RELOAD_SCRIPT))
 
+// ── Minified bron leesbaar maken ─────────────────────────────────────────────
+const miniHtml = '<header><nav><a href="index.html">Home</a><a href="projecten.html">Projecten</a></nav></header><main><section class="hero"><h1>Het <em>voelt</em><br>als <span>thuiskomen.</span></h1><p class="intro">Onda ontwerpt plekken.</p></section></main>'
+t('één lange html-regel heeft opmaak nodig', W.heeftOpmaakNodig(miniHtml))
+t('nette html met regels niet',
+  !W.heeftOpmaakNodig('<html>\n  <body>\n    <p>x</p>\n  </body>\n</html>\n'))
+const mooiHtml = W.formatTekst(miniHtml, 'index.html')
+t('minified html krijgt meerdere regels', mooiHtml.split('\n').length >= 8)
+t('nav en main staan onder elkaar',
+  mooiHtml.includes('<nav>') && mooiHtml.indexOf('<nav>') < mooiHtml.indexOf('</nav>')
+  && mooiHtml.indexOf('</nav>') < mooiHtml.indexOf('<main>'))
+t('inline tags blijven bruikbaar (em/span)',
+  mooiHtml.includes('<em>voelt</em>') && mooiHtml.includes('<span>thuiskomen.</span>'))
+t('indentatie met twee spaties',
+  /^ {2}<nav>/m.test(mooiHtml) || /^ {2}<a /m.test(mooiHtml))
+
+const miniCss = 'body{margin:0;color:#111}.hero{display:flex;gap:1rem}'
+const mooiCss = W.formatTekst(miniCss, 'style.css')
+t('minified css krijgt regels',
+  mooiCss.split('\n').length >= 4
+  && (mooiCss.includes('margin: 0') || mooiCss.includes('margin:0')))
+t('css heeft accolades op eigen plek', mooiCss.includes('{') && mooiCss.includes('}'))
+
+const miniJs = 'function hi(n){const x=n+1;return x}'
+const mooiJs = W.formatTekst(miniJs, 'script.js')
+t('minified js krijgt regels', mooiJs.split('\n').length >= 3)
+t('json wordt netjes',
+  W.formatTekst('{"a":1,"b":[2,3]}', 'data.json').includes('\n  "a"'))
+t('onbekende extensie blijft zoals hij is',
+  W.formatTekst(miniHtml, 'notes.txt') === miniHtml)
+t('al nette bron blijft onaangeroerd',
+  (() => { const n = 'body {\n  margin: 0;\n}\n'; return W.formatTekst(n, 'a.css') === n })())
+
 // ── De bedrading ─────────────────────────────────────────────────────────────
 const main = fs.readFileSync(path.join(APP, 'main.js'), 'utf8')
 const pre = fs.readFileSync(path.join(APP, 'preload.js'), 'utf8')
@@ -227,6 +259,9 @@ t('groot en binair worden geweigerd bij het lezen',
 t('preload geeft de nieuwe wegen door',
   /zoekSite:/.test(pre) && /leesTekst:/.test(pre)
   && /schrijfTekst:/.test(pre) && /siteStart:/.test(pre))
+t('editor maakt minified bron leesbaar bij openen',
+  /formatTekst\(r\.inhoud,\s*pad\)/.test(ren)
+  && /formatTekst\(r\.inhoud,\s*tab\.pad\)/.test(ren))
 
 t('index.html laadt web-tools.js vóór renderer.js',
   html.includes('src="web-tools.js"')
@@ -262,6 +297,11 @@ t('editor is een derde termTab',
   && /tab !== 'editor'/.test(ren)
   && /function standaardTermTab\(/.test(ren)
   && /function openWebsiteStart\(/.test(ren))
+t('bestand-tab alleen zichtbaar met open bestand',
+  /function verversBestandTabZichtbaarheid/.test(ren)
+  && /b\.hidden = !aan/.test(ren)
+  && /data-tab="editor" hidden/.test(ren)
+  && /tab === 'editor' && !lezerStaat\.tabs\.length/.test(ren))
 t('meerdere bestanden openen als tabjes',
   /lezerStaat\.tabs/.test(ren)
   && /function kiesLezerTab\(/.test(ren)

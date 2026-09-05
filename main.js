@@ -213,6 +213,20 @@ ipcMain.on('git:afsluitHartslag', (_, extra) => {
   if (!afsluitenGevraagd || afsluitenBevestigd) return
   startAfsluitNoodrem(extra && extra.ms)
 })
+
+// node-pty kan bij een race (commando sterft vóór resize) synchroon of via
+// native callback gooien. Zonder dit krijgt de gebruiker een Electron-dialoog
+// "Cannot resize a pty that has already exited" bovenop de echte fout.
+process.on('uncaughtException', (err) => {
+  const msg = err && err.message ? err.message : String(err)
+  if (/Cannot resize a pty that has already exited/i.test(msg)) {
+    console.warn('[pty]', msg)
+    return
+  }
+  console.error(err)
+  try { dialog.showErrorBox('A JavaScript error occurred in the main process', msg) } catch {}
+})
+
 app.whenReady().then(() => {
   // Eén keer blokkerend, vóór het venster er is: daarna heeft elke git- of
   // gh-aanroep meteen een pad en hoeft er nooit meer gewacht te worden.
@@ -1077,6 +1091,32 @@ function zoekInPad(naam) {
   return null
 }
 
+// npm-global `claude.cmd` roept bin\claude.exe aan. Ontbreekt die stub (mislukte
+// update), dan faalt starten met "…\bin\claude.exe is not recognized".
+function claudeCmdDoelOntbreekt(pad) {
+  if (!pad || !/claude\.cmd$/i.test(pad)) return false
+  const exe = path.join(path.dirname(pad), 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe')
+  try { return !fs.existsSync(exe) } catch { return true }
+}
+
+function herstelClaudeCodePad(pad) {
+  if (!pad) return null
+  if (claudeCmdDoelOntbreekt(pad)) {
+    const arch = process.arch === 'arm64' ? 'arm64' : 'x64'
+    const native = path.join(
+      path.dirname(pad), 'node_modules', '@anthropic-ai', 'claude-code',
+      'node_modules', `@anthropic-ai/claude-code-win32-${arch}`, 'claude.exe')
+    try { if (fs.existsSync(native)) return native } catch {}
+    return null
+  }
+  // Vast .exe-pad dat weg is: probeer native sibling of laat caller PATH proberen.
+  if (/\.exe$/i.test(pad)) {
+    try { if (fs.existsSync(pad)) return pad } catch {}
+    return null
+  }
+  return pad
+}
+
 ipcMain.handle('app:scanEditors', () => {
   const wortels = programmaWortels()
 
@@ -1102,6 +1142,18 @@ ipcMain.handle('app:scanEditors', () => {
     if (!pad && ed.cli) {
       const p = zoekInPad(ed.cli)
       if (p) { pad = p; bron = 'PATH' }
+    }
+    // Claude Code (npm): postinstall kopieert de native binary naar
+    // bin/claude.exe. Mislukt die stap, dan wijst claude.cmd naar een
+    // spookbestand — liever de echte win32-binary of PATH.
+    if (pad && ed.id === 'claudeCode') {
+      const hersteld = herstelClaudeCodePad(pad)
+      if (hersteld) pad = hersteld
+      else if (!fs.existsSync(pad) || claudeCmdDoelOntbreekt(pad)) {
+        const viaPad = ed.cli && zoekInPad(ed.cli)
+        if (viaPad && !claudeCmdDoelOntbreekt(viaPad)) { pad = viaPad; bron = 'PATH' }
+        else pad = null
+      }
     }
     if (pad) gevonden.push({ id: ed.id, label: ed.label, path: pad, bron })
   }
@@ -4240,8 +4292,15 @@ ipcMain.handle('pty:write', (_, { id, data } = {}) => {
 ipcMain.handle('pty:resize', (_, { id, cols, rows } = {}) => {
   const proc = ptySessies.get(id)
   if (!proc) return false
-  try { proc.resize(Math.max(20, Number(cols) || 100), Math.max(5, Number(rows) || 30)) } catch {}
-  return true
+  try {
+    proc.resize(Math.max(20, Number(cols) || 100), Math.max(5, Number(rows) || 30))
+    return true
+  } catch {
+    // Proces al weg (snel mislukt commando): uit de map, anders blijft de
+    // renderer resize sturen en kan node-pty alsnog een uncaught throw geven.
+    if (ptySessies.get(id) === proc) ptySessies.delete(id)
+    return false
+  }
 })
 
 function stopPty(id) {

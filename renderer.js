@@ -717,19 +717,23 @@ function zorgVoorSiteTerugBalk(aan) {
 // de tab de globale instelling "project openen".
 function standaardTermTab(projectId) {
   const bewaard = (settings.termTabs || {})[projectId]
-  if (bewaard === 'browser' || bewaard === 'editor' || bewaard === 'output') return bewaard
+  // Editor-tab alleen als er echt een bestand openstaat — anders verdwijnt
+  // de knop en zou je op een lege editor landen.
+  if (bewaard === 'editor' && lezerStaat.tabs.length) return 'editor'
+  if (bewaard === 'browser' || bewaard === 'output') return bewaard
   const p = projects.find(x => x.id === projectId)
-  return WebTools.termTabVoorOpenKeuze(openKeuzeVoorProject(p))
+  const gok = WebTools.termTabVoorOpenKeuze(openKeuzeVoorProject(p))
+  if (gok === 'editor' && !lezerStaat.tabs.length) return 'output'
+  return gok
 }
 
 async function openWebsiteStart(p) {
   if (!projectIsWebsite(p)) return
   const loc = p.locations?.[p.activeLocation] || p.locations?.[0]
-  if (!loc?.path) { setTermTab('editor'); return }
+  if (!loc?.path) return
   const site = await window.api.zoekSite(loc.path).catch(() => null)
   const start = WebTools.besteStart((site && site.gevonden) || [])
   if (start && start.pad) await toonBestand(start.pad)
-  else setTermTab('editor')
 }
 
 // Eerste keer een project openen: doe wat de globale instelling zegt.
@@ -4224,20 +4228,26 @@ function renderMain() {
       // De naam zonder extensie: `claude.cmd` (npm) is net zo goed Claude Code
       // als `claude.exe`, en alleen zo herkent de lijst hieronder dat het om
       // een programma gaat dat een echt toetsenbord nodig heeft.
-      const progNaam = editorPath.split(/[\\/]/).pop().replace(/\.(exe|cmd|bat|com|ps1)$/i, '')
+      //
+      // Opdrachtregel-AI's starten we op de korte naam (`claude`, niet het
+      // absolute pad naar een npm-.cmd/.exe). Dat pad kan na een mislukte
+      // update naar een ontbrekende stub wijzen; PATH via childEnv blijft
+      // wél de werkende `claude.cmd` vinden.
+      const schoonPad = String(editorPath).trim().replace(/^["']+|["']+$/g, '')
+      const progNaam = schoonPad.split(/[\\/]/).pop().replace(/\.(exe|cmd|bat|com|ps1)$/i, '')
       if (vraagtOmEenVenster(progNaam)) {
-        const commando = /\s/.test(editorPath) ? `"${editorPath}"` : editorPath
+        const commando = progNaam
         if (await startPtySessie(p.id, commando, loc.path)) {
-          showToast(I18N.t('editor.runningInOutputToast', { name: ptyNaam(editorPath) }))
+          showToast(I18N.t('editor.runningInOutputToast', { name: ptyNaam(commando) }))
           return
         }
-        const r = await openCmdMetMelding({ cwd: loc.path, cmd: `"${editorPath}"` })
+        const r = await openCmdMetMelding({ cwd: loc.path, cmd: commando })
         // Netwerk-toast wint: die is nieuwer en zegt iets wat de gebruiker
         // anders niet ziet in het losse venster.
         if (!(r && r.viaLetter)) showToast(I18N.t('editor.claudeCodeOpenedToast'))
         return
       }
-      window.api.openEditor({ editorPath, cwd: loc.path })
+      window.api.openEditor({ editorPath: schoonPad || editorPath, cwd: loc.path })
     }
   })
 
@@ -4403,6 +4413,7 @@ function zorgVoorEditorInWrap(wrap) {
     const knop = document.createElement('button')
     knop.className = 'term-tab'
     knop.dataset.tab = 'editor'
+    knop.hidden = !lezerStaat.tabs.length
     knop.title = I18N.t('term.tabEditor')
     knop.innerHTML = `<i class="ti ti-file-code"></i>${knopTekst(I18N.t('term.tabEditor'))}`
     tabs.appendChild(knop)
@@ -4427,7 +4438,7 @@ function terminalMarkup(opts = {}) {
         <div class="term-tabs">
           <button class="term-tab active" data-tab="output" title="${esc(I18N.t('term.tabOutput'))}"><i class="ti ti-terminal-2"></i>${knopTekst(I18N.t('term.tabOutput'))}<span class="pty-punt" id="pty-punt" hidden></span></button>
           <button class="term-tab" data-tab="browser" title="${esc(I18N.t('term.tabBrowser'))}"><i class="ti ti-folders"></i>${knopTekst(I18N.t('term.tabBrowser'))}</button>
-          <button class="term-tab" data-tab="editor" title="${esc(I18N.t('term.tabEditor'))}"><i class="ti ti-file-code"></i>${knopTekst(I18N.t('term.tabEditor'))}</button>
+          <button class="term-tab" data-tab="editor" hidden title="${esc(I18N.t('term.tabEditor'))}"><i class="ti ti-file-code"></i>${knopTekst(I18N.t('term.tabEditor'))}</button>
         </div>
         <div class="terminal-bar-btns">
           <button class="term-btn alleen-site" id="btn-site-open" title="${esc(I18N.t('term.siteOpenTitle'))}" hidden><i class="ti ti-world" style="font-size:13px"></i>${knopTekst(I18N.t('term.siteOpenButton'))}</button>
@@ -5908,6 +5919,7 @@ function pasTermSchermAan() {
     planSplitPlusVervers()
     keurStatusNa()
     werkTermBarVoorProject(termTab)
+    verversBestandTabZichtbaarheid()
     return
   }
 
@@ -5983,6 +5995,7 @@ function pasTermSchermAan() {
   levenden('.term-tab').forEach(b => {
     b.classList.toggle('active', b.dataset.tab === tab)
   })
+  verversBestandTabZichtbaarheid()
   pasSplitKnopAan(wrap?.querySelector('.term-split-plus[data-split="right"]'),
     split && termSplit === 'right', I18N.t('term.splitRightTitle'))
   pasSplitKnopAan(wrap?.querySelector('.term-split-plus[data-split="bottom"]'),
@@ -6082,6 +6095,8 @@ function wireTermSplit() {
 
 function setTermTab(tab) {
   if (tab !== 'output' && tab !== 'browser' && tab !== 'editor') return
+  // Zonder open bestand bestaat de editor-tab niet — niet naartoe springen.
+  if (tab === 'editor' && !lezerStaat.tabs.length) tab = 'output'
   // De split kent maar twee panelen (output/verkenner). Editor erbij zou een
   // derde vlak vragen — dus split dicht vóór we naar de editor gaan.
   if (tab === 'editor' && termSplitAan() && !splitTweeProjecten()) {
@@ -8762,6 +8777,13 @@ function lezerOpen() {
   return termTab === 'editor' && lezerStaat.tabs.length > 0
 }
 
+// De term-tab "bestand" alleen tonen als er minstens één bestand openstaat.
+// Zonder open bestand is de knop ruis — je kunt er toch niets mee.
+function verversBestandTabZichtbaarheid() {
+  const aan = lezerStaat.tabs.length > 0
+  levenden('.term-tab[data-tab="editor"]').forEach(b => { b.hidden = !aan })
+}
+
 function lezerInhoudEl() {
   return levend('#lezer-inhoud')
 }
@@ -8905,8 +8927,9 @@ async function herlaadLezerTab(tab) {
   if (!tab || !tab.pad) return false
   const r = await window.api.leesTekst(tab.pad).catch(() => null)
   if (!r || !r.ok) return false
-  tab.inhoud = r.inhoud
-  tab.concept = r.inhoud
+  const inhoud = WebTools.formatTekst(r.inhoud, tab.pad)
+  tab.inhoud = inhoud
+  tab.concept = inhoud
   tab.mtime = r.mtime ?? null
   tab.bom = !!r.bom
   tab.crlf = !!r.crlf
@@ -8967,8 +8990,11 @@ async function toonBestand(pad) {
   const tab = leegLezerTab()
   tab.pad = pad
   tab.naam = naam
-  tab.inhoud = r.inhoud
-  tab.concept = r.inhoud
+  // Minified html/css/js in één regel: leesbaar onder elkaar zetten. Alleen
+  // als het er echt als één lijn uitziet — nette bron blijft onaangeroerd.
+  const inhoud = WebTools.formatTekst(r.inhoud, pad)
+  tab.inhoud = inhoud
+  tab.concept = inhoud
   tab.mtime = r.mtime ?? null
   tab.bom = !!r.bom
   tab.crlf = !!r.crlf
@@ -9289,6 +9315,7 @@ async function sluitLezerTab(idx) {
     lezerStaat.actief = -1
     syncLezerNaarDom()
     hertekenWebKnoppen()
+    verversBestandTabZichtbaarheid()
     if (termTab === 'editor') setTermTab('output')
     else focusTerminalInput()
     return
@@ -9296,6 +9323,7 @@ async function sluitLezerTab(idx) {
   lezerStaat.actief = Math.min(idx, lezerStaat.tabs.length - 1)
   syncLezerNaarDom()
   hertekenWebKnoppen()
+  verversBestandTabZichtbaarheid()
   lezerInhoudEl()?.focus()
 }
 
@@ -9314,6 +9342,8 @@ function sluitLezerStil() {
   lezerStaat.tabs = []
   lezerStaat.actief = -1
   syncLezerNaarDom()
+  verversBestandTabZichtbaarheid()
+  if (termTab === 'editor') setTermTab('output')
 }
 
 function bedraadLezer() {
@@ -9334,10 +9364,12 @@ function bedraadLezer() {
     if (!lezerStaat.tabs.length) {
       lezerStaat.actief = -1
       syncLezerNaarDom()
+      verversBestandTabZichtbaarheid()
       if (termTab === 'editor') setTermTab('browser')
     } else {
       lezerStaat.actief = Math.min(idx, lezerStaat.tabs.length - 1)
       syncLezerNaarDom()
+      verversBestandTabZichtbaarheid()
     }
     if (pad) openInVerkenner(ouderVan(pad), pad)
   }
@@ -9351,10 +9383,12 @@ function bedraadLezer() {
     if (!lezerStaat.tabs.length) {
       lezerStaat.actief = -1
       syncLezerNaarDom()
+      verversBestandTabZichtbaarheid()
       if (termTab === 'editor') setTermTab('output')
     } else {
       lezerStaat.actief = Math.min(idx, lezerStaat.tabs.length - 1)
       syncLezerNaarDom()
+      verversBestandTabZichtbaarheid()
     }
     if (pad) window.api.openFolder(pad)
   }
@@ -13037,7 +13071,9 @@ function toonPtySessie() {
 }
 
 function pasPtyMaatAan(s) {
-  if (!s || !s.fit) return
+  // Geen resize meer zodra de sessie al gestopt is: node-pty gooit dan
+  // "Cannot resize a pty that has already exited" (snel falend commando).
+  if (!s || !s.fit || s.actief === false) return
   try {
     s.fit.fit()
     window.api.ptyResize({ id: s.id, cols: s.term.cols, rows: s.term.rows })

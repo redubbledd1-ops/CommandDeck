@@ -200,6 +200,413 @@
     } catch { return false }
   }
 
+  // ── Leesbaar maken van minified bron ───────────────────────────────────────
+  // Sites leveren soms html/css/js in één lange regel. In de editor is dat niet
+  // te lezen. Alleen opmaken als het er echt als één lijn uitziet — bestanden
+  // die al netjes onder elkaar staan blijven onaangeroerd.
+  const INDENT = '  '
+
+  const HTML_VOID = new Set([
+    'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta',
+    'param', 'source', 'track', 'wbr',
+  ])
+  // Inhoud van deze tags niet verder splitsen op `<` — script/style/pre houden
+  // hun eigen structuur (of worden apart opgemaakt).
+  const HTML_RAUW = new Set(['script', 'style', 'pre', 'textarea'])
+  // Inline: blijven op de regel bij hun tekst (`Het <em>voelt</em>`), anders
+  // wordt elke span een eigen blok en is de copy niet meer leesbaar.
+  const HTML_INLINE = new Set([
+    'abbr', 'b', 'bdi', 'bdo', 'br', 'cite', 'code', 'data', 'dfn', 'em',
+    'i', 'kbd', 'mark', 'q', 's', 'samp', 'small', 'span', 'strong', 'sub',
+    'sup', 'time', 'u', 'var', 'wbr', 'img',
+  ])
+  // Koppen, alinea's, links: open+inhoud+sluit op één regel (mits geen blok
+  // erin). Zo blijft `Het <em>voelt</em>` leesbaar én krijgt elke nav-link
+  // een eigen regel.
+  const HTML_REGEL = new Set([
+    'a', 'button', 'label', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li',
+    'dt', 'dd', 'title', 'option', 'figcaption', 'summary',
+  ])
+
+  function heeftOpmaakNodig(tekst) {
+    const t = String(tekst == null ? '' : tekst)
+    if (!t.trim()) return false
+    const regels = t.split(/\r?\n/)
+    // Al een beetje lucht: niet opnieuw formatteren.
+    if (regels.length >= 4) return false
+    const langste = regels.reduce((m, r) => Math.max(m, r.length), 0)
+    if (langste > 80) return true
+    // Korte maar dichte bron: `a{b:1}` of `<a></a><b></b>` zonder enters.
+    if (regels.length <= 2 && t.trim().length >= 15
+        && (/<[a-zA-Z]/.test(t) || /[{;}]/.test(t) || /^\s*[[{"]/.test(t.trim()))) {
+      return true
+    }
+    return false
+  }
+
+  function formatHtml(bron) {
+    const s = String(bron == null ? '' : bron)
+    const out = []
+    let diepte = 0
+    let i = 0
+    let regel = ''
+
+    function flush() {
+      if (regel.trim()) out.push(INDENT.repeat(Math.max(0, diepte)) + regel.trim())
+      regel = ''
+    }
+
+    function voeg(stuk, soort) {
+      const t = String(stuk)
+      if (!t) return
+      if (!regel) { regel = t; return }
+      if (soort === 'tekst') {
+        if (regel.endsWith('>') || regel.endsWith(' ')) regel += t
+        else regel += ' ' + t
+        return
+      }
+      regel += t
+    }
+
+    function skipWs() {
+      while (i < s.length && /[ \t\r\n]/.test(s[i])) i++
+    }
+
+    // Zoek bijbehorende sluit-tag (eenvoudig: eerste </naam> is genoeg voor
+    // a/p/h1 — geneste gelijknamige tags komen daar zelden voor).
+    function vindSluit(naam, van) {
+      const lager = s.toLowerCase()
+      const tok = '</' + naam
+      let p = van
+      while (p < s.length) {
+        const j = lager.indexOf(tok, p)
+        if (j < 0) return -1
+        const na = lager[j + tok.length]
+        if (!na || /[\s>]/.test(na)) return j
+        p = j + tok.length
+      }
+      return -1
+    }
+
+    while (i < s.length) {
+      skipWs()
+      if (i >= s.length) break
+
+      if (s.startsWith('<!--', i)) {
+        const eind = s.indexOf('-->', i + 4)
+        const stuk = eind < 0 ? s.slice(i) : s.slice(i, eind + 3)
+        flush(); voeg(stuk, 'tag'); flush()
+        i = eind < 0 ? s.length : eind + 3
+        continue
+      }
+
+      if (s.startsWith('<!', i) || s.startsWith('<?', i)) {
+        const eind = s.indexOf('>', i + 2)
+        const stuk = eind < 0 ? s.slice(i) : s.slice(i, eind + 1)
+        flush(); voeg(stuk, 'tag'); flush()
+        i = eind < 0 ? s.length : eind + 1
+        continue
+      }
+
+      if (s[i] === '<') {
+        const eind = s.indexOf('>', i + 1)
+        if (eind < 0) { voeg(s.slice(i), 'tag'); break }
+        const tag = s.slice(i, eind + 1)
+        const m = /^<\/?\s*([a-zA-Z0-9:_-]+)/.exec(tag)
+        const naam = m ? m[1].toLowerCase() : ''
+        const isSluit = /^<\//.test(tag)
+        const isVoid = HTML_VOID.has(naam) || /\/>$/.test(tag.trim())
+        const inline = HTML_INLINE.has(naam)
+
+        if (isSluit) {
+          if (inline) voeg(tag, 'tag')
+          else {
+            flush()
+            diepte = Math.max(0, diepte - 1)
+            voeg(tag, 'tag')
+            flush()
+          }
+          i = eind + 1
+          continue
+        }
+
+        if (inline || isVoid) {
+          voeg(tag, 'tag')
+          i = eind + 1
+          continue
+        }
+
+        // Kop/link/alinea: inhoud op dezelfde regel als de tags.
+        if (HTML_REGEL.has(naam)) {
+          const j = vindSluit(naam, eind + 1)
+          if (j >= 0) {
+            const sluitEind = s.indexOf('>', j)
+            const binnen = s.slice(eind + 1, j)
+            const heeftBlok = /<(header|footer|nav|main|section|article|aside|div|ul|ol|table|form|script|style)\b/i.test(binnen)
+            if (!heeftBlok && sluitEind >= 0) {
+              flush()
+              const mid = binnen.replace(/\s+/g, ' ').trim()
+              voeg(tag + mid + s.slice(j, sluitEind + 1), 'tag')
+              flush()
+              i = sluitEind + 1
+              continue
+            }
+          }
+        }
+
+        flush()
+        voeg(tag, 'tag')
+        flush()
+        i = eind + 1
+
+        if (HTML_RAUW.has(naam)) {
+          const lager = s.toLowerCase()
+          const j = lager.indexOf('</' + naam, i)
+          if (j >= 0) {
+            const binnen = s.slice(i, j)
+            const opgemaakt = naam === 'style' ? formatCss(binnen)
+              : (naam === 'script' ? formatJs(binnen) : binnen)
+            diepte++
+            if (opgemaakt.trim()) {
+              for (const r of opgemaakt.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')) {
+                if (r.trim()) out.push(INDENT.repeat(diepte) + r.trim())
+                else out.push('')
+              }
+            }
+            i = j
+            continue
+          }
+        }
+
+        diepte++
+        continue
+      }
+
+      let j = s.indexOf('<', i)
+      if (j < 0) j = s.length
+      const tekst = s.slice(i, j).replace(/\s+/g, ' ').trim()
+      if (tekst) voeg(tekst, 'tekst')
+      i = j
+    }
+
+    flush()
+    return out.join('\n').replace(/\n{3,}/g, '\n\n').trim() + (/\r?\n$/.test(s) ? '\n' : '')
+  }
+
+  // CSS: accolades en puntkomma's krijgen hun eigen regel; strings blijven heel.
+  function formatCss(bron) {
+    const s = String(bron == null ? '' : bron)
+    let out = ''
+    let diepte = 0
+    let i = 0
+    let str = null
+
+    function nl() {
+      out = out.replace(/[ \t]+$/g, '')
+      out += '\n' + INDENT.repeat(Math.max(0, diepte))
+    }
+
+    while (i < s.length) {
+      const c = s[i]
+
+      if (str) {
+        out += c
+        if (c === '\\' && i + 1 < s.length) { out += s[++i]; i++; continue }
+        if (c === str) str = null
+        i++
+        continue
+      }
+
+      if (c === '"' || c === "'") { str = c; out += c; i++; continue }
+
+      if (c === '/' && s[i + 1] === '*') {
+        const eind = s.indexOf('*/', i + 2)
+        const stuk = eind < 0 ? s.slice(i) : s.slice(i, eind + 2)
+        if (out && !/\n\s*$/.test(out)) nl()
+        out += stuk.trim()
+        nl()
+        i = eind < 0 ? s.length : eind + 2
+        continue
+      }
+
+      if (/\s/.test(c)) {
+        if (out && !/\s$/.test(out) && out[out.length - 1] !== '\n') out += ' '
+        i++
+        continue
+      }
+
+      if (c === '{') {
+        out = out.replace(/[ \t]+$/g, '')
+        out += ' {'
+        diepte++
+        nl()
+        i++
+        continue
+      }
+
+      if (c === '}') {
+        diepte = Math.max(0, diepte - 1)
+        out = out.replace(/[ \t]+$/g, '')
+        if (!/\n\s*$/.test(out)) nl()
+        // nl() zette al indent van oude diepte; corrigeer naar nieuwe
+        out = out.replace(/\n[ \t]*$/, '\n' + INDENT.repeat(diepte))
+        out += '}'
+        nl()
+        i++
+        continue
+      }
+
+      if (c === ';') {
+        out += ';'
+        nl()
+        i++
+        continue
+      }
+
+      if (c === ',') {
+        out += ','
+        // Selectorenlijst: komma + spatie; binnen functie blijft het op de regel
+        // via de normale whitespace-logica hierna.
+        i++
+        continue
+      }
+
+      out += c
+      i++
+    }
+
+    return out.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
+  }
+
+  // Lichte JS/TS-opmaak: accolades, puntkomma's en regels na } — geen echte
+  // parser, wél genoeg om één minified regel leesbaar te maken.
+  function formatJs(bron) {
+    const s = String(bron == null ? '' : bron)
+    let out = ''
+    let diepte = 0
+    let i = 0
+    let str = null
+    let tmpl = 0
+
+    function nl() {
+      out = out.replace(/[ \t]+$/g, '')
+      out += '\n' + INDENT.repeat(Math.max(0, diepte))
+    }
+
+    while (i < s.length) {
+      const c = s[i]
+
+      if (str) {
+        out += c
+        if (c === '\\' && i + 1 < s.length) { out += s[++i]; i++; continue }
+        if (str === '`' && c === '$' && s[i + 1] === '{') {
+          out += s[++i]; tmpl++; str = null; i++; continue
+        }
+        if (c === str) str = null
+        i++
+        continue
+      }
+
+      // Regelcommentaar
+      if (c === '/' && s[i + 1] === '/') {
+        const eind = s.indexOf('\n', i)
+        out += eind < 0 ? s.slice(i) : s.slice(i, eind)
+        i = eind < 0 ? s.length : eind
+        continue
+      }
+      // Blokcommentaar
+      if (c === '/' && s[i + 1] === '*') {
+        const eind = s.indexOf('*/', i + 2)
+        out += eind < 0 ? s.slice(i) : s.slice(i, eind + 2)
+        i = eind < 0 ? s.length : eind + 2
+        if (out && !/\n\s*$/.test(out)) nl()
+        continue
+      }
+
+      if (c === '"' || c === "'" || c === '`') { str = c; out += c; i++; continue }
+
+      if (c === '}' && tmpl > 0) {
+        tmpl--
+        out += c
+        str = '`'
+        i++
+        continue
+      }
+
+      if (/\s/.test(c)) {
+        if (out && !/[\s{([]$/.test(out) && !/\n\s*$/.test(out)) out += ' '
+        i++
+        continue
+      }
+
+      if (c === '{') {
+        out += ' {'
+        diepte++
+        nl()
+        i++
+        continue
+      }
+
+      if (c === '}') {
+        diepte = Math.max(0, diepte - 1)
+        out = out.replace(/[ \t]+$/g, '')
+        if (!/\n\s*$/.test(out)) out += '\n' + INDENT.repeat(diepte)
+        else out = out.replace(/\n[ \t]*$/, '\n' + INDENT.repeat(diepte))
+        out += '}'
+        i++
+        if (s[i] === ',' || s[i] === ';' || s[i] === ')') {
+          /* op dezelfde regel houden */
+        } else if (i < s.length) {
+          nl()
+        }
+        continue
+      }
+
+      if (c === ';') {
+        out += ';'
+        i++
+        skipJsWs()
+        if (i < s.length && s[i] !== '}') nl()
+        continue
+      }
+
+      out += c
+      i++
+    }
+
+    function skipJsWs() {
+      while (i < s.length && /[ \t\r\n]/.test(s[i])) i++
+    }
+
+    return out.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
+  }
+
+  function formatJson(bron) {
+    try {
+      return JSON.stringify(JSON.parse(String(bron)), null, 2)
+    } catch {
+      return formatJs(bron)
+    }
+  }
+
+  // Pad of extensie → opgemaakte tekst. Zonder bekende taal: bron terug.
+  // Alleen als heeftOpmaakNodig — anders blijft alles zoals op schijf.
+  function formatTekst(tekst, padOfExt, opties) {
+    const bron = String(tekst == null ? '' : tekst)
+    const forceer = !!(opties && opties.forceer)
+    if (!forceer && !heeftOpmaakNodig(bron)) return bron
+    const ext = String(padOfExt || '').includes('.')
+      ? extensieVan(padOfExt)
+      : String(padOfExt || '').toLowerCase().replace(/^\./, '')
+    let uit
+    if (ext === 'html' || ext === 'htm' || ext === 'xml' || ext === 'svg') uit = formatHtml(bron)
+    else if (ext === 'css') uit = formatCss(bron)
+    else if (ext === 'json') uit = formatJson(bron)
+    else if (['js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx'].includes(ext)) uit = formatJs(bron)
+    else return bron
+    return uit && uit !== bron ? uit : bron
+  }
+
   // Zoeken in één bestand. Case-insensitive standaard: je zoekt een woord, niet
   // een exacte spelling. Geeft startposities terug zodat de UI erdoorheen kan.
   function zoekInTekst(tekst, naald, opties) {
@@ -298,6 +705,7 @@
     TEKST_EXT, WEB_EXT, extensieVan, isTekstBestand, isWebBestand, isHtmlBestand,
     MAX_TEKST_BYTES, MIME, mimeVoor, padUitUrl, doelPad, binnenWortel,
     tekstVoorSchrijf, isGeldigUtf8, zoekInTekst, isWebsiteGok, kiesSiteOpen,
+    heeftOpmaakNodig, formatTekst, formatHtml, formatCss, formatJs, formatJson,
     PROJECT_OPEN_STANDAARD, PROJECT_OPEN_KEUZES, projectOpenSoort,
     projectOpenKeuze, termTabVoorOpenKeuze,
     RELOAD_PAD, isReloadUrl, RELOAD_SCRIPT, injecteerReload,
