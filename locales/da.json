@@ -332,7 +332,6 @@
   "term.sortButton": "sortér",
   "term.copyLastButton": "kopiér seneste",
   "term.copyAllButton": "kopiér alt",
-  "term.batButtonTitle": "Opretter en bat-fil ud fra det, du lige har skrevet, eller redigerer en eksisterende fil",
   "term.stopButton": "stop",
   "term.closeSessionButton": "luk session",
   "term.relaunchTitle": "Genindlæser appen med den aktuelle kildekode — bygger intet, brug Opdater-knappen øverst til højre for en rigtig ny .exe.",

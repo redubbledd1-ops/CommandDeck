@@ -332,7 +332,6 @@
   "term.sortButton": "sortuj",
   "term.copyLastButton": "kopiuj ostatnie",
   "term.copyAllButton": "kopiuj wszystko",
-  "term.batButtonTitle": "Tworzy plik bat z tego, co właśnie wpisano, lub edytuje istniejący plik",
   "term.stopButton": "stop",
   "term.closeSessionButton": "zamknij sesję",
   "term.relaunchTitle": "Przeładowuje aplikację z bieżącym kodem źródłowym — nic nie buduje, użyj przycisku Aktualizuj w prawym górnym rogu, aby uzyskać prawdziwy nowy plik .exe.",

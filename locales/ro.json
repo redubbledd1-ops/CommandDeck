@@ -332,7 +332,6 @@
   "term.sortButton": "sortează",
   "term.copyLastButton": "copiază ultimul",
   "term.copyAllButton": "copiază tot",
-  "term.batButtonTitle": "Fă un fișier bat din ce tocmai ai tastat sau editează un fișier existent",
   "term.stopButton": "oprește",
   "term.closeSessionButton": "închide sesiunea",
   "term.relaunchTitle": "Reîncarcă aplicația cu codul sursă curent — nu construiește nimic, folosește butonul Update din dreapta sus pentru un .exe nou adevărat.",

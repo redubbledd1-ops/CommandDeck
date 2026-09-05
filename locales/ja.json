@@ -332,7 +332,6 @@
   "term.sortButton": "並べ替え",
   "term.copyLastButton": "最後をコピー",
   "term.copyAllButton": "すべてコピー",
-  "term.batButtonTitle": "入力内容から bat ファイルを作成、または既存ファイルを編集",
   "term.stopButton": "停止",
   "term.closeSessionButton": "セッションを閉じる",
   "term.relaunchTitle": "現在のソースコードでアプリを再読み込み — ビルドはしません。新しい .exe には右上の更新ボタンを使ってください。",

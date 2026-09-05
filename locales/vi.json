@@ -332,7 +332,6 @@
   "term.sortButton": "sắp xếp",
   "term.copyLastButton": "sao chép cuối",
   "term.copyAllButton": "sao chép tất cả",
-  "term.batButtonTitle": "Tạo tệp bat từ những gì vừa gõ, hoặc sửa tệp có sẵn",
   "term.stopButton": "dừng",
   "term.closeSessionButton": "đóng phiên",
   "term.relaunchTitle": "Tải lại ứng dụng với mã nguồn hiện tại — không xây gì, dùng nút Update góc trên phải cho .exe mới thật.",

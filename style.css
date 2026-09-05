@@ -1445,9 +1445,6 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
 /* ── Bat-bestand modal ── */
 .modal-lg { width: 620px; max-width: calc(100vw - 60px); }
 
-.term-btn.bat { border-color: rgba(74,222,128,0.35); color: var(--green); }
-.term-btn.bat:hover { background: var(--green-d); border-color: var(--green); }
-
 .bat-open-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 .bat-open-row .loc-select { flex: 1; min-width: 0; }
 

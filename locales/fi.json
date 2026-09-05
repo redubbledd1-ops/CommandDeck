@@ -332,7 +332,6 @@
   "term.sortButton": "lajittele",
   "term.copyLastButton": "kopioi viimeisin",
   "term.copyAllButton": "kopioi kaikki",
-  "term.batButtonTitle": "Luo bat-tiedoston juuri kirjoittamastasi tai muokkaa olemassa olevaa tiedostoa",
   "term.stopButton": "pysäytä",
   "term.closeSessionButton": "sulje istunto",
   "term.relaunchTitle": "Lataa sovelluksen uudelleen nykyisellä lähdekoodilla — ei rakenna mitään, käytä Päivitä-painiketta oikeassa yläkulmassa oikean uuden .exe-tiedoston saamiseksi.",

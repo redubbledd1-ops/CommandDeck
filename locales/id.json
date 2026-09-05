@@ -332,7 +332,6 @@
   "term.sortButton": "urutkan",
   "term.copyLastButton": "salin terakhir",
   "term.copyAllButton": "salin semua",
-  "term.batButtonTitle": "Buat file bat dari yang baru Anda ketik, atau edit file yang ada",
   "term.stopButton": "berhenti",
   "term.closeSessionButton": "tutup sesi",
   "term.relaunchTitle": "Memuat ulang aplikasi dengan kode sumber saat ini — tidak membangun apa pun, gunakan tombol Update di kanan atas untuk .exe baru yang sesungguhnya.",

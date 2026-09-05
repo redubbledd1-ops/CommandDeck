@@ -332,7 +332,6 @@
   "term.sortButton": "řadit",
   "term.copyLastButton": "kopírovat poslední",
   "term.copyAllButton": "kopírovat vše",
-  "term.batButtonTitle": "Vytvoří bat soubor z toho, co jste právě napsali, nebo upraví existující soubor",
   "term.stopButton": "stop",
   "term.closeSessionButton": "zavřít relaci",
   "term.relaunchTitle": "Znovu načte aplikaci s aktuálním zdrojovým kódem — nic nesestavuje, pro opravdu nový .exe použijte tlačítko Aktualizovat vpravo nahoře.",

@@ -390,7 +390,6 @@
   "term.sortButton": "sort",
   "term.copyLastButton": "copy last",
   "term.copyAllButton": "copy all",
-  "term.batButtonTitle": "Make a bat file from what you just typed, or edit an existing file",
   "term.stopButton": "stop",
   "term.siteOpenButton": "open",
   "term.siteOpenTitle": "Open the site in your browser — the html you are editing, or otherwise index/home",

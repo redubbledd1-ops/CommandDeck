@@ -332,7 +332,6 @@
   "term.sortButton": "sırala",
   "term.copyLastButton": "sonuncuyu kopyala",
   "term.copyAllButton": "tümünü kopyala",
-  "term.batButtonTitle": "Az önce yazdığınızdan bir bat dosyası oluşturur veya mevcut bir dosyayı düzenler",
   "term.stopButton": "durdur",
   "term.closeSessionButton": "oturumu kapat",
   "term.relaunchTitle": "Uygulamayı geçerli kaynak koduyla yeniden yükler — hiçbir şey derlemez, gerçek yeni bir .exe için sağ üstteki Güncelle düğmesini kullanın.",

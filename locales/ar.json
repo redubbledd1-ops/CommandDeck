@@ -332,7 +332,6 @@
   "term.sortButton": "ترتيب",
   "term.copyLastButton": "نسخ الأخير",
   "term.copyAllButton": "نسخ الكل",
-  "term.batButtonTitle": "إنشاء ملف bat مما كتبته للتو، أو تحرير ملف موجود",
   "term.stopButton": "إيقاف",
   "term.closeSessionButton": "إغلاق الجلسة",
   "term.relaunchTitle": "يعيد تحميل التطبيق بالكود المصدري الحالي — لا يبني شيئاً، استخدم زر التحديث أعلى اليمين لـ .exe جديد حقيقي.",

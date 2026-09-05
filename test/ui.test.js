@@ -3438,16 +3438,8 @@ function startVraagAutomaat() {
   $('#btn-nav-bat').click(); await tick(); await tick()
   check('bat-map blijft staan als je een project opent', $('#bat-cwd-select').value === 'C:\\tools\\scripts')
 
-  // knop in de terminalbalk als snelkoppeling
-  $('#btn-nav-cmd').click(); await tick()
-  $('#term-input').value = 'flutter build apk --release'
-  $('#btn-bat').click(); await tick(); await tick()
-  check('bat-knop in de terminal opent de sectie', $('#bat-panel').style.display === 'flex')
-  check('en neemt het getypte commando mee',
-    $('#bat-content').value.includes('flutter build apk --release'))
-  check('met een voorgestelde bestandsnaam', $('#bat-name').value === 'flutter-build-apk-release.bat')
-
-  // opties
+  // opties (op een vers sjabloon, niet op een bestaand bestand)
+  $('#bat-new').click(); await tick()
   check('opties staan in het paneel', !!$('#bo-pause') && !!$('#bo-admin'))
   $('#bo-admin').checked = true
   $('#bo-admin').dispatchEvent(new window.Event('change')); await tick(); await tick()

@@ -332,7 +332,6 @@
   "term.sortButton": "क्रमबद्ध",
   "term.copyLastButton": "अंतिम कॉपी",
   "term.copyAllButton": "सब कॉपी",
-  "term.batButtonTitle": "जो अभी टाइप किया उससे bat फ़ाइल बनाएँ, या मौजूदा संपादित करें",
   "term.stopButton": "रोकें",
   "term.closeSessionButton": "सत्र बंद",
   "term.relaunchTitle": "वर्तमान स्रोत कोड से ऐप पुनः लोड — कुछ नहीं बनाता, नया .exe के लिए ऊपर दाएँ अपडेट बटन।",

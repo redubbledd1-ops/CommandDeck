@@ -332,7 +332,6 @@
   "term.sortButton": "정렬",
   "term.copyLastButton": "마지막 복사",
   "term.copyAllButton": "모두 복사",
-  "term.batButtonTitle": "입력 내용으로 bat 파일 만들기 또는 기존 파일 편집",
   "term.stopButton": "중지",
   "term.closeSessionButton": "세션 닫기",
   "term.relaunchTitle": "현재 소스 코드로 앱 다시 로드 — 빌드하지 않음. 새 .exe는 오른쪽 위 업데이트 버튼 사용.",

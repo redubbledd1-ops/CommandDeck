@@ -332,7 +332,6 @@
   "term.sortButton": "rendezés",
   "term.copyLastButton": "utolsó másolása",
   "term.copyAllButton": "összes másolása",
-  "term.batButtonTitle": "Bat fájl készítése abból, amit most gépeltél, vagy meglévő fájl szerkesztése",
   "term.stopButton": "leállítás",
   "term.closeSessionButton": "munkamenet bezárása",
   "term.relaunchTitle": "Újratölti az alkalmazást a jelenlegi forráskóddal — semmit nem épít, a jobb felső Update gombbal készül igazi új .exe.",

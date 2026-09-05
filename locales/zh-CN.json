@@ -332,7 +332,6 @@
   "term.sortButton": "排序",
   "term.copyLastButton": "复制最后",
   "term.copyAllButton": "复制全部",
-  "term.batButtonTitle": "根据输入创建 bat 文件，或编辑现有文件",
   "term.stopButton": "停止",
   "term.closeSessionButton": "关闭会话",
   "term.relaunchTitle": "用当前源代码重新加载应用 — 不构建；新 .exe 请用右上角更新按钮。",

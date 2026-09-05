@@ -540,7 +540,7 @@ function openKeuzeVoorProject(p) {
   return WebTools.projectOpenKeuze(settings.projectOpenen, soort)
 }
 
-// Terminalbalk: bij een site horen copy/bat/stop weg, en Open erbij.
+// Terminalbalk: bij een site horen copy/stop weg, en Open erbij.
 // Verkenner-knoppen blijven aan de tab hangen (weergave/sorteren).
 function werkTermBarVoorProject(tab) {
   const siteProject = projectIsWebsite(projects.find(x => x.id === activeId))
@@ -4446,7 +4446,6 @@ function terminalMarkup(opts = {}) {
           <button class="term-btn alleen-verkenner" id="br-sorteer" title="${esc(I18N.t('term.sortTitle'))}" hidden><i class="ti ti-arrows-sort" style="font-size:13px"></i>${knopTekst(I18N.t('term.sortButton'))}</button>
           <button class="term-btn alleen-terminal" id="btn-copy-last" title="${esc(I18N.t('term.copyLastButton'))}"><i class="ti ti-copy" style="font-size:13px"></i>${knopTekst(I18N.t('term.copyLastButton'))}</button>
           <button class="term-btn alleen-terminal" id="btn-copy-all" title="${esc(I18N.t('term.copyAllButton'))}"><i class="ti ti-clipboard" style="font-size:13px"></i>${knopTekst(I18N.t('term.copyAllButton'))}</button>
-          <button class="term-btn bat alleen-terminal" id="btn-bat" title="${esc(I18N.t('term.batButtonTitle'))}"><i class="ti ti-file-code" style="font-size:13px"></i>${knopTekst('bat')}</button>
           <button class="term-btn stop alleen-terminal" id="btn-kill" title="${esc(I18N.t('term.stopButton'))}"><i class="ti ti-player-stop" style="font-size:13px"></i>${knopTekst(I18N.t('term.stopButton'))}</button>
           <button class="term-btn" id="btn-pty-sluit" title="${esc(I18N.t('term.closeSessionButton'))}" hidden><i class="ti ti-x" style="font-size:13px"></i>${knopTekst(I18N.t('term.closeSessionButton'))}</button>
           <button class="term-btn alleen-terminal" id="btn-clear" title="${esc(I18N.t('common.clear'))}"><i class="ti ti-trash" style="font-size:13px"></i>${knopTekst(I18N.t('common.clear'))}</button>
@@ -6527,11 +6526,6 @@ function wireTerminal(ctx, opts = {}) {
     const text = [...$id('terminal').querySelectorAll('div:not(.t-sep)')].map(el => el.textContent).filter(Boolean).join('\n')
     if (text) { navigator.clipboard.writeText(text); showToast(I18N.t('term.copyAllToast')) }
   }
-  $id('btn-bat').onclick = () => {
-    // Snelkoppeling: neemt mee wat je net getypt hebt naar de bat-sectie
-    const typed = $id('term-input')?.value || ''
-    openBatView({ cmds: typed })
-  }
   const siteOpen = $id('btn-site-open')
   if (siteOpen) siteOpen.onclick = () => { void openSiteVanProject() }
   $id('btn-relaunch').onclick = () => {
@@ -8137,12 +8131,8 @@ function runCommandForFile(p) {
 function batAllCmds() { return batState.sourceCmds || '' }
 
 // ── Sectie openen ─────────────────────────────────────────────────────────────
-// Vanuit de zijbalk zonder argument, vanuit de bat-knop in de terminal mét de
-// commando's die daar getypt zijn.
-async function openBatView({ cmds = null } = {}) {
-  if (cmds !== null && String(cmds).trim()) {
-    newBatDraft(String(cmds))
-  } else if (!batState.path && !batState.content) {
+async function openBatView() {
+  if (!batState.path && !batState.content) {
     newBatDraft('')
   }
   setView('bat')

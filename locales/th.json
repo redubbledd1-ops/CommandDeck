@@ -332,7 +332,6 @@
   "term.sortButton": "เรียง",
   "term.copyLastButton": "คัดลอกล่าสุด",
   "term.copyAllButton": "คัดลอกทั้งหมด",
-  "term.batButtonTitle": "สร้างไฟล์ bat จากสิ่งที่พิมพ์ หรือแก้ไขไฟล์ที่มีอยู่",
   "term.stopButton": "หยุด",
   "term.closeSessionButton": "ปิดเซสชัน",
   "term.relaunchTitle": "โหลดแอปใหม่ด้วยซอร์สโค้ดปัจจุบัน — ไม่สร้างอะไร ใช้ปุ่มอัปเดตมุมขวาบนสำหรับ .exe ใหม่จริงๆ",

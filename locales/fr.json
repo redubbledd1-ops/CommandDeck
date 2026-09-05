@@ -332,7 +332,6 @@
   "term.sortButton": "trier",
   "term.copyLastButton": "copier le dernier",
   "term.copyAllButton": "tout copier",
-  "term.batButtonTitle": "Crée un fichier bat à partir de ce que vous venez de taper, ou modifie un fichier existant",
   "term.stopButton": "arrêter",
   "term.closeSessionButton": "fermer la session",
   "term.relaunchTitle": "Recharge l'application avec le code source actuel — ne construit rien, utilisez le bouton Mise à jour en haut à droite pour un véritable nouveau .exe.",
