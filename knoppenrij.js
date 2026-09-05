@@ -289,13 +289,23 @@
       if (van[id] === '') return false
       return !mapVanKnop(rij, id)
     })
+    // Gebruikt deze rij al mappen? Dan is de gebruiker met mappen bezig. Eén
+    // keer vooraf bepalen, vóór we zelf mappen maken.
+    const alMappen = mappenVan(rij.bron, rij.sectie).length > 0
     let gedaan = 0
     for (const soort of soortenVan(rij)) {
       const hoort = losse.filter(soort.toets)
       if (!hoort.length) continue
       let f = mappenVan(rij.bron, rij.sectie).find(x => x.auto === soort.auto)
       if (!f) {
-        if (hoort.length < 2) continue
+        // Nieuwe map: normaal pas bij twee of meer losse knoppen van die soort
+        // (één knop in een eigen map is lawaai op een verse rij). Uitzondering:
+        // een soort met `soloInMap` -- de gevonden programma's -- hoort ook als
+        // enkeling in een map zodra de rij al mappen gebruikt. Dat is bug 5:
+        // "wanneer mappen aan staan komt een nieuw gevonden programma in de map"
+        // in plaats van los naast de mappen die er al zijn.
+        const soloMag = alMappen && soort.soloInMap
+        if (hoort.length < 2 && !soloMag) continue
         f = { id: nieuwMapId(), sectie: rij.sectie, label: soort.label, open: true, auto: soort.auto }
         rij.bron.cmdFolders = [...(rij.bron.cmdFolders || []), f]
       }

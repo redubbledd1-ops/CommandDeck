@@ -3684,7 +3684,7 @@ const AI_LOKAAL_BIJ_PROG = new Set(['ai:ollama', 'ai:lmstudio'])
 const AUTO_MAPPEN = [
   { auto: 'git',       sleutel: 'folder.autoGit',   toets: (id) => GitTools.isGitId(id) },
   { auto: 'ai',        sleutel: 'folder.autoAi',    toets: (id) => id.startsWith('ai:') && !id.startsWith('ai:prog:') && !AI_LOKAAL_BIJ_PROG.has(id) },
-  { auto: 'prog',      sleutel: 'folder.autoProgs', fallbackAuto: 'ai',
+  { auto: 'prog',      sleutel: 'folder.autoProgs', fallbackAuto: 'ai', soloInMap: true,
     toets: (id) => id.startsWith('editor:custom:') || id.startsWith('ai:prog:') || AI_LOKAAL_BIJ_PROG.has(id) },
   { auto: FLUTTER_MAP, sleutel: 'folder.flutter',   toets: (id) => TOOLS_IDS.has(id) },
   ...((typeof WebKnoppen !== 'undefined' ? WebKnoppen.WEB_AUTO_MAPPEN : []).map(m => ({
@@ -3705,6 +3705,7 @@ function autoSoorten() {
     label: I18N.t(s.sleutel),
     toets: s.toets,
     fallbackAuto: s.fallbackAuto,
+    soloInMap: s.soloInMap,
   }))
 }
 

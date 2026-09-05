@@ -200,6 +200,62 @@ function rij(b, ids, extra) {
   t('gemini zit weer in programma\'s', (K.mapVanKnop(r, 'ai:prog:gemini') || {}).id === 'p1')
 }
 
+// ── Een enkel gevonden programma hoort in een map zodra de rij mappen gebruikt ─
+{
+  // soloInMap geldt alleen voor de programma-soort. Een verse rij zonder mappen
+  // krijgt nog géén map voor één los programma (dat zou lawaai zijn).
+  const b = bron()
+  const soorten = [{ auto: 'prog', label: 'programma\'s', soloInMap: true,
+                     toets: (id) => id.startsWith('editor:custom:') }]
+  const r = rij(b, ['editor:custom:vscode', 'los'], { autoSoorten: soorten })
+  t('één gevonden programma op een verse rij (geen mappen) krijgt er geen',
+    K.maakAutoMappen(r) === 0)
+  t('en blijft los', K.mapVanKnop(r, 'editor:custom:vscode') === null)
+}
+
+{
+  // Gebruikt de rij al mappen (git-map bestaat), dan hoort ook een enkel nieuw
+  // gevonden programma in zijn eigen map, niet los ernaast. Dat is bug 5:
+  // "wanneer mappen aan staan, komt een nieuw gevonden programma in de map".
+  const b = bron({
+    cmdFolders: [{ id: 'g1', sectie: 'run', label: 'git', open: true, auto: 'git' }],
+    cmdFolderVan: { 'git-status': 'g1', 'git-push': 'g1' },
+    cmdVolgorde: { run: ['map:g1', 'git-status', 'git-push', 'editor:custom:vscode'] },
+  })
+  const soorten = [
+    { auto: 'git', label: 'git', toets: (id) => id.startsWith('git-') },
+    { auto: 'prog', label: 'programma\'s', fallbackAuto: 'ai', soloInMap: true,
+      toets: (id) => id.startsWith('editor:custom:') },
+  ]
+  const r = rij(b, ['git-status', 'git-push', 'editor:custom:vscode'], { autoSoorten: soorten })
+  t('een enkel programma wordt ingedeeld als de rij al mappen heeft',
+    K.maakAutoMappen(r) >= 1)
+  t('er is een programma-map voor gemaakt',
+    K.mappenVan(b, 'run').some(f => f.auto === 'prog'))
+  t('en het gevonden programma zit erin',
+    (K.mapVanKnop(r, 'editor:custom:vscode') || {}).auto === 'prog')
+  t('de git-knoppen blijven in hun eigen map',
+    (K.mapVanKnop(r, 'git-status') || {}).id === 'g1')
+  t('nog een keer doet niets meer', K.maakAutoMappen(r) === 0)
+}
+
+{
+  // Een soort zónder soloInMap (bijv. losse AI-dienst) blijft wél los, ook als
+  // er al mappen zijn -- anders krijgt elke eenling een eigen mapje.
+  const b = bron({
+    cmdFolders: [{ id: 'g1', sectie: 'run', label: 'git', open: true, auto: 'git' }],
+    cmdFolderVan: { 'git-status': 'g1', 'git-push': 'g1' },
+    cmdVolgorde: { run: ['map:g1', 'git-status', 'git-push', 'ai:claude'] },
+  })
+  const soorten = [
+    { auto: 'git', label: 'git', toets: (id) => id.startsWith('git-') },
+    { auto: 'ai', label: 'ai', toets: (id) => id.startsWith('ai:') },
+  ]
+  const r = rij(b, ['git-status', 'git-push', 'ai:claude'], { autoSoorten: soorten })
+  t('een losse AI-dienst krijgt geen eigen mapje, ook met mappen aan',
+    K.maakAutoMappen(r) === 0 && K.mapVanKnop(r, 'ai:claude') === null)
+}
+
 // ── Twee rijen in dezelfde bron ──────────────────────────────────────────────
 // Dit is waar het om begonnen was: cmd en powershell bewaren hun rij straks in
 // hetzelfde instellingenblok, elk onder een eigen sectienaam.
