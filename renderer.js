@@ -5116,13 +5116,6 @@ function visueelTermPaneVoorSlot(visueel) {
   return visueel === 0 ? 'output' : 'browser'
 }
 
-function zetSlotsOpSchermvolgorde() {
-  if (!werkSplit.slots || werkSplit.slots.length !== 2) return
-  if (werkSplit.first !== 'browser') return
-  if (!splitGemengd()) werkSplit.slots.reverse()
-  werkSplit.first = 'output'
-}
-
 function zorgVoorSlots() {
   if (werkSplit.slots && werkSplit.slots.length === 2) {
     werkSplit.slots = werkSplit.slots.map(normaliseerSlot)
@@ -5435,7 +5428,9 @@ function pasWerkSchermAan() {
   }
 
   const gemengd = splitGemengd()
-  if (gemengd) zetSlotsOpSchermvolgorde()
+  // Bij een gemengde split (project + woordenboek/cmd) speelt de output|verkenner-
+  // volgorde niet; houd 'first' dan op de standaard.
+  if (gemengd) werkSplit.first = 'output'
   werk.hidden = view === 'settings'
   werk.classList.toggle('gesplitst', gemengd)
   werk.classList.toggle('naast', gemengd && werkSplit.dir === 'right')
@@ -5522,7 +5517,6 @@ function sluitSplitVoorView() {
 function plaatsInSplit(v) {
   zorgVoorSlots()
   const visueelDoel = werkSplit.focus === 1 ? 1 : 0
-  zetSlotsOpSchermvolgorde()
   // Een tweede, ánder project bij een split van één project (uitvoer|verkenner):
   // het nieuwe project neemt het uitvoervlak over, zodat het oorspronkelijke
   // project zijn verkenner in het andere vlak houdt. Zonder dit belandde het

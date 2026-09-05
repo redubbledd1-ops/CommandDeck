@@ -552,7 +552,7 @@ check('zonder systeemprompt blijft het veld weg',
     bron.includes('function plaatsInSplit'))
   check('een nieuwe split-keuze landt in het gerichte vlak, rechts of onder',
     bron.includes('function visueelSlotVoorTermPane') &&
-    bron.includes('function zetSlotsOpSchermvolgorde') &&
+    bron.includes('function visueelVoorDataSlot') &&
     /werkSplit\.focus = 1/.test(bron.slice(bron.indexOf('function zorgVoorSlots'), bron.indexOf('function paneelEl'))) &&
     bron.includes('const visueelDoel'))
   check('opdrachten kunnen naast een project in split',
