@@ -525,7 +525,8 @@ function startVraagAutomaat() {
     $('#kop-cmd').dataset.kort === 'o' && $('#kop-dezepc').dataset.kort === 'd')
   check('en elke opdracht ook',
     $('#btn-nav-cmd').dataset.kort === 'c' && $('#btn-nav-ps').dataset.kort === 'p' &&
-    $('#btn-nav-bat').dataset.kort === 'b' && $('#btn-nav-dict').dataset.kort === 'w')
+    $('#btn-nav-bat').dataset.kort === 'b' && $('#btn-nav-text').dataset.kort === 't' &&
+    $('#btn-nav-dict').dataset.kort === 'w')
   check('een project draagt zijn naam in de titel, want er staat alleen een icoon',
     ($$('.proj-item')[0].title || '').includes('dd_crypto'))
   check('en een letter vertelt in zijn tooltip waar hij voor staat',
@@ -2738,21 +2739,21 @@ function startVraagAutomaat() {
 
   // hetzelfde voor de cmd-knoppen
   check('de knoppen staan standaard in de vaste volgorde',
-    navNamen().join() === 'btn-nav-cmd,btn-nav-ps,btn-nav-bat,btn-nav-dict')
+    navNamen().join() === 'btn-nav-cmd,btn-nav-ps,btn-nav-bat,btn-nav-text,btn-nav-dict')
 
   $('#sort-nav').click(); await tick()
-  check('ook hier komen pijltjes', $$('.nav-list .sort-pijl').length === 8)
+  check('ook hier komen pijltjes', $$('.nav-list .sort-pijl').length === 10)
   $$('.nav-list .nav-item')[2].querySelector('[data-op="links"]').click(); await tick()
   check('bat schuift omhoog',
-    navNamen().join() === 'btn-nav-cmd,btn-nav-bat,btn-nav-ps,btn-nav-dict')
+    navNamen().join() === 'btn-nav-cmd,btn-nav-bat,btn-nav-ps,btn-nav-text,btn-nav-dict')
   check('de volgorde wordt onthouden',
-    settings.navVolgorde.join() === 'cmd,bat,ps,dict')
+    settings.navVolgorde.join() === 'cmd,bat,ps,text,dict')
 
   $('#sort-nav').click(); await tick()
   const naHerstart = await herstart()
   check('en staat er na herstart nog steeds zo bij',
     [...naHerstart.document.querySelectorAll('.nav-list .nav-item')].map(e => e.id).join()
-      === 'btn-nav-cmd,btn-nav-bat,btn-nav-ps,btn-nav-dict')
+      === 'btn-nav-cmd,btn-nav-bat,btn-nav-ps,btn-nav-text,btn-nav-dict')
   global.window = window; global.document = window.document
 
   // terugzetten voor de rest van de tests
@@ -2760,7 +2761,7 @@ function startVraagAutomaat() {
   $$('.nav-list .nav-item')[1].querySelector('[data-op="rechts"]').click(); await tick()
   $('#sort-nav').click(); await tick()
   check('en terugschuiven kan ook',
-    navNamen().join() === 'btn-nav-cmd,btn-nav-ps,btn-nav-bat,btn-nav-dict')
+    navNamen().join() === 'btn-nav-cmd,btn-nav-ps,btn-nav-bat,btn-nav-text,btn-nav-dict')
 
   // het tweede project weer opruimen, zodat de rest van de tests zijn oude
   // uitgangspositie houdt
@@ -3340,8 +3341,10 @@ function startVraagAutomaat() {
     html.indexOf('btn-nav-cmd') < html.indexOf('btn-nav-ps'))
   check('bat staat onder powershell',
     html.indexOf('btn-nav-ps') < html.indexOf('btn-nav-bat'))
-  check('woordenboek staat onder bat',
-    html.indexOf('btn-nav-bat') < html.indexOf('btn-nav-dict'))
+  check('tekst staat onder bat',
+    html.indexOf('btn-nav-bat') < html.indexOf('btn-nav-text'))
+  check('woordenboek staat onder tekst',
+    html.indexOf('btn-nav-text') < html.indexOf('btn-nav-dict'))
 
   $$('.proj-item')[0].click(); await tick()
   const projMap = 'C:\\a'

@@ -160,6 +160,15 @@ contextBridge.exposeInMainWorld('api', {
   saveAs:        (o)     => ipcRenderer.invoke('dialog:saveAs', o),
   pickIcon:      (cwd)   => ipcRenderer.invoke('dialog:pickIcon', cwd),
 
+  noteDefaultDir: ()     => ipcRenderer.invoke('note:defaultDir'),
+  listNotes:     (cwd)   => ipcRenderer.invoke('note:list', cwd),
+  listNotePaths: (paden) => ipcRenderer.invoke('note:listPaths', paden),
+  leesNote:      (p)     => ipcRenderer.invoke('note:lees', p),
+  schrijfNote:   (o)     => ipcRenderer.invoke('note:schrijf', o || {}),
+  deleteNote:    (p)     => ipcRenderer.invoke('note:delete', p),
+  noteExists:    (p)     => ipcRenderer.invoke('note:exists', p),
+  pickNote:      (cwd)   => ipcRenderer.invoke('dialog:pickNote', cwd),
+
   // Sinds Electron 32 bestaat File.path niet meer; dit is de vervanger waarmee
   // een gesleept bestand alsnog zijn pad op schijf prijsgeeft.
   getFilePath:   (file)  => { try { return webUtils.getPathForFile(file) } catch { return '' } },

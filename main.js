@@ -13,6 +13,7 @@ const { psCommandLaunch, psWindowLaunch } = require('./ps-launch')
 const { EDITORS } = require('./editor-catalog')
 const GitTools = require('./git-tools')
 const WebTools = require('./web-tools')
+const NoteTools = require('./note-tools')
 const Accounts = require('./accounts')
 const { maakAi } = require('./ai-runtime')
 const { SUPPORTED_LANGUAGES } = require('./locales/languages')
@@ -3757,6 +3758,125 @@ ipcMain.handle('dialog:pickBat', async (_, cwd) => {
     filters: [{ name: 'Batch-bestand', extensions: ['bat', 'cmd'] }],
   })
   return r.canceled ? null : r.filePaths[0]
+})
+
+ipcMain.handle('dialog:pickNote', async (_, cwd) => {
+  const r = await dialog.showOpenDialog(win, {
+    title: 'Kies een tekstbestand',
+    properties: ['openFile'],
+    defaultPath: cwd && fs.existsSync(cwd) ? cwd : undefined,
+    filters: [
+      { name: 'Tekst', extensions: NoteTools.NOTE_EXT },
+      { name: 'Alle bestanden', extensions: ['*'] },
+    ],
+  })
+  return r.canceled ? null : r.filePaths[0]
+})
+
+// ── Tekstnotities ─────────────────────────────────────────────────────────────
+function notesDir() {
+  const dir = path.join(app.getPath('userData'), 'notes')
+  try { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }) } catch {}
+  return dir
+}
+
+ipcMain.handle('note:defaultDir', () => notesDir())
+
+ipcMain.handle('note:list', (_, cwd) => {
+  try {
+    if (!cwd || !fs.existsSync(cwd)) return []
+    return fs.readdirSync(cwd)
+      .filter(name => NoteTools.isNoteBestand(name))
+      .map(name => noteInfoVoorPad(path.join(cwd, name)))
+      .filter(Boolean)
+      .sort((a, b) => b.mtime - a.mtime)
+  } catch { return [] }
+})
+
+ipcMain.handle('note:listPaths', (_, paden) => {
+  try {
+    if (!Array.isArray(paden)) return []
+    const zie = new Set()
+    const uit = []
+    for (const p of paden) {
+      const key = String(p || '').toLowerCase()
+      if (!key || zie.has(key)) continue
+      zie.add(key)
+      const info = noteInfoVoorPad(p)
+      if (info) uit.push(info)
+    }
+    return uit
+  } catch { return [] }
+})
+
+function noteInfoVoorPad(filePath) {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) return null
+    const st = fs.statSync(filePath)
+    if (!st.isFile()) return null
+    let meta = null
+    if (st.size <= 65536) {
+      const r = NoteTools.parseNote(fs.readFileSync(filePath, 'utf8'))
+      if (r.heeftFooter) meta = r.meta
+    } else {
+      const max = 4096
+      const fd = fs.openSync(filePath, 'r')
+      try {
+        const buf = Buffer.alloc(max)
+        fs.readSync(fd, buf, 0, max, Math.max(0, st.size - max))
+        const staart = buf.toString('utf8')
+        const idx = staart.lastIndexOf('--- CommandDeck:note ---')
+        if (idx >= 0) {
+          const r = NoteTools.parseNote('.\n\n' + staart.slice(idx))
+          if (r.heeftFooter) meta = r.meta
+        }
+      } finally { fs.closeSync(fd) }
+    }
+    return { name: path.basename(filePath), path: filePath, mtime: st.mtimeMs, meta }
+  } catch { return null }
+}
+
+ipcMain.handle('note:lees', (_, filePath) => {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) return { ok: false, reason: 'notfound' }
+    const content = fs.readFileSync(filePath, 'utf8')
+    const geparsed = NoteTools.parseNote(content)
+    return {
+      ok: true,
+      content,
+      body: geparsed.body,
+      meta: geparsed.meta,
+      heeftFooter: geparsed.heeftFooter,
+      mtime: fs.statSync(filePath).mtimeMs,
+    }
+  } catch (e) { return { ok: false, reason: e.message } }
+})
+
+ipcMain.handle('note:schrijf', (_, { filePath, body, meta } = {}) => {
+  try {
+    if (!filePath) return { ok: false, reason: 'nopath' }
+    const dir = path.dirname(filePath)
+    if (!fs.existsSync(dir)) return { ok: false, reason: 'nodir', dir }
+    const gestempeld = NoteTools.stampUpdated(meta || NoteTools.leegMeta())
+    const inhoud = NoteTools.schrijfNote(body, gestempeld)
+    fs.writeFileSync(filePath, inhoud.replace(/\r?\n/g, '\r\n'), 'utf8')
+    return { ok: true, path: filePath, meta: gestempeld, mtime: fs.statSync(filePath).mtimeMs }
+  } catch (e) { return { ok: false, reason: e.message } }
+})
+
+ipcMain.handle('note:delete', (_, filePath) => {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) return { ok: false, reason: 'notfound' }
+    if (!NoteTools.isNoteBestand(path.basename(filePath))) {
+      return { ok: false, reason: 'geen notitiebestand' }
+    }
+    fs.unlinkSync(filePath)
+    return { ok: true }
+  } catch (e) { return { ok: false, reason: e.message } }
+})
+
+ipcMain.handle('note:exists', (_, filePath) => {
+  try { return !!filePath && fs.existsSync(filePath) } catch { return false }
 })
 
 // PATH van Windows (Machine + User), zodat tools die ná het starten van

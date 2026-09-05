@@ -3,7 +3,7 @@ let projects    = []
 let settings    = {}
 let history     = { entries: [], recent: [] }   // commando-woordenboek + recente uitvoeringen
 let activeId    = null
-let view        = 'project'   // 'project' | 'cmd' | 'ps' | 'dict' | 'settings'
+let view        = 'project'   // 'project' | 'cmd' | 'ps' | 'dict' | 'bat' | 'text' | 'settings'
 let lastShellView = 'cmd'     // laatste cmd/powershell-paneel, voor 'beide'-commando's
 let activeTermId = null       // van wie de terminal-uitvoer nu getoond wordt
 let getekendProjectId = ''    // welk project nu in #main staat; voorkomt opnieuw opbouwen
@@ -2000,6 +2000,39 @@ function bouwContextMenu(item) {
     if (!meerdere && !item.dir && !inArch) {
       items.push({ label: I18N.t('ctx.openWith'), icoon: 'ti-apps', doe: () => window.api.openWith(item.path) })
     }
+    if (!meerdere && !item.dir && !inArch && NoteTools.isNoteBestand(item.name)) {
+      items.push({
+        label: I18N.t('text.openInText'), icoon: 'ti-notes',
+        doe: () => void voegToeAanTextOmgeving(item.path, { openen: true }),
+      })
+      items.push({
+        label: I18N.t('text.infoButton'), icoon: 'ti-info-circle',
+        doe: () => void openNoteInfo(item.path),
+      })
+      items.push({
+        label: I18N.t('text.showMetaInEditor'),
+        icoon: textMetaZichtbaar() ? 'ti-eye' : 'ti-eye-off',
+        doe: () => void zetTextMetaZichtbaar(!textMetaZichtbaar()),
+      })
+      const bekende = (textState.files || []).find(x => x.path && x.path.toLowerCase() === String(item.path).toLowerCase())
+      if (noteProjectVoor(bekende?.meta)) {
+        items.push({
+          label: I18N.t('text.showInProject'),
+          icoon: 'ti-folder-symlink',
+          doe: () => void toonNoteInProject(item.path),
+        })
+      }
+      items.push({
+        label: isTextFavorite(item.path) ? I18N.t('text.unfavorite') : I18N.t('text.favorite'),
+        icoon: isTextFavorite(item.path) ? 'ti-star-off' : 'ti-star',
+        doe: async () => {
+          const aan = !isTextFavorite(item.path)
+          await zetTextFavorite(item.path, aan)
+          if (aan) await voegToeAanTextOmgeving(item.path, { openen: false })
+          showToast(aan ? I18N.t('text.favoritedToast') : I18N.t('text.unfavoritedToast'))
+        },
+      })
+    }
     items.push({ scheiding: true })
     items.push({
       label: meerdere ? I18N.t('ctx.copyPathsCount', { count: gekozen.length }) : I18N.t('ctx.copyPath'), icoon: 'ti-clipboard',
@@ -2624,7 +2657,7 @@ function setupNavigatie() {
 }
 
 // ── View router ───────────────────────────────────────────────────────────────
-const PANELS = { project: 'main', cmd: 'cmd-panel', ps: 'ps-panel', dict: 'dict-panel', bat: 'bat-panel', settings: 'settings-panel' }
+const PANELS = { project: 'main', cmd: 'cmd-panel', ps: 'ps-panel', dict: 'dict-panel', bat: 'bat-panel', text: 'text-panel', settings: 'settings-panel' }
 
 // Panelen delen element-ID's (terminal, verkenner). Verborgen panelen houden
 // hun DOM, maar hun id's gaan naar data-bewaard-id zodat getElementById alleen
@@ -2695,7 +2728,7 @@ function rememberView() {
 // meer, dan begin je gewoon op het lege startscherm.
 function restoreLastView() {
   const last = settings.lastView || {}
-  if (last.view === 'cmd' || last.view === 'ps' || last.view === 'dict' || last.view === 'bat') { setView(last.view); return }
+  if (last.view === 'cmd' || last.view === 'ps' || last.view === 'dict' || last.view === 'bat' || last.view === 'text') { setView(last.view); return }
   if (last.view === 'project' && last.projectId && projects.some(p => p.id === last.projectId)) {
     activeId = last.projectId
     setView('project')
@@ -2844,6 +2877,7 @@ const NAV_KNOPPEN = [
   { sleutel: 'cmd',  id: 'btn-nav-cmd',  open: () => setView('cmd') },
   { sleutel: 'ps',   id: 'btn-nav-ps',   open: () => setView('ps') },
   { sleutel: 'bat',  id: 'btn-nav-bat',  open: () => openBatView() },
+  { sleutel: 'text', id: 'btn-nav-text', open: () => openTextView() },
   { sleutel: 'dict', id: 'btn-nav-dict', open: () => setView('dict') },
 ]
 
@@ -2941,6 +2975,10 @@ function navVolgorde() {
       const i = uit.indexOf('cmd')
       if (i >= 0) uit.splice(i + 1, 0, k)
       else uit.unshift(k)
+    } else if (k === 'text') {
+      const i = uit.indexOf('bat')
+      if (i >= 0) uit.splice(i + 1, 0, k)
+      else uit.push(k)
     } else {
       uit.push(k)
     }
@@ -4398,6 +4436,7 @@ function lezerPaneelHtml() {
             </div>
             <div class="lezer-term-voet">
               <span class="lezer-info" id="lezer-info"></span>
+              <button class="btn-ghost" id="lezer-info-knop" hidden data-i18n="text.infoButton">info</button>
               <button class="btn-ghost" id="lezer-zoek-knop" data-i18n="lezer.zoeken">zoeken</button>
               <button class="btn-ghost" id="lezer-kopieer" data-i18n="lezer.kopieer">kopiëren</button>
               <button class="btn-ghost" id="lezer-map" data-i18n="lezer.inMap">map openen</button>
@@ -4876,7 +4915,7 @@ function normaliseerSlot(s) {
   if (!s || typeof s !== 'object') {
     return { view: 'project', projectId: activeId, tab: 'output' }
   }
-  const v = ['project', 'cmd', 'ps', 'dict', 'bat'].includes(s.view) ? s.view : 'project'
+  const v = ['project', 'cmd', 'ps', 'dict', 'bat', 'text'].includes(s.view) ? s.view : 'project'
   if (v === 'project') {
     return {
       view: 'project',
@@ -4953,7 +4992,7 @@ function kanSamen(a, b) {
 }
 
 function tweedeSlotVoor(v) {
-  if ((v === 'dict' || v === 'bat') && activeId && projects.some(p => p.id === activeId)) {
+  if ((v === 'dict' || v === 'bat' || v === 'text') && activeId && projects.some(p => p.id === activeId)) {
     return { view: 'project', projectId: activeId, tab: 'output' }
   }
   if (v === 'cmd' || v === 'ps') return { view: 'dict' }
@@ -5121,6 +5160,7 @@ function tekenView(v, { alsLeeg = false } = {}) {
   if (v === 'ps')   renderPsPanel()
   if (v === 'dict') renderDictPanel()
   if (v === 'bat')  renderBatPanel()
+  if (v === 'text') renderTextPanel()
 }
 
 function toonPanelenVolledig(v) {
@@ -5198,6 +5238,7 @@ function slotNaam(s) {
   if (s.view === 'ps')   return I18N.t('sidebar.navPowershell')
   if (s.view === 'dict') return I18N.t('sidebar.navDict')
   if (s.view === 'bat')  return I18N.t('sidebar.navBat')
+  if (s.view === 'text') return I18N.t('sidebar.navText')
   return ''
 }
 
@@ -5215,7 +5256,7 @@ function werkPlusNodig() {
   if (view === 'settings') return false
   if (splitGemengd()) return true
   if (levend('.terminal-wrap.splitbaar')) return false
-  return view === 'cmd' || view === 'ps' || view === 'dict' || view === 'bat'
+  return view === 'cmd' || view === 'ps' || view === 'dict' || view === 'bat' || view === 'text'
 }
 
 // Chromium stuurt na een hertekening geen mousemove zolang de muis stilstaat.
@@ -5477,7 +5518,7 @@ function herstelWerkSplitNaStart() {
   if (!slots.some(s => s.view === view)) return
   const ok = slots.every(s => {
     if (s.view === 'project') return !!(s.projectId && projects.some(p => p.id === s.projectId))
-    return ['cmd', 'ps', 'dict', 'bat'].includes(s.view)
+    return ['cmd', 'ps', 'dict', 'bat', 'text'].includes(s.view)
   })
   if (!ok) return
   termSplit = gelezen.dir
@@ -5770,7 +5811,7 @@ function herstelTermSplit(ctx) {
     const gemengd = slots[0].view !== 'project' || slots[1].view !== 'project'
     const ok = slots.every(s => {
       if (s.view === 'project') return !!(s.projectId && (s.projectId === ctx?.id || projects.some(p => p.id === s.projectId)))
-      return ['cmd', 'ps', 'dict', 'bat'].includes(s.view)
+      return ['cmd', 'ps', 'dict', 'bat', 'text'].includes(s.view)
     })
     // Gemengd (woordenboek/cmd ernaast) niet hier terugzetten: dat plakte het
     // woordenboek op elk project dat je daarna opende.
@@ -6478,14 +6519,31 @@ async function openBrowserItem(item) {
     return
   }
 
-  // Alleen websitebestanden laten we hier zien. Elk tekstbestand afvangen zou
-  // veranderen wat dubbelklikken al jaren doet — een .yaml of .json hoort nog
-  // steeds naar het programma te gaan dat jij eraan gekoppeld hebt. Slepen kan
-  // wél alles: daar is geen gewoonte om te breken.
+  // Websitebestanden en notities (.txt/.md) openen we zelf. Andere tekst
+  // (yaml/json) blijft naar het gekoppelde programma gaan.
   if (WebTools.isWebBestand(item.name)) { await toonBestand(item.path); return }
+  if (NoteTools.isNoteBestand(item.name)) {
+    await openNoteVanVerkenner(item.path)
+    return
+  }
 
   window.api.openFolder(item.path)
   showToast(I18N.t('browser.openedToast', { name: item.name }))
+}
+
+async function openNoteVanVerkenner(pad) {
+  const r = await window.api.leesNote(pad).catch(() => null)
+  if (r && r.ok && r.heeftFooter) {
+    await voegToeAanTextOmgeving(pad, { openen: true })
+    return
+  }
+  const keuze = await vraagNoteOpenKeuze(pad)
+  if (!keuze) return
+  if (keuze === 'toevoegen') {
+    await voegToeAanTextOmgeving(pad, { openen: true })
+    return
+  }
+  await toonBestand(pad)
 }
 
 async function wireBrowser(ctx, opts = {}) {
@@ -8888,6 +8946,9 @@ async function verwerkGesleept(paden) {
     if (await window.api.isMap(pad)) { await vraagOverMap(pad); return }
   }
 
+  const note = paden.find(p => NoteTools.isNoteBestand(p))
+  if (note) { await openNoteVanVerkenner(note); return }
+
   const tekst = paden.find(p => WebTools.isTekstBestand(p))
   if (tekst) { await toonBestand(tekst); return }
 
@@ -8904,6 +8965,900 @@ async function openBatUitSleep(bat) {
     await refreshBatFiles()
     showToast(I18N.t('browser.openedToast', { name: bat.split(/[\\/]/).pop() }))
   }
+}
+
+// ── Tekstnotities ─────────────────────────────────────────────────────────────
+// Eigen omgeving naast bat: snelle notities als echte .txt/.md-bestanden, met
+// een herkenbare footer zodat ze tussen pc's meeverhuizen.
+const textState = {
+  path: null,
+  mtime: null,
+  dirty: false,
+  body: '',
+  meta: null,
+  name: '',
+  files: [],
+  autoOpened: false,
+  doelMap: null,
+}
+
+function textLibrary() {
+  return Array.isArray(settings.textLibrary) ? settings.textLibrary : []
+}
+
+async function zetTextInBibliotheek(pad, aan = true) {
+  if (!pad) return
+  const kaal = String(pad)
+  const low = kaal.toLowerCase()
+  let lijst = textLibrary().filter(p => String(p).toLowerCase() !== low)
+  if (aan) lijst = [kaal, ...lijst].slice(0, 500)
+  settings.textLibrary = lijst
+  await window.api.saveSettings(settings)
+}
+
+async function zorgVoorTextBibliotheek() {
+  if (settings.textLibraryMigrated) return
+  const paden = []
+  const zie = new Set()
+  const push = (p) => {
+    const key = String(p || '').toLowerCase()
+    if (!key || zie.has(key)) return
+    zie.add(key)
+    paden.push(p)
+  }
+  for (const p of textLibrary()) push(p)
+  for (const p of textFavorites()) push(p)
+  try {
+    const cwd = settings.textCwd || await window.api.noteDefaultDir()
+    if (cwd) {
+      const files = await window.api.listNotes(cwd).catch(() => [])
+      for (const f of files || []) if (f && f.path) push(f.path)
+    }
+  } catch {}
+  settings.textLibrary = paden
+  settings.textLibraryMigrated = true
+  await window.api.saveSettings(settings)
+}
+
+function textFavorites() {
+  return Array.isArray(settings.textFavorites) ? settings.textFavorites : []
+}
+
+function textSortMode() {
+  const m = settings.textSort
+  return m === 'date' || m === 'project' ? m : 'name'
+}
+
+// Footer blijft op schijf; in de editor alleen zichtbaar als dit aan staat (standaard uit).
+function textMetaZichtbaar() {
+  return settings.textMetaZichtbaar === true
+}
+
+async function zetTextMetaZichtbaar(aan) {
+  if (view === 'text') bewaarTextUitDom()
+  settings.textMetaZichtbaar = !!aan
+  await window.api.saveSettings(settings)
+  if (view === 'text') syncTextToDom()
+  const vak = document.getElementById('set-text-meta')
+  if (vak) vak.checked = !!aan
+  const infoVak = document.getElementById('note-info-toon')
+  if (infoVak) infoVak.checked = !!aan
+  pasLezerNoteMetaZichtAan()
+  pasLezerNoteInfoKnop()
+}
+
+// Open notities in de Bestand-tab: footer tonen of verbergen zonder schijf aan te raken.
+function pasLezerNoteMetaZichtAan() {
+  const aan = textMetaZichtbaar()
+  let veranderd = false
+  for (const t of (lezerStaat.tabs || [])) {
+    if (!t.pad || !NoteTools.isNoteBestand(t.pad)) continue
+    const bron = t.dirty ? (t.concept || t.inhoud || '') : (t.inhoud || '')
+    const p = NoteTools.parseNote(bron)
+    const body = p.heeftFooter ? p.body : bron
+    const meta = p.meta || t.noteMeta
+    if (!meta && !p.heeftFooter) continue
+    if (meta) t.noteMeta = meta
+    if (!t.noteMeta) continue
+    const getoond = aan
+      ? NoteTools.schrijfNote(body, t.noteMeta).replace(/\s+$/, '')
+      : body
+    if ((t.dirty ? t.concept : t.inhoud) === getoond) continue
+    if (t.dirty) t.concept = getoond
+    else { t.inhoud = getoond; t.concept = getoond }
+    veranderd = true
+  }
+  if (veranderd && lezerInhoudEl()) syncLezerNaarDom()
+}
+
+function pasLezerNoteInfoKnop() {
+  const knop = document.getElementById('lezer-info-knop')
+  if (!knop) return
+  const t = lezerHuidig()
+  const note = !!(t && t.pad && NoteTools.isNoteBestand(t.pad))
+  knop.hidden = !note
+}
+
+async function zetTextFavoriteLijst(pad, aan) {
+  if (!pad) return
+  const kaal = String(pad)
+  const low = kaal.toLowerCase()
+  let lijst = textFavorites().filter(p => String(p).toLowerCase() !== low)
+  if (aan) lijst = [kaal, ...lijst].slice(0, 200)
+  settings.textFavorites = lijst
+  await window.api.saveSettings(settings)
+}
+
+async function zetTextFavorite(pad, aan) {
+  if (!pad) return false
+  const kaal = String(pad)
+  const low = kaal.toLowerCase()
+  await zetTextFavoriteLijst(kaal, aan)
+
+  // Geheugen bijwerken — anders blijft isTextFavorite() de oude footer zien.
+  if (textState.path && textState.path.toLowerCase() === low && textState.meta) {
+    textState.meta.favorite = !!aan
+  }
+  for (const f of (textState.files || [])) {
+    if (!f.path || f.path.toLowerCase() !== low) continue
+    f.favorite = !!aan
+    if (!f.meta) f.meta = NoteTools.leegMeta({ subject: NoteTools.subjectVan(null, f.path) })
+    f.meta.favorite = !!aan
+  }
+  for (const t of (lezerStaat.tabs || [])) {
+    if (!t.pad || t.pad.toLowerCase() !== low || !t.noteMeta) continue
+    t.noteMeta.favorite = !!aan
+  }
+
+  // Actief in Tekst-omgeving: body uit de editor.
+  if (textState.path && textState.path.toLowerCase() === low) {
+    if (textState.meta) textState.meta.favorite = !!aan
+    return saveTextFile({ stil: true, skipFavSync: true })
+  }
+
+  // Open in Bestand-tab: body uit de lezer, niet opnieuw van schijf.
+  const lezerTab = (lezerStaat.tabs || []).find(t => t.pad && t.pad.toLowerCase() === low)
+  if (lezerTab) {
+    bewaarLezerUitDom()
+    const inhoud = (lezerTab === lezerHuidig() && lezerInhoudEl())
+      ? lezerInhoudEl().value
+      : (lezerTab.dirty ? lezerTab.concept : lezerTab.inhoud)
+    const p = NoteTools.parseNote(inhoud || '')
+    const body = p.heeftFooter ? p.body : String(inhoud || '')
+    const meta = NoteTools.stampUpdated({
+      ...(lezerTab.noteMeta || p.meta || NoteTools.leegMeta({ subject: NoteTools.subjectVan(null, kaal) })),
+      favorite: !!aan,
+    })
+    lezerTab.noteMeta = meta
+    const uit = await window.api.schrijfNote({ filePath: kaal, body, meta }).catch(() => null)
+    if (!uit || !uit.ok) return false
+    const getoond = textMetaZichtbaar()
+      ? NoteTools.schrijfNote(body, meta).replace(/\s+$/, '')
+      : body
+    lezerTab.inhoud = getoond
+    lezerTab.concept = getoond
+    lezerTab.dirty = false
+    lezerTab.mtime = uit.mtime
+    if (lezerTab === lezerHuidig()) syncLezerNaarDom()
+    return true
+  }
+
+  // Ander bestand: alleen de footer-vlag bijwerken.
+  const r = await window.api.leesNote(kaal).catch(() => null)
+  if (!r || !r.ok) return true
+  const meta = NoteTools.stampUpdated({
+    ...(r.meta || NoteTools.leegMeta({ subject: NoteTools.subjectVan(null, kaal) })),
+    favorite: !!aan,
+  })
+  const body = r.body != null ? r.body : NoteTools.parseNote(r.content || '').body
+  const uit = await window.api.schrijfNote({ filePath: kaal, body, meta }).catch(() => null)
+  return !!(uit && uit.ok)
+}
+
+function isTextFavorite(pad) {
+  if (!pad) return false
+  const low = String(pad).toLowerCase()
+  if (textFavorites().some(p => String(p).toLowerCase() === low)) return true
+  if (textState.path && textState.path.toLowerCase() === low && textState.meta) {
+    return !!textState.meta.favorite
+  }
+  const f = (textState.files || []).find(x => x.path && x.path.toLowerCase() === low)
+  return !!(f && (f.favorite || (f.meta && f.meta.favorite)))
+}
+
+function newTextDraft(opts = {}) {
+  textState.path = null
+  textState.mtime = null
+  textState.dirty = false
+  textState.body = ''
+  textState.meta = NoteTools.leegMeta({
+    projects: opts.projectId ? [opts.projectId] : [],
+  })
+  textState.name = I18N.t('text.newFileName')
+  textState.autoOpened = false
+  textState.doelMap = opts.doelMap || null
+}
+
+async function openTextView(opts = {}) {
+  await zorgVoorTextBibliotheek()
+  if (!textState.path && !textState.body && !textState.meta) newTextDraft()
+  setView('text')
+  if (opts.pad) await loadTextFile(opts.pad)
+}
+
+async function renderTextPanel() {
+  const panel = document.getElementById('text-panel')
+  if (!panel) return
+  await zorgVoorTextBibliotheek()
+
+  panel.innerHTML = `
+    <div class="settings-header">
+      <i class="ti ti-notes" style="font-size:18px;color:var(--accent)"></i>
+      <span class="settings-header-title">${esc(I18N.t('text.title'))}</span>
+    </div>
+
+    <div class="bat-layout text-layout">
+      <aside class="bat-files">
+        <div class="bat-files-head text-files-head">
+          <span id="text-files-count"></span>
+          <button type="button" class="text-files-add" id="text-add" title="${esc(I18N.t('text.addTitle'))}"><i class="ti ti-plus"></i></button>
+        </div>
+        <div class="bat-file-list" id="text-file-list"></div>
+      </aside>
+
+      <section class="bat-edit">
+        <div class="bat-edit-head" data-krap>
+          <span class="bat-edit-title" id="text-edit-title"></span>
+          <button class="term-btn" id="text-info" title="${esc(I18N.t('text.infoTitle'))}"><i class="ti ti-info-circle" style="font-size:12px"></i>${knopTekst(I18N.t('text.infoButton'))}</button>
+          <button class="term-btn" id="text-fav" title="${esc(I18N.t('text.favoriteTitle'))}"><i class="ti ti-star" style="font-size:12px"></i>${knopTekst(I18N.t('text.favoriteButton'))}</button>
+          <button class="term-btn" id="text-reload" title="${esc(I18N.t('text.reloadTitle'))}"><i class="ti ti-refresh" style="font-size:12px"></i>${knopTekst(I18N.t('text.reloadButton'))}</button>
+        </div>
+
+        <textarea class="field mono bat-editor" id="text-content" spellcheck="true" placeholder="${esc(I18N.t('text.editorPlaceholder'))}"></textarea>
+
+        <div class="bat-edit-foot" data-krap>
+          <input class="field mono bat-name" id="text-name" placeholder="${esc(I18N.t('text.namePlaceholder'))}" />
+          <button class="btn-primary" id="text-save" title="${esc(I18N.t('common.save'))}"><i class="ti ti-device-floppy" style="font-size:13px"></i>${knopTekst(I18N.t('common.save'))}</button>
+        </div>
+      </section>
+    </div>
+  `
+
+  syncTextToDom()
+  wireTextPanel()
+  keurKrappeBalken()
+  await refreshTextFiles({ autoOpen: true })
+  const ta = document.getElementById('text-content')
+  requestAnimationFrame(() => { ta?.focus() })
+}
+
+function textBodyVoorEditor(body) {
+  const p = NoteTools.parseNote(String(body == null ? '' : body))
+  return p.heeftFooter ? p.body : String(body == null ? '' : body)
+}
+
+function textVoorEditorVak() {
+  const body = textBodyVoorEditor(textState.body)
+  if (textMetaZichtbaar() && textState.meta) {
+    return NoteTools.schrijfNote(body, textState.meta).replace(/\s+$/, '')
+  }
+  return body
+}
+
+function syncTextToDom() {
+  const body = document.getElementById('text-content')
+  const naam = document.getElementById('text-name')
+  if (body) body.value = textVoorEditorVak()
+  if (naam) naam.value = textState.name || ''
+  updateTextEditTitle()
+  updateTextFavKnop()
+}
+
+function updateTextEditTitle() {
+  const el = document.getElementById('text-edit-title')
+  if (!el) return
+  const titel = textState.meta?.subject
+    || (textState.path ? textState.path.split(/[\\/]/).pop() : I18N.t('text.newFileButton'))
+  el.innerHTML = textState.path
+    ? `<i class="ti ti-pencil"></i> ${esc(titel)}${textState.dirty ? ' *' : ''}`
+    : `<i class="ti ti-file-plus"></i> ${esc(I18N.t('text.newFileButton'))}${textState.dirty ? ' *' : ''}`
+}
+
+function updateTextFavKnop() {
+  const knop = document.getElementById('text-fav')
+  if (!knop) return
+  const aan = textState.path ? isTextFavorite(textState.path) : !!(textState.meta && textState.meta.favorite)
+  knop.classList.toggle('aan', aan)
+  const ico = knop.querySelector('i')
+  if (ico) ico.className = aan ? 'ti ti-star-filled' : 'ti ti-star'
+}
+
+function bewaarTextUitDom() {
+  const body = document.getElementById('text-content')
+  const naam = document.getElementById('text-name')
+  if (body) {
+    const p = NoteTools.parseNote(body.value)
+    if (p.heeftFooter) {
+      textState.body = p.body
+      if (p.meta) textState.meta = p.meta
+    } else {
+      textState.body = body.value
+    }
+  }
+  if (naam) textState.name = naam.value.trim()
+  if (!textState.meta) textState.meta = NoteTools.leegMeta()
+}
+
+async function refreshTextFiles({ autoOpen = false } = {}) {
+  await zorgVoorTextBibliotheek()
+  const paden = []
+  const zie = new Set()
+  const push = (pad) => {
+    const key = String(pad || '').toLowerCase()
+    if (!key || zie.has(key)) return
+    zie.add(key)
+    paden.push(pad)
+  }
+  for (const pad of textLibrary()) push(pad)
+  for (const pad of textFavorites()) push(pad)
+
+  let files = []
+  try { files = await window.api.listNotePaths(paden) } catch { files = [] }
+  textState.files = files || []
+  renderTextFileList()
+
+  if (!autoOpen || textState.autoOpened) return
+  textState.autoOpened = true
+  const gesorteerd = NoteTools.sorteerNotes(textState.files, textSortMode(), textFavorites())
+  if (gesorteerd.alles.length === 1 && !textState.path && !textState.dirty) {
+    await loadTextFile(gesorteerd.alles[0].path)
+  }
+}
+
+function noteProjectVoor(metaOfPad) {
+  let meta = metaOfPad
+  if (typeof metaOfPad === 'string') {
+    const f = (textState.files || []).find(x => x.path && x.path.toLowerCase() === metaOfPad.toLowerCase())
+    meta = f?.meta || (textState.path && textState.path.toLowerCase() === metaOfPad.toLowerCase() ? textState.meta : null)
+  }
+  const ids = (meta && meta.projects) || []
+  if (!ids.length) return null
+  return projects.find(p => ids.includes(p.id) || ids.includes(p.name)) || null
+}
+
+async function toonNoteInProject(pad) {
+  if (!pad) return
+  let meta = null
+  const f = (textState.files || []).find(x => x.path === pad)
+  if (f) meta = f.meta
+  if (!meta && textState.path === pad) meta = textState.meta
+  if (!meta) {
+    const r = await window.api.leesNote(pad).catch(() => null)
+    meta = r && r.ok ? r.meta : null
+  }
+  const proj = noteProjectVoor(meta)
+  if (!proj) {
+    showToast(I18N.t('text.noLinkedProjectToast'))
+    return
+  }
+  await selectProject(proj.id)
+  setTermTab('browser')
+  const map = ouderVan(pad)
+  if (map) await navigeerNaar(map)
+  const n = browserZichtbaar.findIndex(i => i.path === pad)
+  if (n >= 0) selecteerAlleen(n)
+}
+
+function renderTextFileList() {
+  const list = document.getElementById('text-file-list')
+  const head = document.getElementById('text-files-count')
+  if (!list) return
+
+  const gesorteerd = NoteTools.sorteerNotes(textState.files, textSortMode(), textFavorites())
+  const n = gesorteerd.alles.length
+  if (head) {
+    head.textContent = n
+      ? I18N.t(n === 1 ? 'browser.status.fileOne' : 'browser.status.fileMany', { n })
+      : I18N.t('text.noFilesInList')
+  }
+
+  if (!n) {
+    list.innerHTML = `<div class="bat-files-empty">${I18N.t('text.emptyHint', { btn: '<strong>+</strong>' })}</div>`
+    return
+  }
+
+  const rij = (f) => {
+    const onderwerp = NoteTools.subjectVan(f.meta, f.path)
+    const proj = noteProjectVoor(f.meta)
+    const metaRegel = [
+      proj ? proj.name : null,
+      f.meta?.updated || f.meta?.created
+        ? String(f.meta.updated || f.meta.created).slice(0, 10)
+        : relTime(f.mtime),
+    ].filter(Boolean).join(' · ')
+    return `
+    <div class="bat-file ${f.path === textState.path ? 'active' : ''} ${f.favorite ? 'text-fav' : ''}" data-file="${esc(f.path)}" title="${esc(f.path)}">
+      <i class="ti ${f.favorite ? 'ti-star-filled' : 'ti-file-text'}"></i>
+      <div class="bat-file-main">
+        <div class="bat-file-name">${esc(onderwerp)}</div>
+        <div class="bat-file-meta">${esc(metaRegel)}</div>
+      </div>
+      <button class="bat-file-btn" data-fav-file="${esc(f.path)}" title="${esc(I18N.t('text.favoriteTitle'))}"><i class="ti ${f.favorite ? 'ti-star-filled' : 'ti-star'}"></i></button>
+      <button class="bat-file-btn danger" data-del-file="${esc(f.path)}" title="${esc(I18N.t('ctx.delete'))}"><i class="ti ti-trash"></i></button>
+    </div>`
+  }
+
+  let html = ''
+  if (gesorteerd.favorieten.length) {
+    html += `<div class="text-files-sectie">${esc(I18N.t('text.favoritesSection'))}</div>`
+    html += gesorteerd.favorieten.map(rij).join('')
+    if (gesorteerd.rest.length) {
+      html += `<div class="text-files-sectie">${esc(I18N.t('text.allSection'))}</div>`
+      html += gesorteerd.rest.map(rij).join('')
+    }
+  } else {
+    html = gesorteerd.alles.map(rij).join('')
+  }
+  list.innerHTML = html
+
+  list.querySelectorAll('[data-file]').forEach(row => {
+    row.onclick = (e) => {
+      if (e.target.closest('[data-fav-file],[data-del-file]')) return
+      void loadTextFile(row.dataset.file)
+    }
+    row.oncontextmenu = (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      toonTextBestandMenu(row.dataset.file, e.clientX, e.clientY)
+    }
+  })
+  list.querySelectorAll('[data-fav-file]').forEach(b => b.onclick = async (e) => {
+    e.stopPropagation()
+    const pad = b.dataset.favFile
+    const aan = !isTextFavorite(pad)
+    await zetTextFavorite(pad, aan)
+    updateTextFavKnop()
+    await refreshTextFiles()
+    showToast(aan ? I18N.t('text.favoritedToast') : I18N.t('text.unfavoritedToast'))
+  })
+  list.querySelectorAll('[data-del-file]').forEach(b => b.onclick = async (e) => {
+    e.stopPropagation()
+    const naam = b.dataset.delFile.split(/[\\/]/).pop()
+    if (!await vraagJaNee(I18N.t('text.deleteFileConfirmTitle', { name: naam }), I18N.t('text.deleteFileConfirmText'), I18N.t('common.delete'), 'gevaar')) return
+    const r = await window.api.deleteNote(b.dataset.delFile)
+    if (!r || !r.ok) { showToast(I18N.t('error.deleteFailedPrefix') + (r?.reason || I18N.t('common.unknownError'))); return }
+    await zetTextFavorite(b.dataset.delFile, false)
+    await zetTextInBibliotheek(b.dataset.delFile, false)
+    if (textState.path === b.dataset.delFile) { newTextDraft(); syncTextToDom() }
+    showToast(I18N.t('text.fileDeletedToast', { name: naam }))
+    await refreshTextFiles()
+  })
+}
+
+function toonTextAddMenu(x, y) {
+  const sort = textSortMode()
+  toonContextMenu(x, y, [
+    { label: I18N.t('text.newFileButton'), icoon: 'ti-file-plus', doe: () => void startNieuweNotitie({ metProject: false }) },
+    { label: I18N.t('text.newLinkedButton'), icoon: 'ti-link', doe: () => void startNieuweNotitie({ metProject: true }) },
+    { label: I18N.t('text.addExistingButton'), icoon: 'ti-file-search', doe: () => void voegBestaandTextToe() },
+    { scheiding: true },
+    { label: I18N.t('text.sortName'), icoon: sort === 'name' ? 'ti-check' : 'ti-sort-ascending-letters', doe: () => void zetTextSort('name') },
+    { label: I18N.t('text.sortDate'), icoon: sort === 'date' ? 'ti-check' : 'ti-sort-descending', doe: () => void zetTextSort('date') },
+    { label: I18N.t('text.sortProject'), icoon: sort === 'project' ? 'ti-check' : 'ti-folder', doe: () => void zetTextSort('project') },
+  ])
+}
+
+async function zetTextSort(modus) {
+  settings.textSort = modus
+  await window.api.saveSettings(settings)
+  renderTextFileList()
+}
+
+async function kiesTextProjectId() {
+  if (!projects.length) {
+    showToast(I18N.t('text.noProjectToast'))
+    return null
+  }
+  if (activeId && projects.some(p => p.id === activeId)) return activeId
+  if (projects.length === 1) return projects[0].id
+  const knoppen = [
+    { label: I18N.t('common.cancel'), waarde: '' },
+    ...projects.slice(0, 10).map(p => ({
+      label: p.name,
+      waarde: p.id,
+      soort: p.id === activeId ? 'primair' : undefined,
+    })),
+  ]
+  return await vraagKeuze({
+    titel: I18N.t('text.pickProjectTitle'),
+    tekst: I18N.t('text.pickProjectText'),
+    knoppen,
+  })
+}
+
+async function startNieuweNotitie({ metProject = false } = {}) {
+  let projectId = null
+  let doelMap = null
+  if (metProject) {
+    projectId = await kiesTextProjectId()
+    if (!projectId) return
+    const proj = projects.find(x => x.id === projectId)
+    doelMap = actieveLocPad(proj)
+    if (!doelMap) {
+      showToast(I18N.t('text.noProjectFolderToast'))
+      return
+    }
+  } else {
+    try { doelMap = await window.api.noteDefaultDir() } catch { doelMap = null }
+  }
+  newTextDraft({ projectId, doelMap })
+  syncTextToDom()
+  document.getElementById('text-content')?.focus()
+}
+
+async function voegBestaandTextToe() {
+  let start = null
+  try { start = await window.api.noteDefaultDir() } catch {}
+  const gekozen = await window.api.pickNote(start)
+  if (!gekozen) return
+  await voegToeAanTextOmgeving(gekozen, { openen: true })
+}
+
+function toonTextBestandMenu(pad, x, y) {
+  const fav = isTextFavorite(pad)
+  const f = (textState.files || []).find(x => x.path === pad)
+  const proj = noteProjectVoor(f?.meta || (textState.path === pad ? textState.meta : null))
+  const items = [
+    { label: I18N.t('ctx.open'), icoon: 'ti-external-link', doe: () => loadTextFile(pad) },
+    { label: I18N.t('text.infoButton'), icoon: 'ti-info-circle', doe: () => void openNoteInfo(pad) },
+    {
+      label: I18N.t('text.showMetaInEditor'),
+      icoon: textMetaZichtbaar() ? 'ti-eye' : 'ti-eye-off',
+      doe: () => void zetTextMetaZichtbaar(!textMetaZichtbaar()),
+    },
+  ]
+  if (proj) {
+    items.push({
+      label: I18N.t('text.showInProject'),
+      icoon: 'ti-folder-symlink',
+      doe: () => void toonNoteInProject(pad),
+    })
+  }
+  items.push(
+    { label: fav ? I18N.t('text.unfavorite') : I18N.t('text.favorite'), icoon: fav ? 'ti-star-off' : 'ti-star', doe: async () => {
+      await zetTextFavorite(pad, !fav)
+      updateTextFavKnop()
+      await refreshTextFiles()
+      showToast(!fav ? I18N.t('text.favoritedToast') : I18N.t('text.unfavoritedToast'))
+    } },
+    { label: I18N.t('text.linkProject'), icoon: 'ti-link', doe: async () => {
+      const id = await kiesTextProjectId()
+      if (!id) return
+      await loadTextFile(pad)
+      if (!textState.meta) textState.meta = NoteTools.leegMeta()
+      textState.meta.projects = [id]
+      textState.dirty = true
+      syncTextToDom()
+      await saveTextFile()
+    } },
+    { scheiding: true },
+    { label: I18N.t('text.removeFromList'), icoon: 'ti-playlist-x', doe: async () => {
+      await zetTextInBibliotheek(pad, false)
+      await zetTextFavoriteLijst(pad, false)
+      if (textState.path === pad) { newTextDraft(); syncTextToDom() }
+      await refreshTextFiles()
+      showToast(I18N.t('text.removedFromListToast'))
+    } },
+    { label: I18N.t('ctx.revealInExplorer'), icoon: 'ti-folder-open', doe: () => window.api.revealItem(pad) },
+    { label: I18N.t('ctx.delete'), icoon: 'ti-trash', doe: async () => {
+      const naam = pad.split(/[\\/]/).pop()
+      if (!await vraagJaNee(I18N.t('text.deleteFileConfirmTitle', { name: naam }), I18N.t('text.deleteFileConfirmText'), I18N.t('common.delete'), 'gevaar')) return
+      await window.api.deleteNote(pad)
+      await zetTextFavorite(pad, false)
+      await zetTextInBibliotheek(pad, false)
+      if (textState.path === pad) { newTextDraft(); syncTextToDom() }
+      await refreshTextFiles()
+    } },
+  )
+  toonContextMenu(x, y, items)
+}
+
+let noteInfoPad = null
+
+async function openNoteInfo(pad) {
+  // Actieve notitie zonder pad: info over het concept.
+  if (!pad && textState.path) pad = textState.path
+  const lezerTab = pad ? (lezerStaat.tabs || []).find(t => t.pad === pad) : null
+
+  if (lezerTab) {
+    bewaarLezerUitDom()
+    const inhoud = (lezerTab === lezerHuidig() && lezerInhoudEl())
+      ? lezerInhoudEl().value
+      : (lezerTab.dirty ? lezerTab.concept : lezerTab.inhoud)
+    const p = NoteTools.parseNote(inhoud || '')
+    textState.path = pad
+    textState.body = p.heeftFooter ? p.body : String(inhoud || '')
+    textState.meta = Object.assign(
+      NoteTools.leegMeta({ subject: NoteTools.subjectVan(null, pad) }),
+      lezerTab.noteMeta || p.meta || {},
+    )
+    textState.dirty = false
+    textState.name = pad.split(/[\\/]/).pop()
+  } else if (pad && textState.path !== pad) {
+    if (textState.dirty) {
+      const ok = await vraagJaNee(I18N.t('text.unsavedTitle'), I18N.t('text.unsavedDiscard'), I18N.t('common.yes'), 'gevaar')
+      if (!ok) return
+    }
+    await loadTextFile(pad)
+  } else if (pad && !textState.path) {
+    await loadTextFile(pad)
+  } else {
+    bewaarTextUitDom()
+  }
+  noteInfoPad = textState.path || pad || null
+  const meta = textState.meta || NoteTools.leegMeta()
+  const body = document.getElementById('note-info-body')
+  const titel = document.getElementById('note-info-titel')
+  if (titel) titel.textContent = I18N.t('text.infoTitle')
+  if (!body) return
+
+  const projectOpts = projects.map(p => {
+    const aan = (meta.projects || []).includes(p.id) || (meta.projects || []).includes(p.name)
+    return `<option value="${esc(p.id)}" ${aan ? 'selected' : ''}>${esc(p.name)}</option>`
+  }).join('')
+
+  body.innerHTML = `
+    <label class="field-label">${esc(I18N.t('text.subjectLabel'))}</label>
+    <input class="field" id="note-info-subject" value="${esc(meta.subject || '')}" placeholder="${esc(I18N.t('text.subjectPlaceholder'))}" />
+    <label class="field-label" style="margin-top:10px">${esc(I18N.t('text.projectLabel'))}</label>
+    <select class="loc-select" id="note-info-project">
+      <option value="">${esc(I18N.t('text.projectNone'))}</option>
+      ${projectOpts}
+    </select>
+    <label class="field-label" style="margin-top:10px">${esc(I18N.t('text.infoId'))}</label>
+    <input class="field mono" id="note-info-id" value="${esc(meta.id || '')}" readonly />
+    <div class="note-info-datums" style="margin-top:10px;font-size:12px;color:var(--muted)">
+      <div>${esc(I18N.t('text.infoCreated'))}: ${esc(meta.created || '—')}</div>
+      <div>${esc(I18N.t('text.infoUpdated'))}: ${esc(meta.updated || '—')}</div>
+    </div>
+    <label class="bat-opt" style="margin-top:14px">
+      <input type="checkbox" id="note-info-fav" ${meta.favorite || (noteInfoPad && isTextFavorite(noteInfoPad)) ? 'checked' : ''} />
+      ${esc(I18N.t('text.favorite'))}
+    </label>
+    <label class="bat-opt" style="margin-top:8px">
+      <input type="checkbox" id="note-info-toon" ${textMetaZichtbaar() ? 'checked' : ''} />
+      ${esc(I18N.t('text.showMetaInEditor'))}
+    </label>
+    <span class="instel-uitleg" style="display:block;margin-top:4px">${esc(I18N.t('text.showMetaInEditorDesc'))}</span>
+  `
+  document.getElementById('modal-note-info').hidden = false
+  requestAnimationFrame(() => document.getElementById('note-info-subject')?.focus())
+}
+
+function sluitNoteInfo() {
+  document.getElementById('modal-note-info').hidden = true
+  noteInfoPad = null
+}
+
+async function slaNoteInfoOp() {
+  const subject = document.getElementById('note-info-subject')?.value.trim() || ''
+  const proj = document.getElementById('note-info-project')?.value || ''
+  const fav = !!document.getElementById('note-info-fav')?.checked
+  const toon = !!document.getElementById('note-info-toon')?.checked
+  const idVeld = document.getElementById('note-info-id')?.value.trim()
+
+  await zetTextMetaZichtbaar(toon)
+
+  if (!textState.meta) textState.meta = NoteTools.leegMeta()
+  if (idVeld) textState.meta.id = idVeld
+  textState.meta.subject = subject
+  textState.meta.projects = proj ? [proj] : []
+  textState.meta.favorite = fav
+  textState.dirty = true
+
+  const pad = noteInfoPad || textState.path
+  const lezerTab = pad ? (lezerStaat.tabs || []).find(t => t.pad === pad) : null
+
+  // Bestand-tab heeft voorrang: body uit de lezer, niet uit de Tekst-omgeving.
+  if (lezerTab) {
+    if (pad) await zetTextFavoriteLijst(pad, fav)
+    bewaarLezerUitDom()
+    const inhoud = (lezerTab === lezerHuidig() && lezerInhoudEl())
+      ? lezerInhoudEl().value
+      : (lezerTab.dirty ? lezerTab.concept : lezerTab.inhoud)
+    const p = NoteTools.parseNote(inhoud || '')
+    const body = p.heeftFooter ? p.body : String(inhoud || '')
+    let meta = NoteTools.stampUpdated({
+      ...(lezerTab.noteMeta || p.meta || textState.meta || NoteTools.leegMeta()),
+      subject,
+      projects: proj ? [proj] : [],
+      favorite: fav,
+    })
+    if (idVeld) meta.id = idVeld
+    lezerTab.noteMeta = meta
+    const uit = await window.api.schrijfNote({ filePath: pad, body, meta }).catch(() => null)
+    if (!uit || !uit.ok) {
+      showToast(I18N.t('error.saveFailedPrefix') + (uit?.reason || I18N.t('common.unknownError')))
+      return
+    }
+    const getoond = textMetaZichtbaar()
+      ? NoteTools.schrijfNote(body, meta).replace(/\s+$/, '')
+      : body
+    lezerTab.inhoud = getoond
+    lezerTab.concept = getoond
+    lezerTab.dirty = false
+    lezerTab.mtime = uit.mtime
+    if (lezerTab === lezerHuidig()) syncLezerNaarDom()
+    textState.path = pad
+    textState.body = body
+    textState.meta = meta
+    textState.dirty = false
+    textState.mtime = uit.mtime
+    if (view === 'text') syncTextToDom()
+    showToast(I18N.t('text.savedToast', { name: pad.split(/[\\/]/).pop() }))
+    sluitNoteInfo()
+    return
+  }
+
+  if (noteInfoPad || textState.path) {
+    if (pad) await zetTextFavoriteLijst(pad, fav)
+    await saveTextFile({ stil: false, skipFavSync: true })
+  } else {
+    syncTextToDom()
+  }
+  sluitNoteInfo()
+}
+
+async function loadTextFile(pad) {
+  if (!pad) return false
+  if (textState.dirty && textState.path && textState.path !== pad) {
+    const ok = await vraagJaNee(I18N.t('text.unsavedTitle'), I18N.t('text.unsavedDiscard'), I18N.t('common.yes'), 'gevaar')
+    if (!ok) return false
+  }
+  const r = await window.api.leesNote(pad).catch(() => null)
+  if (!r || !r.ok) {
+    showToast(I18N.t('error.openFailedPrefix') + (r?.reason || I18N.t('common.unknownError')))
+    return false
+  }
+  textState.path = pad
+  textState.mtime = r.mtime
+  textState.dirty = false
+  {
+    const bron = r.content != null ? r.content : (r.body || '')
+    const geparsed = NoteTools.parseNote(bron)
+    textState.body = geparsed.heeftFooter ? geparsed.body : (r.body != null ? r.body : bron)
+    textState.meta = geparsed.meta || NoteTools.leegMeta({
+      subject: NoteTools.subjectVan(null, pad),
+      favorite: isTextFavorite(pad),
+    })
+  }
+  if (isTextFavorite(pad)) textState.meta.favorite = true
+  textState.name = pad.split(/[\\/]/).pop()
+  syncTextToDom()
+  renderTextFileList()
+  return true
+}
+
+function ensureTextExt(naam) {
+  const n = String(naam || '').trim()
+  if (!n) return 'notitie.txt'
+  if (/\.(txt|md|log)$/i.test(n)) return n
+  return n + '.txt'
+}
+
+async function saveTextFile({ stil = false, skipFavSync = false } = {}) {
+  bewaarTextUitDom()
+  let pad = textState.path
+  let cwd = textState.doelMap || ''
+  if (!cwd) {
+    try { cwd = await window.api.noteDefaultDir() } catch { cwd = '' }
+  }
+  if (!pad) {
+    if (!cwd) {
+      if (!stil) showToast(I18N.t('text.noSaveFolderToast'))
+      return false
+    }
+    const naam = ensureTextExt(textState.name || textState.meta?.subject || 'notitie')
+    pad = (cwd.replace(/[\\/]+$/, '') + '\\' + naam)
+    if (await window.api.noteExists(pad)) {
+      const stem = naam.replace(/\.(txt|md|log)$/i, '')
+      const ext = (naam.match(/\.(txt|md|log)$/i) || ['.txt'])[0]
+      let i = 2
+      while (await window.api.noteExists(cwd.replace(/[\\/]+$/, '') + '\\' + stem + '-' + i + ext)) i++
+      pad = cwd.replace(/[\\/]+$/, '') + '\\' + stem + '-' + i + ext
+    }
+  }
+  if (!textState.meta) textState.meta = NoteTools.leegMeta()
+  // Settings-lijst volgt de meta-vlag — nooit OR terug naar true (dat klemde favorieten vast).
+  if (!skipFavSync) await zetTextFavoriteLijst(pad, !!textState.meta.favorite)
+
+  const r = await window.api.schrijfNote({ filePath: pad, body: textState.body, meta: textState.meta })
+  if (!r || !r.ok) {
+    if (!stil) showToast(I18N.t('error.saveFailedPrefix') + (r?.reason || I18N.t('common.unknownError')))
+    return false
+  }
+  textState.path = r.path
+  textState.mtime = r.mtime
+  textState.meta = r.meta || textState.meta
+  textState.dirty = false
+  textState.name = r.path.split(/[\\/]/).pop()
+  textState.doelMap = null
+  await zetTextInBibliotheek(r.path, true)
+  syncTextToDom()
+  await refreshTextFiles()
+  if (!stil) showToast(I18N.t('text.savedToast', { name: textState.name }))
+  return true
+}
+
+function wireTextPanel() {
+  const markDirty = () => { textState.dirty = true; updateTextEditTitle() }
+  document.getElementById('text-content')?.addEventListener('input', markDirty)
+  document.getElementById('text-name')?.addEventListener('input', markDirty)
+
+  document.getElementById('text-add').onclick = (e) => {
+    const r = e.currentTarget.getBoundingClientRect()
+    toonTextAddMenu(r.left, r.bottom + 4)
+  }
+  document.getElementById('text-save').onclick = () => void saveTextFile()
+  document.getElementById('text-info').onclick = () => void openNoteInfo(textState.path)
+  document.getElementById('text-reload').onclick = async () => {
+    if (!textState.path) return
+    if (textState.dirty && !await vraagJaNee(I18N.t('text.unsavedTitle'), I18N.t('text.unsavedDiscard'), I18N.t('common.yes'), 'gevaar')) return
+    await loadTextFile(textState.path)
+  }
+  document.getElementById('text-fav').onclick = async () => {
+    if (!textState.path) {
+      if (!textState.meta) textState.meta = NoteTools.leegMeta()
+      textState.meta.favorite = !textState.meta.favorite
+      textState.dirty = true
+      updateTextFavKnop()
+      return
+    }
+    const aan = !isTextFavorite(textState.path)
+    await zetTextFavorite(textState.path, aan)
+    updateTextFavKnop()
+    await refreshTextFiles()
+    showToast(aan ? I18N.t('text.favoritedToast') : I18N.t('text.unfavoritedToast'))
+  }
+}
+
+async function voegToeAanTextOmgeving(pad, { openen = true } = {}) {
+  if (!pad || !NoteTools.isNoteBestand(pad)) return false
+  const r = await window.api.leesNote(pad).catch(() => null)
+  if (!r || !r.ok) return false
+  let meta = r.meta
+  if (!meta) {
+    meta = NoteTools.leegMeta({
+      subject: NoteTools.subjectVan(null, pad),
+      projects: activeId ? [activeId] : [],
+      favorite: isTextFavorite(pad),
+    })
+    await window.api.schrijfNote({ filePath: pad, body: r.body != null ? r.body : r.content, meta })
+  }
+  await zetTextInBibliotheek(pad, true)
+  if (openen) {
+    textState.autoOpened = true
+    await openTextView({ pad })
+  } else {
+    await refreshTextFiles()
+  }
+  showToast(I18N.t('text.addedToast', { name: pad.split(/[\\/]/).pop() }))
+  return true
+}
+
+async function vraagNoteOpenKeuze(pad) {
+  const naam = pad.split(/[\\/]/).pop()
+  const knoppen = [
+    { label: I18N.t('common.cancel'), waarde: '' },
+    { label: I18N.t('text.openRead'), waarde: 'lezen' },
+    { label: I18N.t('text.openAdd'), waarde: 'toevoegen', soort: 'primair' },
+  ]
+  return vraagKeuze({
+    titel: I18N.t('text.openKeuzeTitel', { naam }),
+    tekst: I18N.t('text.openKeuzeTekst'),
+    regels: [pad],
+    knoppen,
+  })
 }
 
 // ── Een bestand bekijken en bewerken ─────────────────────────────────────────
@@ -8999,6 +9954,7 @@ function syncLezerNaarDom() {
   lezerInfoBijwerken()
   lezerRegelsBijwerken()
   verfLezer()
+  pasLezerNoteInfoKnop()
   if (!t) {
     const info = document.getElementById('lezer-info')
     if (info) info.textContent = I18N.t('lezer.leeg')
@@ -9219,7 +10175,15 @@ async function toonBestand(pad) {
   tab.naam = naam
   // Minified html/css/js in één regel: leesbaar onder elkaar zetten. Alleen
   // als het er echt als één lijn uitziet — nette bron blijft onaangeroerd.
-  const inhoud = WebTools.formatTekst(r.inhoud, pad)
+  let inhoud = WebTools.formatTekst(r.inhoud, pad)
+  // Notitie-footer hoort niet in het leesvenster (tenzij je 'm wilt zien).
+  if (NoteTools.isNoteBestand(pad)) {
+    const geparsed = NoteTools.parseNote(inhoud)
+    if (geparsed.heeftFooter) {
+      tab.noteMeta = geparsed.meta
+      if (!textMetaZichtbaar()) inhoud = geparsed.body
+    }
+  }
   tab.inhoud = inhoud
   tab.concept = inhoud
   tab.mtime = r.mtime ?? null
@@ -9282,12 +10246,41 @@ async function slaLezerOp({ negeerSchijf = false, tab = null } = {}) {
     if (keuze !== 'overschrijven') return false
   }
 
-  const r = await window.api.schrijfTekst({
-    pad: t.pad,
-    inhoud,
-    bom: t.bom,
-    crlf: t.crlf,
-  }).catch(() => null)
+  const r = await (async () => {
+    // Notitie met footer: body + meta terugschrijven, footer niet kwijtraken.
+    if (NoteTools.isNoteBestand(t.pad)) {
+      const inVak = NoteTools.parseNote(inhoud)
+      let meta = t.noteMeta || null
+      let body = inhoud
+      if (inVak.heeftFooter) {
+        body = inVak.body
+        meta = inVak.meta || meta
+      } else if (!textMetaZichtbaar() && meta) {
+        body = inhoud
+      } else if (textMetaZichtbaar() && inVak.heeftFooter === false) {
+        // Zichtbare modus zonder footer in vak: bestaande meta bewaren.
+        body = inhoud
+      }
+      if (meta || NoteTools.heeftNoteFooter(String(t.inhoud || '')) || t.noteMeta) {
+        meta = NoteTools.stampUpdated(meta || t.noteMeta || NoteTools.leegMeta({
+          subject: NoteTools.subjectVan(null, t.pad),
+        }))
+        t.noteMeta = meta
+        const uit = await window.api.schrijfNote({ filePath: t.pad, body, meta }).catch(() => null)
+        if (uit && uit.ok) {
+          const getoond = textMetaZichtbaar() ? NoteTools.schrijfNote(body, meta).replace(/\s+$/, '') : body
+          return { ok: true, mtime: uit.mtime, _inhoud: getoond, _body: body }
+        }
+        return uit
+      }
+    }
+    return window.api.schrijfTekst({
+      pad: t.pad,
+      inhoud,
+      bom: t.bom,
+      crlf: t.crlf,
+    }).catch(() => null)
+  })()
   if (!r || !r.ok) {
     await meldKort(I18N.t('lezer.opslaanMislukt'), I18N.t('lezer.opslaanMisluktTekst', {
       reden: (r && r.reden) || I18N.t('common.unknownError'),
@@ -9295,10 +10288,16 @@ async function slaLezerOp({ negeerSchijf = false, tab = null } = {}) {
     return false
   }
 
-  t.inhoud = inhoud
-  t.concept = inhoud
+  const opgeslagen = r._inhoud != null ? r._inhoud : inhoud
+  t.inhoud = opgeslagen
+  t.concept = opgeslagen
+  if (r._body != null && lezerInhoudEl() && t === lezerHuidig() && !textMetaZichtbaar()) {
+    lezerInhoudEl().value = r._body
+    t.inhoud = r._body
+    t.concept = r._body
+  }
   t.mtime = r.mtime ?? null
-  t.bytes = r.bytes || lezerGrootteSchatting(inhoud)
+  t.bytes = r.bytes || lezerGrootteSchatting(opgeslagen)
   t.dirty = false
   lezerTitelBijwerken()
   if (t === lezerHuidig()) lezerInfoBijwerken()
@@ -9584,6 +10583,24 @@ function bedraadLezer() {
   if (!opslaan || opslaan.dataset.bedraad === '1') return
   opslaan.dataset.bedraad = '1'
   opslaan.onclick = () => { void slaLezerOp() }
+  let infoKnop = document.getElementById('lezer-info-knop')
+  if (!infoKnop) {
+    const voet = document.querySelector('.lezer-term-voet')
+    const zoek = document.getElementById('lezer-zoek-knop')
+    if (voet && zoek) {
+      infoKnop = document.createElement('button')
+      infoKnop.className = 'btn-ghost'
+      infoKnop.id = 'lezer-info-knop'
+      infoKnop.hidden = true
+      infoKnop.textContent = I18N.t('text.infoButton')
+      voet.insertBefore(infoKnop, zoek)
+    }
+  }
+  if (infoKnop) infoKnop.onclick = () => {
+    const t = lezerHuidig()
+    if (!t || !t.pad || !NoteTools.isNoteBestand(t.pad)) return
+    void openNoteInfo(t.pad)
+  }
   document.getElementById('lezer-kopieer').onclick = () => {
     kopieer(lezerInhoudEl()?.value || '', I18N.t('lezer.gekopieerd'))
   }
@@ -9744,6 +10761,20 @@ function bedraadLezer() {
       if (document.activeElement === vak) return
       verbergLezerAanvul()
     }, 120)
+  })
+  vak.addEventListener('contextmenu', (e) => {
+    const t = lezerHuidig()
+    if (!t || !t.pad || !NoteTools.isNoteBestand(t.pad)) return
+    e.preventDefault()
+    e.stopPropagation()
+    toonContextMenu(e.clientX, e.clientY, [
+      { label: I18N.t('text.infoButton'), icoon: 'ti-info-circle', doe: () => void openNoteInfo(t.pad) },
+      {
+        label: I18N.t('text.showMetaInEditor'),
+        icoon: textMetaZichtbaar() ? 'ti-eye' : 'ti-eye-off',
+        doe: () => void zetTextMetaZichtbaar(!textMetaZichtbaar()),
+      },
+    ])
   })
 
   const pane = document.querySelector('.term-pane[data-pane="editor"]')
@@ -11098,6 +12129,14 @@ function renderSettingsPanel() {
           </div>
         </div>
       </div>
+      <div>
+        <div class="settings-section-title">${I18N.t('settings.section.textTitle')}</div>
+        <div class="editor-row enabled">
+          <input type="checkbox" id="set-text-meta" ${textMetaZichtbaar() ? 'checked' : ''} />
+          <div class="editor-row-name"><i class="ti ti-notes"></i> ${I18N.t('text.showMetaInEditor')}</div>
+          <div class="instel-uitleg">${I18N.t('text.showMetaInEditorDesc')}</div>
+        </div>
+      </div>
       ${codeKleurenMarkup()}
       <div>
         <div class="settings-section-title">${I18N.t('settings.section.projectOpenTitle')}</div>
@@ -11375,6 +12414,8 @@ function renderSettingsPanel() {
     window.api.saveSettings(settings)
     if (settings.mapGroottes) startMapGroottes()
   }
+  const setTextMeta = document.getElementById('set-text-meta')
+  if (setTextMeta) setTextMeta.onchange = (e) => { void zetTextMetaZichtbaar(e.target.checked) }
   ;['website', 'flutter', 'overig'].forEach(soort => {
     const sel = document.getElementById('set-open-' + soort)
     if (!sel) return
@@ -16892,6 +17933,9 @@ function setupModalEvents() {
 
   document.getElementById('modal-info-close').onclick = () => { document.getElementById('modal-info').hidden = true }
   document.getElementById('modal-info-ok').onclick    = () => { document.getElementById('modal-info').hidden = true }
+  document.getElementById('modal-note-info-close').onclick = () => sluitNoteInfo()
+  document.getElementById('modal-note-info-cancel').onclick = () => sluitNoteInfo()
+  document.getElementById('modal-note-info-save').onclick = () => void slaNoteInfoOp()
 
   document.getElementById('modal-found-close').onclick = sluitGevondenEditors
   document.getElementById('modal-found-later').onclick = sluitGevondenEditors

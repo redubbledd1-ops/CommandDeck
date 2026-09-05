@@ -68,6 +68,10 @@
             <i class="ti ti-file-code"></i>
             <span data-i18n="sidebar.navBat">bat</span>
           </button>
+          <button class="nav-item" id="btn-nav-text">
+            <i class="ti ti-notes"></i>
+            <span data-i18n="sidebar.navText">tekst</span>
+          </button>
           <button class="nav-item" id="btn-nav-dict">
             <i class="ti ti-book"></i>
             <span data-i18n="sidebar.navDict">woordenboek</span>
@@ -127,6 +131,7 @@
       <main class="main" id="ps-panel" style="display:none"></main>
       <main class="main" id="dict-panel" style="display:none"></main>
       <main class="main" id="bat-panel" style="display:none"></main>
+      <main class="main" id="text-panel" style="display:none"></main>
     </div>
     <div class="werk-vlak" data-slot="1" id="werk-vlak-1" hidden>
       <div class="werk-vlak-naam"></div>
@@ -404,6 +409,20 @@
   </div>
 </div>
 
+<div class="modal-backdrop" id="modal-note-info" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <span id="note-info-titel" data-i18n="text.infoTitle">Notitie-info</span>
+      <button class="modal-close" id="modal-note-info-close"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="note-info-body" id="note-info-body"></div>
+    <div class="modal-footer">
+      <button class="btn-ghost" id="modal-note-info-cancel" data-i18n="common.cancel">annuleren</button>
+      <button class="btn-primary" id="modal-note-info-save" data-i18n="common.save">opslaan</button>
+    </div>
+  </div>
+</div>
+
 <!-- Overlay bij het slepen van een bestand -->
 <div id="drop-overlay" hidden>
   <div class="drop-box">
@@ -427,6 +446,7 @@
 <script src="i18n.js"></script>
 <script src="git-tools.js"></script>
 <script src="web-tools.js"></script>
+<script src="note-tools.js"></script>
 <script src="web-knoppen.js"></script>
 <script src="lezer-aanvul.js"></script>
 <script src="code-kleuren.js"></script>
