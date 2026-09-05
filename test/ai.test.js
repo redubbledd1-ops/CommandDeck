@@ -316,7 +316,9 @@ check('zonder systeemprompt blijft het veld weg',
   check('dubbele editors worden samengevoegd', /function ontdubbelCustomEditors\(/.test(bron))
   check('scan slaat een catalogus over die er al is', /bestaand\.cats\.has\(g\.id\)/.test(bron))
   check('AI-programmaknoppen verdwijnen als de editor er al staat',
-    /function aiDienstenOpProject\(/.test(bron) && /aiDienstenOpProject\(\)/.test(bron))
+    /function aiDienstenOpProject\(/.test(bron)
+    && /cats\.has\(d\.programma\.catalogId\)\) return false/.test(bron)
+    && /stammen\.has\(cmd\)\) return false/.test(bron))
   check('bekende programma\'s hebben een merkkleur',
     /MERK_KLEUR/.test(bron) && /editor-vscode/.test(bron) && /editor-claude/.test(bron))
   check('en die merkkleur staat in de css',
