@@ -1525,7 +1525,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       appendLine(type, text)
       return
     }
-    if (splitTweeProjecten() && werkSlots.some(s => s.projectId === projectId)) {
+    if (splitTweeProjecten() && werkSplit.slots.some(s => s.projectId === projectId)) {
       appendLineNaar(projectId, 'terminal-andere', type, text)
     }
   })
@@ -1600,12 +1600,12 @@ let navBezig    = false   // voorkomt dat het toepassen zichzelf weer opslaat
 // zou terug/vooruit een split niet kunnen terugzetten en zou navPush denken dat
 // er niets veranderde als je alleen de split opende, sloot of het vlak wisselde.
 function splitMomentopname() {
-  if (!termSplit || !Array.isArray(werkSlots) || werkSlots.length !== 2) return null
+  if (!werkSplit.dir || !Array.isArray(werkSplit.slots) || werkSplit.slots.length !== 2) return null
   return {
-    dir: termSplit,
-    first: termSplitFirst === 'browser' ? 'browser' : 'output',
-    focus: werkSlotFocus === 1 ? 1 : 0,
-    slots: werkSlots.map(s => ({
+    dir: werkSplit.dir,
+    first: werkSplit.first === 'browser' ? 'browser' : 'output',
+    focus: werkSplit.focus === 1 ? 1 : 0,
+    slots: werkSplit.slots.map(s => ({
       view: s.view || 'project',
       projectId: (s.view || 'project') === 'project' ? s.projectId : undefined,
       tab: normaliseerProjectTab(s.tab),
@@ -1650,11 +1650,11 @@ async function pasLocatieToe(loc) {
     // (via pasWerkSchermAan) laat dit met rust zolang navBezig aanstaat, dus de
     // teruggezette vlakken blijven staan.
     if (loc.split && Array.isArray(loc.split.slots) && loc.split.slots.length === 2) {
-      termSplit = loc.split.dir
-      termSplitFirst = loc.split.first === 'browser' ? 'browser' : 'output'
-      werkSlots = loc.split.slots.map(normaliseerSlot)
-      werkSlotFocus = loc.split.focus === 1 ? 1 : 0
-      const f = werkSlots[werkSlotFocus]
+      werkSplit.dir = loc.split.dir
+      werkSplit.first = loc.split.first === 'browser' ? 'browser' : 'output'
+      werkSplit.slots = loc.split.slots.map(normaliseerSlot)
+      werkSplit.focus = loc.split.focus === 1 ? 1 : 0
+      const f = werkSplit.slots[werkSplit.focus]
       view = f.view || 'project'
       if (view === 'project') {
         if (f.projectId) activeId = f.projectId
@@ -2745,7 +2745,7 @@ function setView(v) {
   // zelf op woordenboek klikt — niet omdat die split nog open of onthouden was.
   if (v === 'project' && splitAan() && (
     splitGemengd() ||
-    (splitTweeProjecten() && !werkSlots.some(s => s.projectId === activeId))
+    (splitTweeProjecten() && !werkSplit.slots.some(s => s.projectId === activeId))
   )) {
     sluitSplitVoorView()
   } else if (splitAan()) {
@@ -3304,7 +3304,7 @@ function updateSidebarActief() {
   document.querySelectorAll('#proj-list .proj-item').forEach((el, i) => {
     const p = projects[i]
     if (!p) return
-    const inAnderVlak = splitAan() && werkSlots.some(s => s.view === 'project' && s.projectId === p.id)
+    const inAnderVlak = splitAan() && werkSplit.slots.some(s => s.view === 'project' && s.projectId === p.id)
       && !(view === 'project' && p.id === activeId)
     el.classList.toggle('active', view === 'project' && p.id === activeId)
     el.classList.toggle('in-split', !!inAnderVlak)
@@ -3313,7 +3313,7 @@ function updateSidebarActief() {
     const knop = document.getElementById(def.id)
     if (!knop) continue
     knop.classList.toggle('active', view === def.sleutel)
-    knop.classList.toggle('in-split', splitAan() && werkSlots.some((s, i) => i !== werkSlotFocus && s.view === def.sleutel))
+    knop.classList.toggle('in-split', splitAan() && werkSplit.slots.some((s, i) => i !== werkSplit.focus && s.view === def.sleutel))
   }
   const settingsBtn = document.getElementById('btn-settings')
   if (settingsBtn) settingsBtn.classList.toggle('active', view === 'settings')
@@ -3346,7 +3346,7 @@ function renderSidebar() {
   projects.forEach((p, n) => {
     const activeLoc = p.locations[p.activeLocation] || p.locations[0]
     const div = document.createElement('div')
-    const inAnderVlak = splitAan() && werkSlots.some(s => s.view === 'project' && s.projectId === p.id)
+    const inAnderVlak = splitAan() && werkSplit.slots.some(s => s.view === 'project' && s.projectId === p.id)
       && !(view === 'project' && p.id === activeId)
     div.className = 'proj-item'
       + (view === 'project' && p.id === activeId ? ' active' : '')
@@ -3404,7 +3404,7 @@ function renderSidebar() {
     knop.hidden = false
     navLijst.appendChild(knop)                       // hiermee komt hij op zijn plek
     knop.classList.toggle('active', view === sleutel)
-    knop.classList.toggle('in-split', splitAan() && werkSlots.some((s, i) => i !== werkSlotFocus && s.view === sleutel))
+    knop.classList.toggle('in-split', splitAan() && werkSplit.slots.some((s, i) => i !== werkSplit.focus && s.view === sleutel))
 
     knop.querySelector('.sort-pijlen')?.remove()
     if (sorteerNav) {
@@ -3516,7 +3516,7 @@ async function selectProject(id) {
   }
 
   if (splitTweeProjecten()) {
-    const erin = werkSlots.some(s => s.projectId === id)
+    const erin = werkSplit.slots.some(s => s.projectId === id)
     if (erin) {
       plaatsInSplit('project')
     } else {
@@ -4349,8 +4349,8 @@ function renderMain() {
     haalVerkennerOp(p.id)
     // Alleen bij een actieve split de tab uit de slots; anders termTab laten
     // (site/editor) — anders wis je de keuze bij elke mapklik.
-    if (termSplitAan() && werkSlots && werkSlots[werkSlotFocus]) {
-      termTab = werkSlots[werkSlotFocus].tab || termTab
+    if (termSplitAan() && werkSplit.slots && werkSplit.slots[werkSplit.focus]) {
+      termTab = werkSplit.slots[werkSplit.focus].tab || termTab
     }
     const loc = p.locations[p.activeLocation] || p.locations[0]
     updateTermPlaceholder(loc?.path || '')
@@ -4702,10 +4702,15 @@ const ARCHIEF_EXT = /\.(zip|jar|apk|aar|war|docx|xlsx|pptx|epub|whl|nupkg|vsix|r
 function inArchief(p) { return String(p || '').includes('.') && /\.[a-z0-9]+::/i.test(p) }
 
 let termTab        = 'output'   // 'output' | 'browser' | 'editor'
-let termSplit      = null       // null | 'right' | 'bottom' — alleen in een project
-let termSplitFirst = 'output'   // welk data-vlak links/boven blijft (output-kant vs verkenner-kant)
-let werkSlots      = null       // null | [{ view, projectId?, tab? }, { view, projectId?, tab? }]
-let werkSlotFocus  = 0          // 0 = output-paneel, 1 = verkenner-paneel
+// De gesplitste weergave als één toestand, i.p.v. vier losse variabelen die
+// apart bijgewerkt moesten worden (en dus makkelijk uit de pas liepen). Het
+// object is const; alleen de velden veranderen.
+const werkSplit = {
+  dir:   null,      // null | 'right' | 'bottom' — alleen in een project
+  first: 'output',  // welk data-vlak links/boven blijft (output-kant vs verkenner-kant)
+  focus: 0,         // 0 = output-paneel, 1 = verkenner-paneel
+  slots: null,      // null | [{ view, projectId?, tab? }, { view, projectId?, tab? }]
+}
 let browserPath  = ''
 let browserItems = []
 let browserFout  = ''
@@ -4733,10 +4738,10 @@ function verkennerPid() {
   // activeId. Staat het woordenboek ernaast, dan loopt activeId achter op het
   // project in het vlak, en werd de map van het ene project onder het andere
   // weggeschreven -- daarna opende dat project in de map van zijn buurman.
-  if (splitAan() && werkSlots) {
-    const gericht = werkSlots[werkSlotFocus]
+  if (splitAan() && werkSplit.slots) {
+    const gericht = werkSplit.slots[werkSplit.focus]
     if (gericht && gericht.view === 'project' && gericht.projectId) return gericht.projectId
-    const ander = werkSlots.find(s => s && s.view === 'project' && s.projectId)
+    const ander = werkSplit.slots.find(s => s && s.view === 'project' && s.projectId)
     if (ander) return ander.projectId
   }
   return activeId || activeTermId
@@ -4793,7 +4798,7 @@ function haalVerkennerOp(pid = verkennerPid()) {
 }
 
 function brSuffix(pid = verkennerPid()) {
-  if (splitTweeProjecten() && werkSlots && werkSlots[0].projectId === pid) return '-andere'
+  if (splitTweeProjecten() && werkSplit.slots && werkSplit.slots[0].projectId === pid) return '-andere'
   return ''
 }
 
@@ -4832,8 +4837,8 @@ function cwdVoorProject(pid) {
 // Teken of navigeer even voor een ander project, zonder de gerichte verkenner
 // kwijt te raken. Na afloop staan de globals weer op het actieve vlak.
 function metVerkenner(pid, fn) {
-  const live = (splitTweeProjecten() && werkSlots)
-    ? werkSlots[werkSlotFocus].projectId
+  const live = (splitTweeProjecten() && werkSplit.slots)
+    ? werkSplit.slots[werkSplit.focus].projectId
     : (activeId || activeTermId)
   const ander = pid && pid !== live
   const vorig = verkennerTekenPid
@@ -4978,15 +4983,15 @@ function normaliseerSlot(s) {
   return { view: v }
 }
 
-// Data-slot 0 hoort bij de output-kant, 1 bij de verkenner-kant. termSplitFirst
+// Data-slot 0 hoort bij de output-kant, 1 bij de verkenner-kant. werkSplit.first
 // wisselt alleen de schermvolgorde; de editor kan in beide data-slots staan.
 function visueelVoorDataSlot(dataSlot) {
-  if (termSplitFirst === 'browser') return dataSlot === 1 ? 0 : 1
+  if (werkSplit.first === 'browser') return dataSlot === 1 ? 0 : 1
   return dataSlot === 1 ? 1 : 0
 }
 
 function dataSlotVoorVisueel(visueel) {
-  if (termSplitFirst === 'browser') return visueel === 0 ? 1 : 0
+  if (werkSplit.first === 'browser') return visueel === 0 ? 1 : 0
   return visueel === 0 ? 0 : 1
 }
 
@@ -4995,7 +5000,7 @@ function orderVoorDataSlot(dataSlot) {
 }
 
 function splitAan() {
-  return !!(termSplit && werkSlots && werkSlots.length === 2)
+  return !!(werkSplit.dir && werkSplit.slots && werkSplit.slots.length === 2)
 }
 
 function isGemengdeSplit(rec) {
@@ -5020,14 +5025,14 @@ function wisGemengdeProjectSplits() {
 
 function splitGemengd() {
   return splitAan() && !(
-    werkSlots[0].view === 'project' && werkSlots[1].view === 'project'
+    werkSplit.slots[0].view === 'project' && werkSplit.slots[1].view === 'project'
   )
 }
 
 function splitTweeProjecten() {
-  return termSplitAan() && !!werkSlots
-    && werkSlots[0].view === 'project' && werkSlots[1].view === 'project'
-    && werkSlots[0].projectId !== werkSlots[1].projectId
+  return termSplitAan() && !!werkSplit.slots
+    && werkSplit.slots[0].view === 'project' && werkSplit.slots[1].view === 'project'
+    && werkSplit.slots[0].projectId !== werkSplit.slots[1].projectId
 }
 
 function heeftEigenTerminal(s) {
@@ -5073,47 +5078,47 @@ function zelfdeSlot(s, v) {
 }
 
 function zelfdeProjectSplit() {
-  return splitAan() && !!werkSlots
-    && werkSlots[0].view === 'project' && werkSlots[1].view === 'project'
-    && werkSlots[0].projectId === werkSlots[1].projectId
+  return splitAan() && !!werkSplit.slots
+    && werkSplit.slots[0].view === 'project' && werkSplit.slots[1].view === 'project'
+    && werkSplit.slots[0].projectId === werkSplit.slots[1].projectId
 }
 
 // Slot 0 is links/boven, slot 1 rechts/onder. Bij output|verkenner kan
-// termSplitFirst de DOM-panelen omwisselen; dan is het browser-paneel visueel 0.
+// werkSplit.first de DOM-panelen omwisselen; dan is het browser-paneel visueel 0.
 function visueelSlotVoorTermPane(pane) {
-  if (termSplitFirst === 'browser') return pane === 'browser' ? 0 : 1
+  if (werkSplit.first === 'browser') return pane === 'browser' ? 0 : 1
   return pane === 'browser' ? 1 : 0
 }
 
 function visueelTermPaneVoorSlot(visueel) {
-  if (termSplitFirst === 'browser') return visueel === 0 ? 'browser' : 'output'
+  if (werkSplit.first === 'browser') return visueel === 0 ? 'browser' : 'output'
   return visueel === 0 ? 'output' : 'browser'
 }
 
 function zetSlotsOpSchermvolgorde() {
-  if (!werkSlots || werkSlots.length !== 2) return
-  if (termSplitFirst !== 'browser') return
-  if (!splitGemengd()) werkSlots.reverse()
-  termSplitFirst = 'output'
+  if (!werkSplit.slots || werkSplit.slots.length !== 2) return
+  if (werkSplit.first !== 'browser') return
+  if (!splitGemengd()) werkSplit.slots.reverse()
+  werkSplit.first = 'output'
 }
 
 function zorgVoorSlots() {
-  if (werkSlots && werkSlots.length === 2) {
-    werkSlots = werkSlots.map(normaliseerSlot)
+  if (werkSplit.slots && werkSplit.slots.length === 2) {
+    werkSplit.slots = werkSplit.slots.map(normaliseerSlot)
     return
   }
   if (view === 'project') {
-    werkSlots = [
+    werkSplit.slots = [
       { view: 'project', projectId: activeId, tab: 'output' },
       { view: 'project', projectId: activeId, tab: 'browser' },
     ]
     // Het nieuwe vlak (rechts/onder) krijgt de focus, zodat de volgende
     // zijbalkkeuze daar landt — niet op het scherm dat al open was.
-    werkSlotFocus = 1
+    werkSplit.focus = 1
     return
   }
-  werkSlots = [{ view }, tweedeSlotVoor(view)]
-  werkSlotFocus = 1
+  werkSplit.slots = [{ view }, tweedeSlotVoor(view)]
+  werkSplit.focus = 1
 }
 
 function paneelEl(v) {
@@ -5253,7 +5258,7 @@ function verzamelPanelenInVlak0() {
 function plaatsPanelenInVlakken() {
   const vlak0 = document.getElementById('werk-vlak-0')
   const vlak1 = document.getElementById('werk-vlak-1')
-  if (!vlak0 || !vlak1 || !werkSlots) return
+  if (!vlak0 || !vlak1 || !werkSplit.slots) return
 
   Object.entries(PANELS).forEach(([name, id]) => {
     if (name === 'settings') return
@@ -5261,7 +5266,7 @@ function plaatsPanelenInVlakken() {
     if (el) bevriesPaneelIds(el)
   })
 
-  werkSlots.forEach((s, i) => {
+  werkSplit.slots.forEach((s, i) => {
     const el = paneelEl(s.view)
     const dest = i === 0 ? vlak0 : vlak1
     if (el && dest && el.parentElement !== dest) dest.appendChild(el)
@@ -5272,7 +5277,7 @@ function plaatsPanelenInVlakken() {
   })
   Object.entries(PANELS).forEach(([name, id]) => {
     if (name === 'settings') return
-    if (werkSlots.some(s => s.view === name)) return
+    if (werkSplit.slots.some(s => s.view === name)) return
     const el = document.getElementById(id)
     if (!el) return
     if (el.parentElement !== vlak0) vlak0.appendChild(el)
@@ -5298,9 +5303,9 @@ function pasWerkVlakNamenAan() {
   document.querySelectorAll('.werk-vlak').forEach(vlak => {
     const naam = vlak.querySelector('.werk-vlak-naam')
     if (!naam) return
-    if (!splitGemengd() || !werkSlots) { naam.textContent = ''; return }
+    if (!splitGemengd() || !werkSplit.slots) { naam.textContent = ''; return }
     const slot = Number(vlak.dataset.slot)
-    naam.textContent = slotNaam(werkSlots[slot])
+    naam.textContent = slotNaam(werkSplit.slots[slot])
   })
 }
 
@@ -5351,12 +5356,12 @@ function verversSplitPlusZicht() {
   const stage = wrap?.querySelector('.term-stage')
   if (stage && !splitGemengd()) {
     ;['right', 'bottom', 'left', 'top'].forEach(kant => {
-      zetSplitPlusZicht(wrap.querySelector(`.term-split-plus[data-split="${kant}"]`), stage, termSplit, kant)
+      zetSplitPlusZicht(wrap.querySelector(`.term-split-plus[data-split="${kant}"]`), stage, werkSplit.dir, kant)
     })
   }
   const werk = document.getElementById('werk')
   if (werk && werkPlusNodig()) {
-    const split = splitGemengd() ? termSplit : null
+    const split = splitGemengd() ? werkSplit.dir : null
     ;['right', 'bottom', 'left', 'top'].forEach(kant => {
       zetSplitPlusZicht(werk.querySelector(`.werk-split-plus[data-split="${kant}"]`), werk, split, kant)
     })
@@ -5390,8 +5395,8 @@ function pasWerkSplitKnoppenAan() {
     })
     return
   }
-  const naast = splitGemengd() && termSplit === 'right'
-  const onder = splitGemengd() && termSplit === 'bottom'
+  const naast = splitGemengd() && werkSplit.dir === 'right'
+  const onder = splitGemengd() && werkSplit.dir === 'bottom'
   pasSplitKnopAan(plusR, naast, I18N.t('term.splitViewRightTitle'))
   pasSplitKnopAan(plusB, onder, I18N.t('term.splitViewBottomTitle'))
   pasSplitSluitRandAan(plusL, naast, I18N.t('term.splitCloseLeftTitle'))
@@ -5412,18 +5417,18 @@ function pasWerkSchermAan() {
   if (gemengd) zetSlotsOpSchermvolgorde()
   werk.hidden = view === 'settings'
   werk.classList.toggle('gesplitst', gemengd)
-  werk.classList.toggle('naast', gemengd && termSplit === 'right')
-  werk.classList.toggle('onder', gemengd && termSplit === 'bottom')
+  werk.classList.toggle('naast', gemengd && werkSplit.dir === 'right')
+  werk.classList.toggle('onder', gemengd && werkSplit.dir === 'bottom')
   vlak1.hidden = !gemengd
-  vlak0.classList.toggle('actief', !gemengd || werkSlotFocus === 0)
-  vlak1.classList.toggle('actief', gemengd && werkSlotFocus === 1)
+  vlak0.classList.toggle('actief', !gemengd || werkSplit.focus === 0)
+  vlak1.classList.toggle('actief', gemengd && werkSplit.focus === 1)
 
   if (gemengd) {
     plaatsPanelenInVlakken()
     const wasView = view
     const wasId = activeId
     const wasTab = termTab
-    werkSlots.forEach((s) => {
+    werkSplit.slots.forEach((s) => {
       view = s.view
       if (s.view === 'project') {
         activeId = s.projectId
@@ -5434,7 +5439,7 @@ function pasWerkSchermAan() {
     view = wasView
     activeId = wasId
     termTab = wasTab
-    const focus = werkSlots[werkSlotFocus]
+    const focus = werkSplit.slots[werkSplit.focus]
     if (focus) {
       view = focus.view
       if (focus.view === 'project') {
@@ -5459,10 +5464,10 @@ function pasWerkSchermAan() {
 }
 
 function focusWerkSlot(slot) {
-  if (!werkSlots || slot === werkSlotFocus) return
-  if (werkSlots[werkSlotFocus]?.view === 'project') bergVerkennerOp()
-  werkSlotFocus = slot
-  const s = werkSlots[slot]
+  if (!werkSplit.slots || slot === werkSplit.focus) return
+  if (werkSplit.slots[werkSplit.focus]?.view === 'project') bergVerkennerOp()
+  werkSplit.focus = slot
+  const s = werkSplit.slots[slot]
   view = s.view
   if (s.view === 'cmd' || s.view === 'ps') lastShellView = s.view
   if (s.view === 'project') {
@@ -5479,10 +5484,10 @@ function focusWerkSlot(slot) {
 }
 
 function sluitSplitVoorView() {
-  termSplit = null
+  werkSplit.dir = null
   bewaarTermSplit()
-  werkSlots = null
-  werkSlotFocus = 0
+  werkSplit.slots = null
+  werkSplit.focus = 0
   verzamelPanelenInVlak0()
   const werk = document.getElementById('werk')
   if (werk) werk.classList.remove('gesplitst', 'naast', 'onder')
@@ -5495,21 +5500,21 @@ function sluitSplitVoorView() {
 
 function plaatsInSplit(v) {
   zorgVoorSlots()
-  const visueelDoel = werkSlotFocus === 1 ? 1 : 0
+  const visueelDoel = werkSplit.focus === 1 ? 1 : 0
   zetSlotsOpSchermvolgorde()
   // Een tweede, ánder project bij een split van één project (uitvoer|verkenner):
   // het nieuwe project neemt het uitvoervlak over, zodat het oorspronkelijke
   // project zijn verkenner in het andere vlak houdt. Zonder dit belandde het
   // nieuwe project in het gefocuste (verkenner-)vlak en verdween de verkenner
   // van het eerste project.
-  if (v === 'project' && zelfdeProjectSplit() && werkSlots[0].projectId !== activeId) {
-    let vlak = werkSlots.findIndex(s => normaliseerProjectTab(s.tab) !== 'browser')
+  if (v === 'project' && zelfdeProjectSplit() && werkSplit.slots[0].projectId !== activeId) {
+    let vlak = werkSplit.slots.findIndex(s => normaliseerProjectTab(s.tab) !== 'browser')
     if (vlak < 0) vlak = visueelDoel
-    werkSlots[vlak] = { view: 'project', projectId: activeId, tab: 'output' }
-    werkSlotFocus = vlak
+    werkSplit.slots[vlak] = { view: 'project', projectId: activeId, tab: 'output' }
+    werkSplit.focus = vlak
     view = 'project'
     termTab = 'output'
-    richtTermOpSlot(werkSlots[vlak])
+    richtTermOpSlot(werkSplit.slots[vlak])
     pasWerkSchermAan()
     renderSidebar()
     rememberView()
@@ -5519,21 +5524,21 @@ function plaatsInSplit(v) {
     return
   }
   const nieuw = nieuwSlot(v)
-  const al = werkSlots.findIndex(s => zelfdeSlot(s, v))
+  const al = werkSplit.slots.findIndex(s => zelfdeSlot(s, v))
   if (al >= 0) {
-    if (v === 'project' && werkSlots.some(s => s.view === 'dict')) {
+    if (v === 'project' && werkSplit.slots.some(s => s.view === 'dict')) {
       sluitSplitVoorView()
       setView('project')
       return
     }
-    werkSlotFocus = al
+    werkSplit.focus = al
     if (v === 'project') {
-      termTab = normaliseerProjectTab(werkSlots[al].tab)
+      termTab = normaliseerProjectTab(werkSplit.slots[al].tab)
       haalVerkennerOp(activeId)
     }
     view = v
     if (v === 'cmd' || v === 'ps') lastShellView = v
-    richtTermOpSlot(werkSlots[al])
+    richtTermOpSlot(werkSplit.slots[al])
     pasWerkSchermAan()
     renderSidebar()
     rememberView()
@@ -5544,10 +5549,10 @@ function plaatsInSplit(v) {
   }
 
   let doel = visueelDoel
-  const kandidaat = werkSlots.map((s, i) => i === doel ? nieuw : s)
+  const kandidaat = werkSplit.slots.map((s, i) => i === doel ? nieuw : s)
   if (!kanSamen(kandidaat[0], kandidaat[1])) {
     const ander = 1 - doel
-    const alt = werkSlots.map((s, i) => i === ander ? nieuw : s)
+    const alt = werkSplit.slots.map((s, i) => i === ander ? nieuw : s)
     if (kanSamen(alt[0], alt[1])) doel = ander
     else {
       sluitSplitVoorView()
@@ -5555,13 +5560,13 @@ function plaatsInSplit(v) {
       return
     }
   }
-  werkSlots[doel] = nieuw
-  if (v === 'project' && werkSlots.some(s => s.view === 'dict')) {
+  werkSplit.slots[doel] = nieuw
+  if (v === 'project' && werkSplit.slots.some(s => s.view === 'dict')) {
     sluitSplitVoorView()
     setView('project')
     return
   }
-  werkSlotFocus = doel
+  werkSplit.focus = doel
   view = v
   if (v === 'cmd' || v === 'ps') lastShellView = v
   if (v === 'project') termTab = normaliseerProjectTab(nieuw.tab)
@@ -5595,11 +5600,11 @@ function herstelWerkSplitNaStart() {
     return ['cmd', 'ps', 'dict', 'bat', 'text'].includes(s.view)
   })
   if (!ok) return
-  termSplit = gelezen.dir
-  termSplitFirst = gelezen.first
-  werkSlots = slots
+  werkSplit.dir = gelezen.dir
+  werkSplit.first = gelezen.first
+  werkSplit.slots = slots
   const i = slots.findIndex(s => s.view === view || (s.view === 'project' && s.projectId === activeId))
-  werkSlotFocus = i >= 0 ? i : (raw.focus === 1 ? 1 : 0)
+  werkSplit.focus = i >= 0 ? i : (raw.focus === 1 ? 1 : 0)
   pasWerkSchermAan()
   renderSidebar()
 }
@@ -5666,28 +5671,28 @@ function bewaarZichtbareUitvoer() {
   }
   const andere = document.getElementById('terminal-andere')
   if (andere && splitTweeProjecten()) {
-    const idleId = werkSlots[1 - werkSlotFocus].projectId
+    const idleId = werkSplit.slots[1 - werkSplit.focus].projectId
     if (idleId) termOutput[idleId] = andere.innerHTML.replace(/<span class="t-cursor"><\/span>/g, '')
   }
 }
 
 function bewaarTermSplit(extraId) {
   const ids = new Set([activeId, activeTermId, extraId].filter(Boolean))
-  if (werkSlots) werkSlots.forEach(s => { if (s.projectId) ids.add(s.projectId) })
+  if (werkSplit.slots) werkSplit.slots.forEach(s => { if (s.projectId) ids.add(s.projectId) })
   const next = { ...(settings.termSplits || {}) }
-  if (!termSplit) {
+  if (!werkSplit.dir) {
     ids.forEach(id => { delete next[id] })
     delete next[WERK_SPLIT_ID]
   } else {
     const rec = {
-      dir: termSplit,
-      first: termSplitFirst,
-      slots: (werkSlots || []).map(s => ({
+      dir: werkSplit.dir,
+      first: werkSplit.first,
+      slots: (werkSplit.slots || []).map(s => ({
         view: s.view || 'project',
         projectId: (s.view || 'project') === 'project' ? s.projectId : undefined,
         tab: normaliseerProjectTab(s.tab),
       })),
-      focus: werkSlotFocus,
+      focus: werkSplit.focus,
     }
     if (splitGemengd()) {
       // Woordenboek/cmd hoort bij dit werkvlak, niet bij elk project. Anders
@@ -5707,16 +5712,16 @@ function kiesProjectInSplit(id) {
   zorgVoorSlots()
   bewaarZichtbareUitvoer()
   bergVerkennerOp()
-  const zelfde = werkSlots[0].view === 'project' && werkSlots[1].view === 'project'
-    && werkSlots[0].projectId === werkSlots[1].projectId
-  const al = werkSlots.findIndex(s => (s.view || 'project') === 'project' && s.projectId === id)
+  const zelfde = werkSplit.slots[0].view === 'project' && werkSplit.slots[1].view === 'project'
+    && werkSplit.slots[0].projectId === werkSplit.slots[1].projectId
+  const al = werkSplit.slots.findIndex(s => (s.view || 'project') === 'project' && s.projectId === id)
   if (al >= 0) {
-    if (!zelfde) werkSlotFocus = al
+    if (!zelfde) werkSplit.focus = al
   } else {
-    const tab = normaliseerProjectTab(werkSlots[werkSlotFocus].tab)
-    werkSlots[werkSlotFocus] = { view: 'project', projectId: id, tab }
+    const tab = normaliseerProjectTab(werkSplit.slots[werkSplit.focus].tab)
+    werkSplit.slots[werkSplit.focus] = { view: 'project', projectId: id, tab }
   }
-  termTab = normaliseerProjectTab(werkSlots[werkSlotFocus].tab)
+  termTab = normaliseerProjectTab(werkSplit.slots[werkSplit.focus].tab)
   bewaarTermSplit(id)
 }
 
@@ -5751,9 +5756,9 @@ function pasPaneNamenAan() {
   levenden('.term-pane').forEach(pane => {
     const naam = pane.querySelector('.term-pane-naam')
     if (!naam) return
-    if (!twee || !werkSlots) { naam.textContent = ''; return }
+    if (!twee || !werkSplit.slots) { naam.textContent = ''; return }
     const slot = pane.dataset.pane === 'browser' ? 1 : 0
-    const p = projects.find(x => x.id === werkSlots[slot].projectId)
+    const p = projects.find(x => x.id === werkSplit.slots[slot].projectId)
     naam.textContent = p ? p.name : ''
   })
 }
@@ -5766,7 +5771,7 @@ function vulSplitPanelen() {
     if (ptyAndere) { ptyAndere.hidden = true; ptyAndere.replaceChildren() }
     return
   }
-  const idleId = werkSlots[1 - werkSlotFocus].projectId
+  const idleId = werkSplit.slots[1 - werkSplit.focus].projectId
   const idlePty = ptySessies.get(idleId)
   if (andere) {
     andere.hidden = !!idlePty
@@ -5783,13 +5788,13 @@ function vulSplitPanelen() {
       pasPtyMaatAan(idlePty)
     } else ptyAndere.replaceChildren()
   }
-  zetLiveInSlot(werkSlotFocus)
+  zetLiveInSlot(werkSplit.focus)
   pasPaneNamenAan()
   toonSlotInhoud()
 }
 
 function toonSlotInhoud() {
-  if (!splitTweeProjecten() || !werkSlots) return
+  if (!splitTweeProjecten() || !werkSplit.slots) return
   const term = document.getElementById('terminal')
   const pty = document.getElementById('pty-host')
   const andere = document.getElementById('terminal-andere')
@@ -5797,9 +5802,9 @@ function toonSlotInhoud() {
   const br = document.getElementById('browser')
   const brAndere = document.getElementById('browser-andere')
 
-  const liveTab = normaliseerProjectTab(werkSlots[werkSlotFocus].tab)
-  const idleId = werkSlots[1 - werkSlotFocus].projectId
-  const idleTab = normaliseerProjectTab(werkSlots[1 - werkSlotFocus].tab)
+  const liveTab = normaliseerProjectTab(werkSplit.slots[werkSplit.focus].tab)
+  const idleId = werkSplit.slots[1 - werkSplit.focus].projectId
+  const idleTab = normaliseerProjectTab(werkSplit.slots[1 - werkSplit.focus].tab)
   const livePty = ptySessies.get(activeTermId)
   const idlePty = ptySessies.get(idleId)
 
@@ -5809,13 +5814,13 @@ function toonSlotInhoud() {
   if (ptyAndere) ptyAndere.hidden = idleTab !== 'output' || !idlePty
 
   // Slot 0 gebruikt altijd #browser-andere, slot 1 #browser.
-  if (brAndere) brAndere.hidden = werkSlots[0].tab !== 'browser'
-  if (br) br.hidden = werkSlots[1].tab !== 'browser'
+  if (brAndere) brAndere.hidden = werkSplit.slots[0].tab !== 'browser'
+  if (br) br.hidden = werkSplit.slots[1].tab !== 'browser'
 }
 
 function vulIdleVerkenner() {
-  if (!splitTweeProjecten() || !werkSlots) return
-  werkSlots.forEach(s => {
+  if (!splitTweeProjecten() || !werkSplit.slots) return
+  werkSplit.slots.forEach(s => {
     if (s.tab !== 'browser') return
     const staat = verkennerStaat(s.projectId)
     if (s.projectId === verkennerPid()) {
@@ -5834,14 +5839,14 @@ function vulIdleVerkenner() {
 
 function termSplitAan() {
   if (splitGemengd()) return false
-  return !!(termSplit && levend('.terminal-wrap.splitbaar'))
+  return !!(werkSplit.dir && levend('.terminal-wrap.splitbaar'))
 }
 
 function springNaarOutput() {
   // Zelfde project gesplitst met editor in één vlak: dat vlak blijft; het
   // andere wordt uitvoer/preview (verkenner wijkt).
   if (termSplitAan() && !splitTweeProjecten()) {
-    if (werkSlots && werkSlots.some(s => normaliseerProjectTab(s.tab) === 'editor')) {
+    if (werkSplit.slots && werkSplit.slots.some(s => normaliseerProjectTab(s.tab) === 'editor')) {
       if (projectIsWebsite(projects.find(x => x.id === activeId))) {
         sitePreviewToonUitvoer = true
       }
@@ -5871,34 +5876,34 @@ function leesTermSplit(v) {
 function herstelTermSplit(ctx) {
   // Cmd en powershell hebben geen splitbare wrap; hun bedrading mag een
   // open werksplit (project ernaast) niet weggooien. Een verse gemengde
-  // split evenmin — die staat al in werkSlots, een oud projectrecord mag
+  // split evenmin — die staat al in werkSplit.slots, een oud projectrecord mag
   // die niet terugzetten.
   if (ctx?.id === CMD_CTX_ID || ctx?.id === PS_CTX_ID) return
   if (splitGemengd()) return
   // Bij het terugzetten van een navigatielocatie (terug/vooruit) staat de split
-  // al goed in werkSlots; laat de herstel-uit-opgeslagen-staat hem dan met rust.
-  if (navBezig && termSplit && Array.isArray(werkSlots) && werkSlots.length === 2) return
+  // al goed in werkSplit.slots; laat de herstel-uit-opgeslagen-staat hem dan met rust.
+  if (navBezig && werkSplit.dir && Array.isArray(werkSplit.slots) && werkSplit.slots.length === 2) return
   // Een verse, levende twee-projecten-split (net gemaakt in plaatsInSplit toen
-  // je op het tweede project klikte) staat al goed in werkSlots, maar is nog
+  // je op het tweede project klikte) staat al goed in werkSplit.slots, maar is nog
   // niet opgeslagen: bewaarTermSplit() draait pas ná pasWerkSchermAan(). Zonder
   // deze uitzondering leest de herstelcode hieronder een leeg record en gooit
   // hij de split meteen weer weg -- dan lijkt de klik op het tweede project
   // niets te doen. Alleen overslaan als beide vlakken naar bestaande projecten
   // wijzen en het net getekende project er één van is; een verwijderd project
   // of een vreemd ctx valt hierbuiten en loopt gewoon door de herstelcode.
-  if (termSplit && Array.isArray(werkSlots) && werkSlots.length === 2
-      && werkSlots[0].view === 'project' && werkSlots[1].view === 'project'
-      && werkSlots[0].projectId && werkSlots[1].projectId
-      && werkSlots[0].projectId !== werkSlots[1].projectId
-      && [werkSlots[0].projectId, werkSlots[1].projectId].includes(ctx?.id)
-      && werkSlots.every(s => projects.some(p => p.id === s.projectId))) {
+  if (werkSplit.dir && Array.isArray(werkSplit.slots) && werkSplit.slots.length === 2
+      && werkSplit.slots[0].view === 'project' && werkSplit.slots[1].view === 'project'
+      && werkSplit.slots[0].projectId && werkSplit.slots[1].projectId
+      && werkSplit.slots[0].projectId !== werkSplit.slots[1].projectId
+      && [werkSplit.slots[0].projectId, werkSplit.slots[1].projectId].includes(ctx?.id)
+      && werkSplit.slots.every(s => projects.some(p => p.id === s.projectId))) {
     return
   }
   const raw = (settings.termSplits || {})[ctx?.id]
   const gelezen = leesTermSplit(raw)
-  if (!gelezen) { termSplit = null; termSplitFirst = 'output'; werkSlots = null; werkSlotFocus = 0; return }
-  termSplit = gelezen.dir
-  termSplitFirst = gelezen.first
+  if (!gelezen) { werkSplit.dir = null; werkSplit.first = 'output'; werkSplit.slots = null; werkSplit.focus = 0; return }
+  werkSplit.dir = gelezen.dir
+  werkSplit.first = gelezen.first
   if (raw && Array.isArray(raw.slots) && raw.slots.length === 2) {
     const slots = raw.slots.map(normaliseerSlot)
     const gemengd = slots[0].view !== 'project' || slots[1].view !== 'project'
@@ -5909,10 +5914,10 @@ function herstelTermSplit(ctx) {
     // Gemengd (woordenboek/cmd ernaast) niet hier terugzetten: dat plakte het
     // woordenboek op elk project dat je daarna opende.
     if (ok && gemengd) {
-      termSplit = null
-      termSplitFirst = 'output'
-      werkSlots = null
-      werkSlotFocus = termTab === 'browser' ? 1 : 0
+      werkSplit.dir = null
+      werkSplit.first = 'output'
+      werkSplit.slots = null
+      werkSplit.focus = termTab === 'browser' ? 1 : 0
       document.getElementById('werk')?.classList.remove('gesplitst', 'naast', 'onder')
       return
     }
@@ -5921,58 +5926,58 @@ function herstelTermSplit(ctx) {
       if (!zelfdeProject) {
         // Twee verschillende projecten niet terugzetten bij opnieuw openen:
         // dat was de glitch bij "project voor de 2e keer" / derde project.
-        termSplit = null
-        termSplitFirst = 'output'
-        werkSlots = null
-        werkSlotFocus = termTab === 'browser' ? 1 : 0
+        werkSplit.dir = null
+        werkSplit.first = 'output'
+        werkSplit.slots = null
+        werkSplit.focus = termTab === 'browser' ? 1 : 0
         document.getElementById('werk')?.classList.remove('gesplitst', 'naast', 'onder')
         return
       }
-      werkSlots = slots
+      werkSplit.slots = slots
       const i = slots.findIndex(s => s.projectId === ctx?.id)
-      werkSlotFocus = i >= 0 ? i : (raw.focus === 1 ? 1 : 0)
-      termTab = werkSlots[werkSlotFocus].tab
+      werkSplit.focus = i >= 0 ? i : (raw.focus === 1 ? 1 : 0)
+      termTab = werkSplit.slots[werkSplit.focus].tab
       return
     }
   }
   if (!levend('.terminal-wrap.splitbaar') && !splitGemengd()) {
-    termSplit = null
-    termSplitFirst = 'output'
-    werkSlots = null
-    werkSlotFocus = termTab === 'browser' ? 1 : 0
+    werkSplit.dir = null
+    werkSplit.first = 'output'
+    werkSplit.slots = null
+    werkSplit.focus = termTab === 'browser' ? 1 : 0
     return
   }
-  werkSlots = null
-  werkSlotFocus = termTab === 'browser' ? 1 : 0
+  werkSplit.slots = null
+  werkSplit.focus = termTab === 'browser' ? 1 : 0
 }
 
 function zetTermSplit(richting, houdenInhoud) {
   if (richting === 'right' || richting === 'bottom') {
     // Het scherm dat je nu open hebt blijft staan; het andere komt rechts of onder.
-    if (!termSplit) {
+    if (!werkSplit.dir) {
       if (view === 'project' && termTab === 'editor') {
         // Bestand open: houd de editor, zet preview/uitvoer ernaast (niet de
         // verkenner — bij sites wil je de live pagina zien terwijl je bewerkt).
-        termSplitFirst = 'output'
+        werkSplit.first = 'output'
         zorgVoorSlots()
-        werkSlots[0].tab = 'editor'
-        werkSlots[1].tab = 'output'
-        werkSlotFocus = visueelVoorDataSlot(1)
+        werkSplit.slots[0].tab = 'editor'
+        werkSplit.slots[1].tab = 'output'
+        werkSplit.focus = visueelVoorDataSlot(1)
         termTab = 'output'
       } else {
-        termSplitFirst = (view === 'project' && termTab === 'browser') ? 'browser' : 'output'
+        werkSplit.first = (view === 'project' && termTab === 'browser') ? 'browser' : 'output'
         zorgVoorSlots()
-        werkSlotFocus = 1
+        werkSplit.focus = 1
         if (view === 'project') termTab = visueelTermPaneVoorSlot(1)
       }
     }
-    termSplit = richting
+    werkSplit.dir = richting
   } else {
-    const houden = houdenInhoud || (werkSlots && werkSlots[werkSlotFocus])
-    termSplit = null
+    const houden = houdenInhoud || (werkSplit.slots && werkSplit.slots[werkSplit.focus])
+    werkSplit.dir = null
     bewaarTermSplit()
-    werkSlots = null
-    werkSlotFocus = 0
+    werkSplit.slots = null
+    werkSplit.focus = 0
     if (houden) {
       view = houden.view || 'project'
       if (view === 'project') {
@@ -5981,10 +5986,10 @@ function zetTermSplit(richting, houdenInhoud) {
       }
     }
   }
-  if (termSplit) bewaarTermSplit()
+  if (werkSplit.dir) bewaarTermSplit()
   pasWerkSchermAan()
   planSplitPlusVervers()
-  if (termSplit && !splitGemengd() && !browserItems.length) navigeerNaar(browserPath || currentCwd())
+  if (werkSplit.dir && !splitGemengd() && !browserItems.length) navigeerNaar(browserPath || currentCwd())
   requestAnimationFrame(() => pasPtyMaatAan(ptySessies.get(activeTermId)))
   // Split openen of sluiten is een stap in de geschiedenis: zo kan terug/vooruit
   // de gesplitste weergave terugzetten of juist weer dichtklappen.
@@ -5994,17 +5999,17 @@ function zetTermSplit(richting, houdenInhoud) {
 // Min links/boven sluit dat vlak; het andere (rechts/onder) blijft staan.
 // visueel 0 = links/boven, visueel 1 = rechts/onder — niet het geselecteerde vlak.
 function inhoudVanVisueelSlot(visueel) {
-  if (werkSlots && werkSlots.length === 2) {
+  if (werkSplit.slots && werkSplit.slots.length === 2) {
     if (splitGemengd()) {
-      const omgewisseld = termSplitFirst === 'browser'
-      const s = omgewisseld ? werkSlots[visueel === 0 ? 1 : 0] : werkSlots[visueel]
+      const omgewisseld = werkSplit.first === 'browser'
+      const s = omgewisseld ? werkSplit.slots[visueel === 0 ? 1 : 0] : werkSplit.slots[visueel]
       return s ? { ...s } : null
     }
     const pane = visueelTermPaneVoorSlot(visueel)
-    // Twee projecten: werkSlots[0] hoort bij het output-paneel, [1] bij verkenner.
-    // Die panelen kunnen visueel omgewisseld zijn via termSplitFirst.
+    // Twee projecten: werkSplit.slots[0] hoort bij het output-paneel, [1] bij verkenner.
+    // Die panelen kunnen visueel omgewisseld zijn via werkSplit.first.
     const dataSlot = pane === 'browser' ? 1 : 0
-    const s = werkSlots[dataSlot] || werkSlots[visueel]
+    const s = werkSplit.slots[dataSlot] || werkSplit.slots[visueel]
     if ((s.view || 'project') !== 'project') return { ...s }
     return { view: 'project', projectId: s.projectId || activeId, tab: normaliseerProjectTab(s.tab || pane) }
   }
@@ -6012,9 +6017,9 @@ function inhoudVanVisueelSlot(visueel) {
 }
 
 function sluitSplitAanKant(kant) {
-  if (!termSplit) return
-  if ((kant === 'left' || kant === 'right') && termSplit !== 'right') return
-  if ((kant === 'top' || kant === 'bottom') && termSplit !== 'bottom') return
+  if (!werkSplit.dir) return
+  if ((kant === 'left' || kant === 'right') && werkSplit.dir !== 'right') return
+  if ((kant === 'top' || kant === 'bottom') && werkSplit.dir !== 'bottom') return
   bergVerkennerOp()
   const houdenVisueel = (kant === 'left' || kant === 'top') ? 1 : 0
   const houden = inhoudVanVisueelSlot(houdenVisueel)
@@ -6030,19 +6035,19 @@ function sluitSplitAanKant(kant) {
         window.api.saveSettings(settings)
       }
     }
-    werkSlotFocus = 0
+    werkSplit.focus = 0
   }
   zetTermSplit(null, houden)
 }
 
 function klikSplitPlus(kant) {
   if (kant === 'right') {
-    if (termSplit === 'right') sluitSplitAanKant('right')
+    if (werkSplit.dir === 'right') sluitSplitAanKant('right')
     else zetTermSplit('right')
     return
   }
   if (kant === 'bottom') {
-    if (termSplit === 'bottom') sluitSplitAanKant('bottom')
+    if (werkSplit.dir === 'bottom') sluitSplitAanKant('bottom')
     else zetTermSplit('bottom')
     return
   }
@@ -6072,7 +6077,7 @@ function pasSplitSluitRandAan(btn, aan, titel) {
 }
 
 function pasTermSchermAan() {
-  if (splitGemengd() && werkSlots) {
+  if (splitGemengd() && werkSplit.slots) {
     document.querySelectorAll('#werk .terminal-wrap').forEach(w => {
       if (inBevrorenPaneel(w)) return
       w.classList.remove('gesplitst', 'naast', 'onder', 'twee-projecten')
@@ -6081,7 +6086,7 @@ function pasTermSchermAan() {
         b.classList.remove('zichtbaar', 'is-min')
       })
       const inMain = !!w.closest('#main')
-      const projectSlot = werkSlots.find(s => s.view === 'project')
+      const projectSlot = werkSplit.slots.find(s => s.view === 'project')
       const tab = inMain ? normaliseerProjectTab(projectSlot?.tab) : 'output'
       const paneOut = w.querySelector('.term-pane[data-pane="output"]')
       const paneBr = w.querySelector('.term-pane[data-pane="browser"]')
@@ -6129,20 +6134,20 @@ function pasTermSchermAan() {
   const twee = splitTweeProjecten()
   if (wrap) {
     wrap.classList.toggle('gesplitst', split)
-    wrap.classList.toggle('naast', split && termSplit === 'right')
-    wrap.classList.toggle('onder', split && termSplit === 'bottom')
+    wrap.classList.toggle('naast', split && werkSplit.dir === 'right')
+    wrap.classList.toggle('onder', split && werkSplit.dir === 'bottom')
     wrap.classList.toggle('twee-projecten', twee)
   }
 
   const paneOut = wrap?.querySelector('.term-pane[data-pane="output"]')
   const paneBr  = wrap?.querySelector('.term-pane[data-pane="browser"]')
   const paneEd  = wrap?.querySelector('.term-pane[data-pane="editor"]')
-  const browserEerst = split && termSplitFirst === 'browser'
-  const splitTabs = (split && !twee && werkSlots)
-    ? [normaliseerProjectTab(werkSlots[0].tab), normaliseerProjectTab(werkSlots[1].tab)]
+  const browserEerst = split && werkSplit.first === 'browser'
+  const splitTabs = (split && !twee && werkSplit.slots)
+    ? [normaliseerProjectTab(werkSplit.slots[0].tab), normaliseerProjectTab(werkSplit.slots[1].tab)]
     : null
-  const liveEdTwee = !!(twee && werkSlots
-    && normaliseerProjectTab(werkSlots[werkSlotFocus].tab) === 'editor')
+  const liveEdTwee = !!(twee && werkSplit.slots
+    && normaliseerProjectTab(werkSplit.slots[werkSplit.focus].tab) === 'editor')
   const editorAan = (!split && tab === 'editor') || liveEdTwee
 
   if (split && !twee && splitTabs) {
@@ -6159,23 +6164,23 @@ function pasTermSchermAan() {
     zetPane(paneOut, 'output')
     zetPane(paneBr, 'browser')
     zetPane(paneEd, 'editor')
-  } else if (twee && werkSlots) {
+  } else if (twee && werkSplit.slots) {
     if (paneOut) {
-      paneOut.hidden = liveEdTwee && werkSlotFocus === 0
-      paneOut.classList.toggle('actief', werkSlotFocus === 0 && !liveEdTwee)
+      paneOut.hidden = liveEdTwee && werkSplit.focus === 0
+      paneOut.classList.toggle('actief', werkSplit.focus === 0 && !liveEdTwee)
       paneOut.style.order = browserEerst ? '2' : '1'
       paneOut.classList.toggle('split-tweede', !!browserEerst)
     }
     if (paneBr) {
-      paneBr.hidden = liveEdTwee && werkSlotFocus === 1
-      paneBr.classList.toggle('actief', werkSlotFocus === 1 && !liveEdTwee)
+      paneBr.hidden = liveEdTwee && werkSplit.focus === 1
+      paneBr.classList.toggle('actief', werkSplit.focus === 1 && !liveEdTwee)
       paneBr.style.order = browserEerst ? '1' : '2'
       paneBr.classList.toggle('split-tweede', !browserEerst)
     }
     if (paneEd) {
       paneEd.hidden = !liveEdTwee
       if (liveEdTwee) {
-        paneEd.style.order = orderVoorDataSlot(werkSlotFocus)
+        paneEd.style.order = orderVoorDataSlot(werkSplit.focus)
         paneEd.classList.toggle('split-tweede', paneEd.style.order === '2')
         paneEd.classList.toggle('actief', true)
       } else {
@@ -6202,7 +6207,7 @@ function pasTermSchermAan() {
   }
 
   const brAndere = document.getElementById('browser-andere')
-  if (twee && werkSlots) {
+  if (twee && werkSplit.slots) {
     // Per vlak terminal of verkenner; toonSlotInhoud doet dat via vulSplitPanelen.
   } else if (split && splitTabs) {
     term.hidden = !splitTabs.includes('output') || ptyZichtbaar
@@ -6219,7 +6224,7 @@ function pasTermSchermAan() {
   // Alleen verbergen als de editor de preview-plek inneemt — niet als die
   // ernaast staat (output|editor bij sites).
   const previewWegDoorEditor = (!split && tab === 'editor')
-    || (liveEdTwee && werkSlotFocus === 0)
+    || (liveEdTwee && werkSplit.focus === 0)
   pasSitePreviewZicht(previewOutput, previewWegDoorEditor, !!(ptyZichtbaar && previewOutput))
   vulSplitPanelen()
   vulIdleVerkenner()
@@ -6243,13 +6248,13 @@ function pasTermSchermAan() {
   })
   verversBestandTabZichtbaarheid()
   pasSplitKnopAan(wrap?.querySelector('.term-split-plus[data-split="right"]'),
-    split && termSplit === 'right', I18N.t('term.splitRightTitle'))
+    split && werkSplit.dir === 'right', I18N.t('term.splitRightTitle'))
   pasSplitKnopAan(wrap?.querySelector('.term-split-plus[data-split="bottom"]'),
-    split && termSplit === 'bottom', I18N.t('term.splitBottomTitle'))
+    split && werkSplit.dir === 'bottom', I18N.t('term.splitBottomTitle'))
   pasSplitSluitRandAan(wrap?.querySelector('.term-split-plus[data-split="left"]'),
-    split && termSplit === 'right', I18N.t('term.splitCloseLeftTitle'))
+    split && werkSplit.dir === 'right', I18N.t('term.splitCloseLeftTitle'))
   pasSplitSluitRandAan(wrap?.querySelector('.term-split-plus[data-split="top"]'),
-    split && termSplit === 'bottom', I18N.t('term.splitCloseTopTitle'))
+    split && werkSplit.dir === 'bottom', I18N.t('term.splitCloseTopTitle'))
   if (splitGemengd()) {
     wrap?.querySelectorAll('.term-split-plus').forEach(b => {
       b.hidden = true
@@ -6314,17 +6319,17 @@ function wireTermSplit() {
         const paneNaam = pane.dataset.pane
         let slot
         if (paneNaam === 'editor') {
-          slot = werkSlots.findIndex(s => normaliseerProjectTab(s.tab) === 'editor')
-          if (slot < 0) slot = werkSlotFocus
+          slot = werkSplit.slots.findIndex(s => normaliseerProjectTab(s.tab) === 'editor')
+          if (slot < 0) slot = werkSplit.focus
         } else {
           slot = visueelSlotVoorTermPane(paneNaam)
         }
-        const id = werkSlots[slot].projectId
+        const id = werkSplit.slots[slot].projectId
         bergVerkennerOp()
         if (id && id !== activeId) selectProject(id)
         else {
-          werkSlotFocus = slot
-          termTab = normaliseerProjectTab(werkSlots[slot].tab)
+          werkSplit.focus = slot
+          termTab = normaliseerProjectTab(werkSplit.slots[slot].tab)
           haalVerkennerOp(id)
           pasTermSchermAan()
           bewaarTermSplit()
@@ -6333,12 +6338,12 @@ function wireTermSplit() {
       }
       const tab = pane.dataset.pane
       if (tab === 'output' || tab === 'browser' || tab === 'editor') {
-        if (termSplitAan() && werkSlots && !splitGemengd()) {
+        if (termSplitAan() && werkSplit.slots && !splitGemengd()) {
           if (tab === 'editor') {
-            const ds = werkSlots.findIndex(s => normaliseerProjectTab(s.tab) === 'editor')
-            werkSlotFocus = ds >= 0 ? visueelVoorDataSlot(ds) : werkSlotFocus
+            const ds = werkSplit.slots.findIndex(s => normaliseerProjectTab(s.tab) === 'editor')
+            werkSplit.focus = ds >= 0 ? visueelVoorDataSlot(ds) : werkSplit.focus
           } else {
-            werkSlotFocus = visueelSlotVoorTermPane(tab)
+            werkSplit.focus = visueelSlotVoorTermPane(tab)
           }
           bewaarTermSplit()
         }
@@ -6356,58 +6361,58 @@ function setTermTab(tab) {
   // Zonder open bestand bestaat de editor-tab niet — niet naartoe springen.
   if (tab === 'editor' && !lezerStaat.tabs.length) tab = 'output'
   termTab = tab
-  if (splitAan() && werkSlots) {
+  if (splitAan() && werkSplit.slots) {
     if (zelfdeProjectSplit()) {
       // Bestand naast preview/uitvoer: houd output, vervang de verkenner.
       // (Anders verdwijnt de live html-pagina en blijft alleen de mappenlijst.)
       if (tab === 'editor') {
-        const oi = werkSlots.findIndex(s => normaliseerProjectTab(s.tab) === 'output')
-        const doel = oi >= 0 ? 1 - oi : dataSlotVoorVisueel(werkSlotFocus)
-        werkSlots[doel].tab = 'editor'
+        const oi = werkSplit.slots.findIndex(s => normaliseerProjectTab(s.tab) === 'output')
+        const doel = oi >= 0 ? 1 - oi : dataSlotVoorVisueel(werkSplit.focus)
+        werkSplit.slots[doel].tab = 'editor'
         const ander = 1 - doel
-        if (normaliseerProjectTab(werkSlots[ander].tab) === 'editor') {
-          werkSlots[ander].tab = 'output'
-        } else if (normaliseerProjectTab(werkSlots[ander].tab) !== 'output') {
+        if (normaliseerProjectTab(werkSplit.slots[ander].tab) === 'editor') {
+          werkSplit.slots[ander].tab = 'output'
+        } else if (normaliseerProjectTab(werkSplit.slots[ander].tab) !== 'output') {
           // Geen preview-vlak meer (bijv. alleen verkenner): herstel output ernaast.
-          werkSlots[ander].tab = 'output'
+          werkSplit.slots[ander].tab = 'output'
         }
-        werkSlotFocus = visueelVoorDataSlot(doel)
+        werkSplit.focus = visueelVoorDataSlot(doel)
       } else {
         // Editor open houden: output/verkenner landt in het ándere vlak.
-        const ed = werkSlots.findIndex(s => normaliseerProjectTab(s.tab) === 'editor')
+        const ed = werkSplit.slots.findIndex(s => normaliseerProjectTab(s.tab) === 'editor')
         if (ed >= 0) {
           const ander = 1 - ed
-          if (normaliseerProjectTab(werkSlots[ander].tab) === tab) {
-            werkSlotFocus = visueelVoorDataSlot(ander)
+          if (normaliseerProjectTab(werkSplit.slots[ander].tab) === tab) {
+            werkSplit.focus = visueelVoorDataSlot(ander)
           } else {
-            werkSlots[ander].tab = tab
-            werkSlotFocus = visueelVoorDataSlot(ander)
+            werkSplit.slots[ander].tab = tab
+            werkSplit.focus = visueelVoorDataSlot(ander)
           }
         } else {
-          const idx = werkSlots.findIndex(s => normaliseerProjectTab(s.tab) === tab)
+          const idx = werkSplit.slots.findIndex(s => normaliseerProjectTab(s.tab) === tab)
           if (idx >= 0) {
-            werkSlotFocus = visueelVoorDataSlot(idx)
+            werkSplit.focus = visueelVoorDataSlot(idx)
           } else {
-            const doel = dataSlotVoorVisueel(werkSlotFocus)
+            const doel = dataSlotVoorVisueel(werkSplit.focus)
             const ander = 1 - doel
-            if (normaliseerProjectTab(werkSlots[ander].tab) === tab) {
-              werkSlotFocus = visueelVoorDataSlot(ander)
+            if (normaliseerProjectTab(werkSplit.slots[ander].tab) === tab) {
+              werkSplit.focus = visueelVoorDataSlot(ander)
             } else {
-              werkSlots[doel].tab = tab
-              werkSlotFocus = visueelVoorDataSlot(doel)
+              werkSplit.slots[doel].tab = tab
+              werkSplit.focus = visueelVoorDataSlot(doel)
             }
           }
         }
       }
-      if (termSplit) bewaarTermSplit()
-    } else if (werkSlots[werkSlotFocus] && (werkSlots[werkSlotFocus].view || 'project') === 'project') {
-      werkSlots[werkSlotFocus].tab = tab
-      if (termSplit) bewaarTermSplit()
+      if (werkSplit.dir) bewaarTermSplit()
+    } else if (werkSplit.slots[werkSplit.focus] && (werkSplit.slots[werkSplit.focus].view || 'project') === 'project') {
+      werkSplit.slots[werkSplit.focus].tab = tab
+      if (werkSplit.dir) bewaarTermSplit()
     } else {
-      const ps = werkSlots.find(s => (s.view || 'project') === 'project')
+      const ps = werkSplit.slots.find(s => (s.view || 'project') === 'project')
       if (ps) {
         ps.tab = tab
-        if (termSplit) bewaarTermSplit()
+        if (werkSplit.dir) bewaarTermSplit()
       }
     }
   }
@@ -6687,7 +6692,7 @@ async function wireBrowser(ctx, opts = {}) {
   await bedraadVerkennerHost('')
   if (document.getElementById('browser-andere')) await bedraadVerkennerHost('-andere')
 
-  if (splitTweeProjecten()) setTermTab(werkSlots[werkSlotFocus].tab)
+  if (splitTweeProjecten()) setTermTab(werkSplit.slots[werkSplit.focus].tab)
   else setTermTab(standaardTermTab(ctx.id))
   ververPtyStatus()
   bedraadLezer()
