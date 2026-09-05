@@ -514,8 +514,10 @@ check('zonder systeemprompt blijft het veld weg',
     bron.includes('function vulIdleVerkenner') &&
     !/splitTweeProjecten\(\) && tab === 'browser'/.test(
       bron.slice(bron.indexOf('function setTermTab'), bron.indexOf('async function navigeerNaar'))))
-  check('elk project onthoudt zijn eigen verkenner-map',
+  check('elk project onthoudt zijn verkenner-map alleen binnen het project',
     bron.includes('function bewaarVerkennerPad') &&
+    bron.includes('function wisVerkennerBuitenBeeld') &&
+    bron.includes('function schoonVerkennerPadenBijStart') &&
     bron.includes('verkennerPaden') &&
     bron.includes('bergVerkennerOp()') &&
     /view === 'cmd'/.test(bron.slice(bron.indexOf('function verkennerPid'), bron.indexOf('function verkennerStaat'))) &&

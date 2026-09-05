@@ -1384,6 +1384,10 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (migreerStandaardEditors() || ontdubbelCustomEditors() || normaliseerEditorKleuren()
       || migreerSnelRijen()) window.api.saveSettings(settings)
 
+  // Project-verkenner begint altijd opnieuw bij de projectlocatie. Alleen
+  // cmd/ps onthouden hun map over herstarts heen.
+  schoonVerkennerPadenBijStart()
+
   pasCodeKleurenToe()
 
   await I18N.init(settings.language)
@@ -1623,8 +1627,7 @@ async function pasLocatieToe(loc) {
   navBezig = true
   try {
     // Alleen opnieuw opbouwen als je echt naar een ander scherm of project
-    // gaat: setView zet de verkenner terug naar de werkmap, en dat is precies
-    // wat je bij het teruglopen door mappen níét wilt.
+    // gaat. Map-stappen binnen dezelfde verkenner mogen de toestand houden.
     const anderScherm  = loc.view !== view
     const anderProject = loc.view === 'project' && loc.projectId && loc.projectId !== activeId
     if (loc.projectId) activeId = loc.projectId
@@ -3441,6 +3444,9 @@ async function selectProject(id) {
   if (projects.some(x => x.id === id)) setTimeout(() => controleerAchterstand(), 400)
 
   const naOpenen = () => {
+    // Pas ná het zetten van split/activeId: projecten die niet meer in beeld
+    // zijn vergeten hun verkenner-map. Opdrachten houden die juist vast.
+    wisVerkennerBuitenBeeld()
     const p = projects.find(x => x.id === id)
     bepaalToolsVoorProject(p).then(async verborgen => {
       if (activeId !== id) return
@@ -4668,10 +4674,15 @@ let sugItems = []
 let sugIndex = -1
 let sugVerbergTimer = null
 
-// Per project bewaren we de verkenner, zodat twee open projecten elk hun
-// eigen map, lijst en selectie houden.
+// Per project bewaren we de verkenner zolang je in dat project blijft (of via
+// opdrachten even weggaat). Ga je naar een ánder project, of herstart je de
+// app, dan begint elk project opnieuw bij zijn locatie. Cmd/ps onthouden wél.
 const verkennerById = {}
 let verkennerTekenPid = null   // tijdelijk: tekenen of navigeren voor een ander project
+
+function isOpdrachtVerkenner(pid) {
+  return pid === CMD_CTX_ID || pid === PS_CTX_ID
+}
 
 function verkennerPid() {
   if (verkennerTekenPid) return verkennerTekenPid
@@ -4693,8 +4704,10 @@ function verkennerPid() {
 function verkennerStaat(pid = verkennerPid()) {
   const id = pid || '__none__'
   if (!verkennerById[id]) {
+    // Alleen cmd/ps lezen een bewaard pad; projecten starten leeg → locatie.
+    const bewaard = isOpdrachtVerkenner(id) ? ((settings.verkennerPaden || {})[id] || '') : ''
     verkennerById[id] = {
-      path: (settings.verkennerPaden || {})[id] || '',
+      path: bewaard,
       items: [], fout: '', parent: null,
       selectie: new Set(), focus: -1, anker: -1, zichtbaar: [],
       scroll: 0,
@@ -4705,11 +4718,60 @@ function verkennerStaat(pid = verkennerPid()) {
 
 function bewaarVerkennerPad(pid, pad) {
   if (!pid || !pad) return
+  // Projectmappen horen niet op schijf: na herstart terug naar de locatie.
+  if (!isOpdrachtVerkenner(pid)) return
   const next = { ...(settings.verkennerPaden || {}) }
   if (next[pid] === pad) return
   next[pid] = pad
   settings.verkennerPaden = next
   window.api.saveSettings(settings)
+}
+
+function wisProjectVerkenner(pid) {
+  if (!pid || isOpdrachtVerkenner(pid) || pid === '__none__') return
+  delete verkennerById[pid]
+  if (settings.verkennerPaden && Object.prototype.hasOwnProperty.call(settings.verkennerPaden, pid)) {
+    const next = { ...settings.verkennerPaden }
+    delete next[pid]
+    settings.verkennerPaden = next
+    window.api.saveSettings(settings)
+  }
+}
+
+// Projecten die nu nog "van jou" zijn: in een split allebei, anders het
+// actieve project — ook als je even bij opdrachten kijkt (activeId blijft).
+function verkennerProjectenInBeeld() {
+  const ids = new Set()
+  if (splitTweeProjecten() && werkSlots) {
+    for (const s of werkSlots) {
+      if (s && s.view === 'project' && s.projectId) ids.add(s.projectId)
+    }
+  } else if (activeId) {
+    ids.add(activeId)
+  }
+  return ids
+}
+
+function wisVerkennerBuitenBeeld() {
+  const houden = verkennerProjectenInBeeld()
+  for (const pid of Object.keys(verkennerById)) {
+    if (isOpdrachtVerkenner(pid) || pid === '__none__') continue
+    if (!houden.has(pid)) wisProjectVerkenner(pid)
+  }
+}
+
+function schoonVerkennerPadenBijStart() {
+  const paden = settings.verkennerPaden || {}
+  const next = {}
+  for (const [id, pad] of Object.entries(paden)) {
+    if (isOpdrachtVerkenner(id) && pad) next[id] = pad
+  }
+  if (Object.keys(next).length !== Object.keys(paden).length) {
+    settings.verkennerPaden = next
+    window.api.saveSettings(settings)
+  } else {
+    settings.verkennerPaden = next
+  }
 }
 
 function bergVerkennerOp(pid = verkennerPid()) {
@@ -4730,7 +4792,8 @@ function bergVerkennerOp(pid = verkennerPid()) {
 
 function haalVerkennerOp(pid = verkennerPid()) {
   const s = verkennerStaat(pid)
-  browserPath = s.path || (settings.verkennerPaden || {})[pid] || ''
+  const bewaard = isOpdrachtVerkenner(pid) ? ((settings.verkennerPaden || {})[pid] || '') : ''
+  browserPath = s.path || bewaard || ''
   browserItems = Array.isArray(s.items) ? s.items.slice() : []
   browserFout = s.fout
   browserParent = s.parent
@@ -6549,7 +6612,8 @@ async function openNoteVanVerkenner(pad) {
 async function wireBrowser(ctx, opts = {}) {
   haalVerkennerOp(ctx.id)
   if (!browserPath) {
-    const bewaard = (settings.verkennerPaden || {})[ctx.id]
+    // Cmd/ps: laatst onthouden map. Projecten: altijd de projectlocatie.
+    const bewaard = isOpdrachtVerkenner(ctx.id) ? (settings.verkennerPaden || {})[ctx.id] : ''
     const loc = ctx.locations[ctx.activeLocation] || ctx.locations[0]
     browserPath = bewaard || loc?.path || ''
     browserItems = []
@@ -17973,6 +18037,7 @@ function setupModalEvents() {
       activeId = null
       document.getElementById('main').innerHTML = `<div class="empty-state"><i class="ti ti-layout-sidebar-left-expand"></i><p>${esc(I18N.t('main.emptyState'))}</p></div>`
     }
+    wisProjectVerkenner(deleteId)
     saveProjects()
     meldGitPadenAanMain()
     sidebarGetekend = false
