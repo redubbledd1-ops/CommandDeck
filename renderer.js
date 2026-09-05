@@ -4799,9 +4799,11 @@ function haalVerkennerOp(pid = verkennerPid()) {
   browserZichtbaar = Array.isArray(s.zichtbaar) ? s.zichtbaar.slice() : []
 }
 
+// Slot 0's verkenner leeft in #browser-andere (output-paneel), slot 1's in
+// #browser (verkenner-paneel). Zelfde slot-model als de terminal, zodat er één
+// manier is om het vlak van een project te bepalen.
 function brSuffix(pid = verkennerPid()) {
-  if (splitTweeProjecten() && werkSplit.slots && werkSplit.slots[0].projectId === pid) return '-andere'
-  return ''
+  return slotVanProject(pid) === 0 ? '-andere' : ''
 }
 
 function brEl(name, pid) {
