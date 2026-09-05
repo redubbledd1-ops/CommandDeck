@@ -393,7 +393,10 @@ function eigenEditors() {
 }
 
 function editorsZelfde(a, b) {
-  if (a.catalogId && b.catalogId && a.catalogId === b.catalogId) return true
+  // Twee bekende catalogus-items zijn alleen hetzelfde als hun id gelijk is. Zo
+  // vallen Claude Code en de Claude-app (beide exe-stam "claude", maar aparte
+  // catalogus-items) niet per ongeluk samen.
+  if (a.catalogId && b.catalogId) return a.catalogId === b.catalogId
   if (a.path && b.path && padNorm(a.path) === padNorm(b.path)) return true
   const sa = padStam(a.path), sb = padStam(b.path)
   return !!(sa && sa === sb)
@@ -3723,6 +3726,7 @@ function hefMappenOp(p, sectie, mapIds) {
 //
 // AI per soort (loop dit na bij een nieuwe dienst):
 //   API-chat (claude/openai/gemini/… + eigen server)  → map "ai"
+//                                                     → anders bestaande "programma's"
 //   CLI-programma (ai:prog:claude/openai/gemini)      → map "programma's"
 //                                                     → anders bestaande "ai"
 //   Lokale app-chat (ollama, lmstudio)                → map "programma's"
@@ -3731,7 +3735,8 @@ const TOOLS_IDS = new Set(TOOLS_CMD_DEFS.map(d => d.id))
 const AI_LOKAAL_BIJ_PROG = new Set(['ai:ollama', 'ai:lmstudio'])
 const AUTO_MAPPEN = [
   { auto: 'git',       sleutel: 'folder.autoGit',   toets: (id) => GitTools.isGitId(id) },
-  { auto: 'ai',        sleutel: 'folder.autoAi',    toets: (id) => id.startsWith('ai:') && !id.startsWith('ai:prog:') && !AI_LOKAAL_BIJ_PROG.has(id) },
+  { auto: 'ai',        sleutel: 'folder.autoAi',    fallbackAuto: 'prog',
+    toets: (id) => id.startsWith('ai:') && !id.startsWith('ai:prog:') && !AI_LOKAAL_BIJ_PROG.has(id) },
   { auto: 'prog',      sleutel: 'folder.autoProgs', fallbackAuto: 'ai', soloInMap: true,
     toets: (id) => id.startsWith('editor:custom:') || id.startsWith('ai:prog:') || AI_LOKAAL_BIJ_PROG.has(id) },
   { auto: FLUTTER_MAP, sleutel: 'folder.flutter',   toets: (id) => TOOLS_IDS.has(id) },
@@ -13034,8 +13039,11 @@ function alGeconfigureerd() {
     if (path) {
       paden.add(padNorm(path))
       paden.add(String(path).toLowerCase())
-      const s = padStam(path)
-      if (s) stammen.add(s)
+      // Op de exe-stam ontdubbelen we alleen paden zónder catalogus-id (handmatig
+      // toegevoegd). Bekende catalogus-programma's herkennen we aan hun id (cats),
+      // zodat twee items met dezelfde stam — Claude Code en de Claude-app —
+      // allebei gevonden mogen worden.
+      if (!catalogId) { const s = padStam(path); if (s) stammen.add(s) }
     }
     if (catalogId) cats.add(catalogId)
   }

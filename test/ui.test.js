@@ -444,6 +444,7 @@ window.eval(fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8')
   + '\n  verwijderMap, folderOp,'
   + '\n  verfLezer,'
   + '\n  gekoppeldeRepoAdressen, zetBewerkt: (id) => { editingId = id },'
+  + '\n  editorsZelfde,'
   + '\n  splitSlotIds: () => (werkSplit.slots || []).map(s => s.projectId) };')
 startVraagAutomaat()
 const W = window
@@ -492,6 +493,20 @@ function startVraagAutomaat() {
 ;(async () => {
   window.document.dispatchEvent(new window.Event('DOMContentLoaded'))
   await tick(); await tick()
+
+  // ── editors ontdubbelen: aparte catalogus-items blijven apart ───────────────
+  check('Claude Code en de Claude-app worden niet samengevoegd',
+    W.__test.editorsZelfde(
+      { catalogId: 'claudeCode', path: 'C:\\a\\claude.exe' },
+      { catalogId: 'claudeDesktop', path: 'C:\\b\\Claude.exe' }) === false)
+  check('maar twee keer hetzelfde catalogus-item wél',
+    W.__test.editorsZelfde(
+      { catalogId: 'claudeCode', path: 'C:\\a\\claude.exe' },
+      { catalogId: 'claudeCode', path: 'C:\\b\\claude.exe' }) === true)
+  check('en zonder catalogus-id telt dezelfde exe-stam nog steeds als hetzelfde',
+    W.__test.editorsZelfde(
+      { path: 'C:\\a\\notepad++.exe' },
+      { path: 'C:\\b\\notepad++.exe' }) === true)
 
   // ── sidebar ────────────────────────────────────────────────────────────────
   check('cmd-knop staat boven de projecten-sectie',
@@ -4255,7 +4270,10 @@ function startVraagAutomaat() {
     // map een eenrichtingsstraat.
     const eigen = { id: 'mtest', sectie: 'run', label: 'test', open: true }
     proj.cmdFolders = [...proj.cmdFolders, eigen]
-    const los = rij().find(id => id.indexOf('map:') !== 0)
+    // Neem bewust een git-knop uit de git-map: dan is er gegarandeerd een losse
+    // knop om mee te testen, los van hoeveel editors er globaal gevonden zijn.
+    const los = W.__test.knoppenInMap(proj, 'run', git.id)[0]
+    W.__test.verplaatsKnopId(proj, 'run', los, null, null, false)
     W.__test.legInMap(proj, 'run', los, eigen.id)
     check('een knop in een map verdwijnt uit de rij',
       !rij().includes(los) && W.__test.knoppenInMap(proj, 'run', eigen.id).includes(los))
@@ -4356,8 +4374,11 @@ function startVraagAutomaat() {
       gemengd[0].indexOf('map:') === 0 && gemengd[0] !== 'map:' + mappen[0].id)
 
     // De rij breekt niet uit zichzelf af, dus zonder het lege blok schuift de
-    // eerste losse knop naast de laatste map.
+    // eerste losse knop naast de laatste map. Zorg voor minstens één losse knop
+    // (haal er één uit een map), los van hoeveel editors er globaal zijn.
     mappen.forEach(f => { f.open = true })
+    const losMaken = W.__test.knoppenInMap(proj, 'run', mappen[0].id)[0]
+    if (losMaken) W.__test.zetKnopInMap(proj, losMaken, null)
     const rijHtml = W.__test.cmdGridHtml(proj, 'run')
     const laatsteGroep = rijHtml.lastIndexOf('cmd-map-groep')
     const breek = rijHtml.indexOf('cmd-rij-breek')
