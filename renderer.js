@@ -4983,8 +4983,19 @@ function normaliseerSlot(s) {
   return { view: v }
 }
 
-// Data-slot 0 hoort bij de output-kant, 1 bij de verkenner-kant. werkSplit.first
-// wisselt alleen de schermvolgorde; de editor kan in beide data-slots staan.
+// ── Mentaal model van de split ────────────────────────────────────────────
+// Er zijn drie begrippen die je uit elkaar moet houden:
+//
+//   data-slot   index 0/1 in werkSplit.slots. Slot 0 = output-kant, slot 1 =
+//               verkenner-kant. werkSplit.focus is zo'n data-slot-index.
+//   visueel     plek op het scherm: 0 = links/boven, 1 = rechts/onder. Wordt
+//               de CSS-flex `order` (visueel + 1).
+//   werkSplit.first  welke KANT visueel eerst staat ('output' of 'browser').
+//               Alleen dit draait de visuele volgorde om; de data-slots blijven
+//               op hun betekenis (0=output, 1=verkenner).
+//
+// De functies hieronder rekenen tussen data-slot en visuele plek om. Zet je een
+// vlak op het scherm, gebruik dan zetVlakOrder(pane, visueel).
 function visueelVoorDataSlot(dataSlot) {
   if (werkSplit.first === 'browser') return dataSlot === 1 ? 0 : 1
   return dataSlot === 1 ? 1 : 0
@@ -4997,6 +5008,16 @@ function dataSlotVoorVisueel(visueel) {
 
 function orderVoorDataSlot(dataSlot) {
   return String(visueelVoorDataSlot(dataSlot) + 1)
+}
+
+// De visuele plek van een vlak in de split. `visueel` 0 = links/boven, 1 =
+// rechts/onder; dat wordt de CSS-flex `order` (1 of 2). `split-tweede` markeert
+// het tweede vlak, voor de rand/naad ertussen. Eén plek zodat elk render-pad
+// dezelfde regel gebruikt in plaats van los order + klasse te zetten.
+function zetVlakOrder(pane, visueel, tweede = visueel === 1) {
+  if (!pane) return
+  pane.style.order = String(visueel + 1)
+  pane.classList.toggle('split-tweede', tweede)
 }
 
 function splitAan() {
@@ -6156,10 +6177,7 @@ function pasTermSchermAan() {
       const ds = splitTabs.indexOf(naam)
       pane.hidden = ds < 0
       pane.classList.toggle('actief', ds >= 0 && termTab === naam)
-      if (ds >= 0) {
-        pane.style.order = orderVoorDataSlot(ds)
-        pane.classList.toggle('split-tweede', pane.style.order === '2')
-      }
+      if (ds >= 0) zetVlakOrder(pane, visueelVoorDataSlot(ds))
     }
     zetPane(paneOut, 'output')
     zetPane(paneBr, 'browser')
@@ -6168,20 +6186,17 @@ function pasTermSchermAan() {
     if (paneOut) {
       paneOut.hidden = liveEdTwee && werkSplit.focus === 0
       paneOut.classList.toggle('actief', werkSplit.focus === 0 && !liveEdTwee)
-      paneOut.style.order = browserEerst ? '2' : '1'
-      paneOut.classList.toggle('split-tweede', !!browserEerst)
+      zetVlakOrder(paneOut, browserEerst ? 1 : 0)
     }
     if (paneBr) {
       paneBr.hidden = liveEdTwee && werkSplit.focus === 1
       paneBr.classList.toggle('actief', werkSplit.focus === 1 && !liveEdTwee)
-      paneBr.style.order = browserEerst ? '1' : '2'
-      paneBr.classList.toggle('split-tweede', !browserEerst)
+      zetVlakOrder(paneBr, browserEerst ? 0 : 1)
     }
     if (paneEd) {
       paneEd.hidden = !liveEdTwee
       if (liveEdTwee) {
-        paneEd.style.order = orderVoorDataSlot(werkSplit.focus)
-        paneEd.classList.toggle('split-tweede', paneEd.style.order === '2')
+        zetVlakOrder(paneEd, visueelVoorDataSlot(werkSplit.focus))
         paneEd.classList.toggle('actief', true)
       } else {
         paneEd.classList.remove('actief', 'split-tweede')
@@ -6191,14 +6206,12 @@ function pasTermSchermAan() {
     if (paneOut) {
       paneOut.hidden = editorAan || !outputZichtbaar
       paneOut.classList.toggle('actief', split && tab === 'output')
-      paneOut.style.order = browserEerst ? '2' : '1'
-      paneOut.classList.toggle('split-tweede', split && browserEerst)
+      zetVlakOrder(paneOut, browserEerst ? 1 : 0, split && browserEerst)
     }
     if (paneBr) {
       paneBr.hidden = split ? false : tab !== 'browser'
       paneBr.classList.toggle('actief', split && tab === 'browser')
-      paneBr.style.order = browserEerst ? '1' : '2'
-      paneBr.classList.toggle('split-tweede', split && !browserEerst)
+      zetVlakOrder(paneBr, browserEerst ? 0 : 1, split && !browserEerst)
     }
     if (paneEd) {
       paneEd.hidden = !editorAan
