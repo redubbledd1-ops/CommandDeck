@@ -5006,10 +5006,6 @@ function dataSlotVoorVisueel(visueel) {
   return visueel === 0 ? 0 : 1
 }
 
-function orderVoorDataSlot(dataSlot) {
-  return String(visueelVoorDataSlot(dataSlot) + 1)
-}
-
 // De visuele plek van een vlak in de split. `visueel` 0 = links/boven, 1 =
 // rechts/onder; dat wordt de CSS-flex `order` (1 of 2). `split-tweede` markeert
 // het tweede vlak, voor de rand/naad ertussen. Eén plek zodat elk render-pad
