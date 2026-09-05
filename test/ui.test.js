@@ -415,6 +415,7 @@ window.Element.prototype.scrollIntoView = function (o) { inBeeldGehaald.push(thi
 window.eval(fs.readFileSync(path.join(APP, 'i18n.js'), 'utf8') + '\nglobalThis.I18N = I18N;')
 window.eval(fs.readFileSync(path.join(APP, 'git-tools.js'), 'utf8'))
 window.eval(fs.readFileSync(path.join(APP, 'web-tools.js'), 'utf8'))
+window.eval(fs.readFileSync(path.join(APP, 'code-kleuren.js'), 'utf8'))
 window.eval(fs.readFileSync(path.join(APP, 'knoppenrij.js'), 'utf8'))
 window.eval(fs.readFileSync(path.join(APP, 'accounts.js'), 'utf8'))
 // Een handvat om iets in de projecten van de renderer te zetten. Elke
@@ -430,6 +431,7 @@ window.eval(fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8')
   + '\n  sectieIsOpen: sectieOpen, zijbalkSmal, zijbalkSectieAan, navItemAan,'
   + '\n  zetNavItem, zetZijbalkSectie,'
   + '\n  verwijderMap, folderOp,'
+  + '\n  verfLezer,'
   + '\n  gekoppeldeRepoAdressen, zetBewerkt: (id) => { editingId = id } };')
 startVraagAutomaat()
 const W = window
@@ -3821,6 +3823,7 @@ function startVraagAutomaat() {
     w.eval(fs.readFileSync(path.join(APP, 'i18n.js'), 'utf8') + '\nglobalThis.I18N = I18N;')
     w.eval(fs.readFileSync(path.join(APP, 'git-tools.js'), 'utf8'))
     w.eval(fs.readFileSync(path.join(APP, 'web-tools.js'), 'utf8'))
+    w.eval(fs.readFileSync(path.join(APP, 'code-kleuren.js'), 'utf8'))
     w.eval(fs.readFileSync(path.join(APP, 'knoppenrij.js'), 'utf8'))
     w.eval(fs.readFileSync(path.join(APP, 'accounts.js'), 'utf8'))
     w.eval(fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8'))
@@ -4600,6 +4603,14 @@ function startVraagAutomaat() {
     check('en met regelnummers ernaast',
       $('#lezer-regels').textContent.includes('1')
       && $('#lezer-regels').textContent.includes('2'))
+    // De gekleurde laag ligt onder het tekstvak en heeft dezelfde tekst; staat
+    // hij er niet of loopt hij achter, dan zie je straks je cursor naast je
+    // letters staan.
+    check('de code krijgt kleur',
+      !!$('#lezer-verf')
+      && !!$('.lezer-inhoud-wrap.verf-aan')
+      && $('#lezer-verf').querySelector('.ck-prop')?.textContent === 'color'
+      && $('#lezer-verf').textContent.trim() === $('#lezer-inhoud').value.trim())
 
     // Bewerken en opslaan — wat een mens doet, niet de functie erachter.
     $('#lezer-inhoud').value = 'body { color: blue }\nh1 { }'
@@ -4608,6 +4619,9 @@ function startVraagAutomaat() {
     check('typen markeert als niet-opgeslagen',
       !!$('.lezer-tab.active.vuil')
       && $('#lezer-info').textContent.includes('niet opgeslagen'))
+    W.__test.verfLezer()
+    check('en de kleurlaag loopt mee met wat je typt',
+      $('#lezer-verf').textContent.trim() === 'body { color: blue }\nh1 { }')
     $('#lezer-opslaan').click(); await tick(); await tick()
     check('opslaan schrijft via fs:schrijfTekst',
       webTekstGeschreven.length === 1

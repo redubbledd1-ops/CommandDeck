@@ -1384,6 +1384,8 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (migreerStandaardEditors() || ontdubbelCustomEditors() || normaliseerEditorKleuren()
       || migreerSnelRijen()) window.api.saveSettings(settings)
 
+  pasCodeKleurenToe()
+
   await I18N.init(settings.language)
   // Pas na I18N: de Flutter-map krijgt een naam uit de taalbestanden.
   migreerAlleProjecten()
@@ -4389,6 +4391,7 @@ function lezerPaneelHtml() {
             <div class="lezer-vak">
               <pre class="lezer-regels mono" id="lezer-regels" aria-hidden="true"></pre>
               <div class="lezer-inhoud-wrap">
+                <pre class="lezer-verf mono" id="lezer-verf" aria-hidden="true"></pre>
                 <textarea class="lezer-inhoud mono" id="lezer-inhoud" spellcheck="false" wrap="off" placeholder=""></textarea>
                 <div class="lezer-aanvul" id="lezer-aanvul" hidden role="listbox"></div>
               </div>
@@ -8833,6 +8836,7 @@ function syncLezerNaarDom() {
   tekenLezerTabs()
   lezerInfoBijwerken()
   lezerRegelsBijwerken()
+  verfLezer()
   if (!t) {
     const info = document.getElementById('lezer-info')
     if (info) info.textContent = I18N.t('lezer.leeg')
@@ -8886,6 +8890,76 @@ function lezerRegelsBijwerken() {
   kolom.scrollTop = vak.scrollTop
 }
 
+// ── Kleuren in de editor ─────────────────────────────────────────────────────
+// Een <pre> onder het tekstvak met dezelfde tekst, in stukjes geknipt en
+// gekleurd. Het tekstvak zelf wordt doorzichtig en houdt de cursor, de selectie
+// en het typen; de laag eronder doet alleen de kleur. Dat is de enige manier om
+// in een gewone textarea kleur te krijgen zonder er een IDE van te maken — en
+// het valt vanzelf terug op zwart-wit zodra het uit staat of het bestand te
+// groot wordt.
+function codeKleurInstelling() {
+  return settings.codeKleuren || {}
+}
+
+function codeKleurenAan() {
+  return codeKleurInstelling().aan !== false
+}
+
+// De kleuren gaan als css-variabelen naar de pagina. Bij het wisselen van thema
+// hoeft er daardoor niets hertekend te worden: de spans die er al staan
+// veranderen gewoon van kleur.
+function pasCodeKleurenToe() {
+  const kleuren = CodeKleuren.kleuren(codeKleurInstelling())
+  const wortel = document.documentElement
+  for (const soort of CodeKleuren.SOORTEN) {
+    wortel.style.setProperty('--ck-' + soort, kleuren[soort])
+  }
+}
+
+function lezerVerfEl() {
+  const wrap = levend('.lezer-inhoud-wrap')
+  if (!wrap) return null
+  let el = wrap.querySelector('.lezer-verf')
+  // Panelen die van vóór deze versie in het scherm staan hebben de laag nog niet.
+  if (!el) {
+    el = document.createElement('pre')
+    el.className = 'lezer-verf mono'
+    el.id = 'lezer-verf'
+    el.setAttribute('aria-hidden', 'true')
+    wrap.insertBefore(el, wrap.firstChild)
+  }
+  return el
+}
+
+let lezerVerfTimer = null
+
+function verfLezer() {
+  clearTimeout(lezerVerfTimer)
+  lezerVerfTimer = null
+  const vak = lezerInhoudEl()
+  const laag = lezerVerfEl()
+  if (!vak || !laag) return
+  const wrap = laag.parentElement
+  const t = lezerHuidig()
+  const taal = t ? CodeKleuren.taalVanPad(t.pad) : ''
+  const tekst = vak.value
+  const aan = !!t && codeKleurenAan() && CodeKleuren.magVerven(tekst, taal)
+  wrap.classList.toggle('verf-aan', aan)
+  if (!aan) { laag.textContent = ''; return }
+  // Een afsluitend regeleinde valt in een <pre> weg. Zonder die extra regel
+  // loopt de laag achter zodra je onderaan het bestand staat te typen.
+  laag.innerHTML = CodeKleuren.verf(tekst, taal) + '\n'
+  laag.scrollTop = vak.scrollTop
+  laag.scrollLeft = vak.scrollLeft
+}
+
+// Tijdens typen niet bij elke aanslag opnieuw knippen: in een groot bestand is
+// dat het verschil tussen typen en wachten.
+function planVerfLezer() {
+  if (lezerVerfTimer) return
+  lezerVerfTimer = setTimeout(() => { lezerVerfTimer = null; verfLezer() }, 90)
+}
+
 function lezerMarkeerVuil() {
   const vak = lezerInhoudEl()
   const t = lezerHuidig()
@@ -8896,6 +8970,7 @@ function lezerMarkeerVuil() {
   lezerTitelBijwerken()
   lezerInfoBijwerken()
   lezerRegelsBijwerken()
+  planVerfLezer()
 }
 
 function kiesLezerTab(idx, { focus = true } = {}) {
@@ -9436,6 +9511,8 @@ function bedraadLezer() {
   vak.addEventListener('scroll', () => {
     const kolom = document.getElementById('lezer-regels')
     if (kolom) kolom.scrollTop = vak.scrollTop
+    const laag = levend('.lezer-verf')
+    if (laag) { laag.scrollTop = vak.scrollTop; laag.scrollLeft = vak.scrollLeft }
     if (lezerAanvulOpen()) tekenLezerAanvul()
   })
   const aanvul = lezerAanvulEl()
@@ -10585,6 +10662,148 @@ function bedraadLogSectie() {
   }
 }
 
+// ── Kleurinstellingen ────────────────────────────────────────────────────────
+// Aan/uit, een thema als startpunt en daarna elke soort los bij te stellen. Het
+// voorbeeld eronder gebruikt dezelfde verf-functie als de editor zelf, dus wat
+// je hier ziet is precies wat je straks in je bestand ziet.
+const CK_VOORBEELD = {
+  html: '<!-- navigatie -->\n<a class="knop" href="/over" data-nieuw>\n\tOver ons\n</a>',
+  css: '/* kaart */\n.kaart:hover {\n\tcolor: #54c8e8;\n\tpadding: 8px 12px;\n}',
+  js: '// begroeting\nconst naam = "wereld"\nif (naam) console.log(`hoi ${naam}`, 42)',
+}
+let ckVoorbeeldTaal = 'html'
+let ckBewaarTimer = null
+
+function ckBewaarStraks() {
+  clearTimeout(ckBewaarTimer)
+  ckBewaarTimer = setTimeout(() => { window.api.saveSettings(settings) }, 250)
+}
+
+function zetCodeKleur(wijziging) {
+  settings.codeKleuren = { ...codeKleurInstelling(), ...wijziging }
+  pasCodeKleurenToe()
+  verfLezer()
+}
+
+function codeKleurenMarkup() {
+  const inst = codeKleurInstelling()
+  const aan = codeKleurenAan()
+  const nu = CodeKleuren.kleuren(inst)
+  const eigen = !CodeKleuren.volgtThema(inst)
+
+  const themaOpties = CodeKleuren.THEMA_IDS.map(id => `
+      <option value="${id}" ${!eigen && (inst.thema || CodeKleuren.STANDAARD_THEMA) === id ? 'selected' : ''}>${esc(I18N.t('settings.codeKleuren.thema.' + id))}</option>`).join('')
+
+  const vakjes = CodeKleuren.SOORTEN.map(soort => `
+        <label class="ck-kleur" title="${esc(I18N.t('settings.codeKleuren.soort.' + soort))}">
+          <input type="color" data-ck-soort="${soort}" value="${nu[soort]}" ${aan ? '' : 'disabled'}>
+          <span class="ck-kleur-naam">${esc(I18N.t('settings.codeKleuren.soort.' + soort))}</span>
+        </label>`).join('')
+
+  return `
+      <div>
+        <div class="settings-section-title">${I18N.t('settings.section.codeKleurenTitle')}</div>
+        <div class="editor-row enabled">
+          <input type="checkbox" id="ck-aan" ${aan ? 'checked' : ''} />
+          <div class="editor-row-name"><i class="ti ti-palette"></i> ${I18N.t('settings.codeKleuren.aanLabel')}</div>
+          <div class="instel-uitleg">${I18N.t('settings.codeKleuren.aanDesc')}</div>
+        </div>
+        <div class="instel-rij">
+          <div class="editor-row-name"><i class="ti ti-color-swatch"></i> ${I18N.t('settings.codeKleuren.themaLabel')}</div>
+          <select class="loc-select" id="ck-thema" ${aan ? '' : 'disabled'}>
+            ${themaOpties}
+            ${eigen ? `<option value="eigen" selected>${esc(I18N.t('settings.codeKleuren.thema.eigen'))}</option>` : ''}
+          </select>
+          <span class="instel-uitleg">${I18N.t('settings.codeKleuren.themaDesc')}</span>
+        </div>
+        <div class="ck-raster" id="ck-raster">${vakjes}</div>
+        <div class="ck-tabs" id="ck-tabs">
+          ${['html', 'css', 'js'].map(taal => `
+          <button type="button" class="lezer-tab${taal === ckVoorbeeldTaal ? ' active' : ''}" data-ck-taal="${taal}">
+            <span class="lezer-tab-naam">${taal}</span>
+          </button>`).join('')}
+          <button class="term-btn" id="ck-herstel" style="margin-left:auto"><i class="ti ti-arrow-back-up" style="font-size:13px"></i> ${I18N.t('settings.codeKleuren.herstel')}</button>
+        </div>
+        <pre class="ck-voorbeeld mono" id="ck-voorbeeld"></pre>
+        <span class="instel-uitleg">${I18N.t('settings.codeKleuren.grensDesc', { max: Math.round(CodeKleuren.MAX_TEKENS / 1000) })}</span>
+      </div>`
+}
+
+function tekenCkVoorbeeld() {
+  const el = document.getElementById('ck-voorbeeld')
+  if (!el) return
+  const bron = CK_VOORBEELD[ckVoorbeeldTaal] || ''
+  el.innerHTML = codeKleurenAan()
+    ? CodeKleuren.verf(bron, ckVoorbeeldTaal)
+    : esc(bron)
+}
+
+function bedraadCodeKleuren() {
+  const panel = document.getElementById('settings-panel')
+  if (!panel) return
+  tekenCkVoorbeeld()
+
+  const aanVak = document.getElementById('ck-aan')
+  if (aanVak) aanVak.onchange = () => {
+    zetCodeKleur({ aan: aanVak.checked })
+    window.api.saveSettings(settings)
+    panel.querySelectorAll('#ck-raster input, #ck-thema').forEach(el => { el.disabled = !aanVak.checked })
+    tekenCkVoorbeeld()
+  }
+
+  const themaKeuze = document.getElementById('ck-thema')
+  if (themaKeuze) themaKeuze.onchange = () => {
+    if (themaKeuze.value === 'eigen') return
+    // Een thema kiezen wist de losse kleuren: anders kies je een thema en zie
+    // je je oude kleuren, en dan doet de lijst iets anders dan hij zegt.
+    zetCodeKleur({ thema: themaKeuze.value, kleuren: {} })
+    window.api.saveSettings(settings)
+    const nu = CodeKleuren.kleuren(codeKleurInstelling())
+    panel.querySelectorAll('[data-ck-soort]').forEach(el => { el.value = nu[el.dataset.ckSoort] })
+    themaKeuze.querySelector('option[value="eigen"]')?.remove()
+    tekenCkVoorbeeld()
+  }
+
+  panel.querySelectorAll('[data-ck-soort]').forEach(el => {
+    el.oninput = () => {
+      const inst = codeKleurInstelling()
+      zetCodeKleur({ kleuren: { ...(inst.kleuren || {}), [el.dataset.ckSoort]: el.value } })
+      ckBewaarStraks()
+      tekenCkVoorbeeld()
+      // Zodra er iets afwijkt heet het "eigen"; anders wijst de lijst een thema
+      // aan dat je niet meer op je scherm hebt staan.
+      const keuze = document.getElementById('ck-thema')
+      if (keuze && !keuze.querySelector('option[value="eigen"]')) {
+        const opt = document.createElement('option')
+        opt.value = 'eigen'
+        opt.textContent = I18N.t('settings.codeKleuren.thema.eigen')
+        keuze.appendChild(opt)
+      }
+      if (keuze) keuze.value = 'eigen'
+    }
+  })
+
+  panel.querySelectorAll('[data-ck-taal]').forEach(knop => {
+    knop.onclick = () => {
+      ckVoorbeeldTaal = knop.dataset.ckTaal
+      panel.querySelectorAll('[data-ck-taal]').forEach(k => k.classList.toggle('active', k === knop))
+      tekenCkVoorbeeld()
+    }
+  })
+
+  const herstel = document.getElementById('ck-herstel')
+  if (herstel) herstel.onclick = () => {
+    zetCodeKleur({ kleuren: {} })
+    window.api.saveSettings(settings)
+    const nu = CodeKleuren.kleuren(codeKleurInstelling())
+    panel.querySelectorAll('[data-ck-soort]').forEach(el => { el.value = nu[el.dataset.ckSoort] })
+    const keuze = document.getElementById('ck-thema')
+    keuze?.querySelector('option[value="eigen"]')?.remove()
+    if (keuze) keuze.value = codeKleurInstelling().thema || CodeKleuren.STANDAARD_THEMA
+    tekenCkVoorbeeld()
+  }
+}
+
 function renderSettingsPanel() {
   const panel = document.getElementById('settings-panel')
   if (settingsSubPage === 'talen') { renderTalenSubPage(panel); return }
@@ -10711,6 +10930,7 @@ function renderSettingsPanel() {
           </div>
         </div>
       </div>
+      ${codeKleurenMarkup()}
       <div>
         <div class="settings-section-title">${I18N.t('settings.section.projectOpenTitle')}</div>
         <div class="instel-rij">
@@ -10807,6 +11027,7 @@ function renderSettingsPanel() {
   `
 
   renderCustomEditors()
+  bedraadCodeKleuren()
   bedraadAiSettings()
   bedraadLogSectie()
   document.getElementById('btn-scan-editors').onclick = async () => {

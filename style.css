@@ -94,6 +94,66 @@
   flex: 1; min-width: 0; border: 0; outline: none; resize: none;
   background: transparent; overflow: auto; font-family: inherit;
 }
+
+/* ── Kleuren in de editor ──
+   De gekleurde laag ligt precies onder het tekstvak: zelfde lettertype, zelfde
+   marges, zelfde regelhoogte, zelfde tabbreedte. Eén afwijking — vet, cursief,
+   een andere padding — en de tekst eronder schuift zichtbaar op. Hier staat
+   daarom alleen kleur, en verder niets. */
+.lezer-verf {
+  position: absolute; inset: 0; margin: 0; padding: 12px 14px;
+  font-family: inherit; font-size: 12px; line-height: 1.5;
+  white-space: pre; tab-size: 2; overflow: hidden;
+  color: var(--text); pointer-events: none; z-index: 0;
+}
+.lezer-inhoud { position: relative; z-index: 1; }
+/* Het tekstvak houdt de cursor en de selectie, maar geeft de letters weg aan
+   de laag eronder. Zonder caret-color zou de cursor mee onzichtbaar worden. */
+.lezer-inhoud-wrap.verf-aan .lezer-inhoud { color: transparent; caret-color: var(--text); }
+.lezer-inhoud-wrap.verf-aan .lezer-inhoud::selection { background: rgba(84,200,232,0.28); }
+
+.ck-comment   { color: var(--ck-comment,   #5f6b6e); }
+.ck-tag       { color: var(--ck-tag,       #54c8e8); }
+.ck-attr      { color: var(--ck-attr,      #a78bfa); }
+.ck-string    { color: var(--ck-string,    #4ade80); }
+.ck-nummer    { color: var(--ck-nummer,    #fbbf24); }
+.ck-keyword   { color: var(--ck-keyword,   #f472b6); }
+.ck-functie   { color: var(--ck-functie,   #60a5fa); }
+.ck-selector  { color: var(--ck-selector,  #54c8e8); }
+.ck-prop      { color: var(--ck-prop,      #a78bfa); }
+.ck-waarde    { color: var(--ck-waarde,    #fb923c); }
+.ck-leesteken { color: var(--ck-leesteken, #8a8a8a); }
+
+/* De kleurkiezers in de instellingen. Vakjes met een naam ernaast, en eronder
+   een voorbeeld dat door dezelfde verf-functie gaat als de editor zelf — anders
+   kies je kleuren op goed geluk en zie je het resultaat pas in een bestand. */
+.ck-raster {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 6px; margin-top: 6px;
+}
+.ck-kleur {
+  display: flex; align-items: center; gap: 8px; min-width: 0; cursor: pointer;
+  padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--s1);
+}
+.ck-kleur:hover { background: var(--s2); }
+.ck-kleur input[type="color"] {
+  flex-shrink: 0; width: 26px; height: 22px; padding: 0; cursor: pointer;
+  border: 1px solid var(--border2); border-radius: 4px; background: transparent;
+}
+.ck-kleur input[type="color"]:disabled { cursor: default; opacity: 0.4; }
+.ck-kleur-naam {
+  font-size: 11.5px; color: var(--muted2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ck-tabs { display: flex; align-items: center; gap: 4px; margin-top: 10px; }
+.ck-voorbeeld {
+  margin: 6px 0; padding: 10px 12px; overflow-x: auto;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg); color: var(--text);
+  font-family: var(--mono); font-size: 12px; line-height: 1.5;
+  white-space: pre; tab-size: 2;
+}
 .lezer-aanvul {
   position: absolute; z-index: 40; min-width: 140px; max-width: 280px;
   max-height: 220px; overflow-y: auto; overflow-x: hidden;
