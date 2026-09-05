@@ -6612,53 +6612,72 @@ async function bedraadVerkennerHost(suffix) {
   $('br-refresh').onclick = () => navigeerNaar(browserPath)
 
   // Ctrl+scroll stapt door de maten; zonder Ctrl scrol je gewoon de lijst.
-  $('br-list').addEventListener('wheel', (e) => {
-    if (!e.ctrlKey) return
-    e.preventDefault()
-    stapWeergave(e.deltaY < 0 ? 1 : -1)
-  }, { passive: false })
+  // Deze handlers gaan via addEventListener (niet .onclick), dus ze stapelen op
+  // als de verkenner opnieuw bedraad wordt op hetzelfde element. Eén vlag per
+  // element houdt dat tegen: anders vuurt bv. een pijltje in de adresbalk twee
+  // keer en springt de keuze een regel te ver.
+  const lijstEl = $('br-list')
+  if (lijstEl && !lijstEl.dataset.acBedraad) {
+    lijstEl.dataset.acBedraad = '1'
+    lijstEl.addEventListener('wheel', (e) => {
+      if (!e.ctrlKey) return
+      e.preventDefault()
+      stapWeergave(e.deltaY < 0 ? 1 : -1)
+    }, { passive: false })
+  }
   if ($('br-external')) $('br-external').onclick = () => browserPath && window.api.openFolder(browserPath)
-  $('br-filter').addEventListener('input', () => { wisSelectie(); planZoek(); renderBrowser() })
-  $('br-filter').addEventListener('keydown', (e) => {
-    // Enter zoekt meteen, zonder te wachten tot je stil bent.
-    if (e.key !== 'Enter' || !diepZoekenAan()) return
-    e.preventDefault()
-    clearTimeout(zoekTimer)
-    const vraag = zoekTekst()
-    if (vraag.length >= 2) doeZoek(vraag)
-  })
+  const filterEl = $('br-filter')
+  if (filterEl && !filterEl.dataset.acBedraad) {
+    filterEl.dataset.acBedraad = '1'
+    filterEl.addEventListener('input', () => { wisSelectie(); planZoek(); renderBrowser() })
+    filterEl.addEventListener('keydown', (e) => {
+      // Enter zoekt meteen, zonder te wachten tot je stil bent.
+      if (e.key !== 'Enter' || !diepZoekenAan()) return
+      e.preventDefault()
+      clearTimeout(zoekTimer)
+      const vraag = zoekTekst()
+      if (vraag.length >= 2) doeZoek(vraag)
+    })
+  }
   $('br-diep').onclick = () => zetDiepZoeken(!diepZoekenAan())
   zetDiepZoekenUiterlijk()
   if ($('br-annuleer')) $('br-annuleer').onclick = () => { window.api.annuleerKopie(); showToast(I18N.t('browser.cancellingToast')) }
 
-  $('br-path').addEventListener('input', ververSuggesties)
-  // Bij het verlaten van het veld verdwijnt de lijst, maar pas na een tel: anders
-  // is hij al weg voordat je klik op een suggestie is aangekomen. Kom je meteen
-  // weer terug in het veld, dan blaas je dat af — anders klapt de lijst alsnog
-  // dicht terwijl je aan het typen bent.
-  $('br-path').addEventListener('blur', () => {
-    clearTimeout(sugVerbergTimer)
-    sugVerbergTimer = setTimeout(verbergSuggesties, 150)
-  })
-  $('br-path').addEventListener('focus', () => { clearTimeout(sugVerbergTimer); sugVerbergTimer = null })
-  $('br-path').addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowDown' && sugItems.length) {
-      e.preventDefault(); sugIndex = Math.min(sugItems.length - 1, sugIndex + 1); markeerSuggestie(); return
-    }
-    if (e.key === 'ArrowUp' && sugItems.length) {
-      e.preventDefault(); sugIndex = Math.max(0, sugIndex - 1); markeerSuggestie(); return
-    }
-    if (e.key === 'Escape') { e.preventDefault(); verbergSuggesties(); return }
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      e.stopPropagation()
-      if (sugIndex >= 0) { kiesSuggestie(sugIndex); return }
-      verbergSuggesties()
-      const ingetypt = $('br-path').value.trim()
-      navigeerNaar(/^deze pc$/i.test(ingetypt) ? DEZE_PC : ingetypt)
-      $('br-path').blur()
-    }
-  })
+  // Ook de adresbalk-listeners gaan via addEventListener en mogen niet stapelen
+  // (zie de vlag hierboven bij de lijst): een dubbel gebonden keydown liet één
+  // pijltje twee suggesties opschieten.
+  const padEl = $('br-path')
+  if (padEl && !padEl.dataset.acBedraad) {
+    padEl.dataset.acBedraad = '1'
+    padEl.addEventListener('input', ververSuggesties)
+    // Bij het verlaten van het veld verdwijnt de lijst, maar pas na een tel: anders
+    // is hij al weg voordat je klik op een suggestie is aangekomen. Kom je meteen
+    // weer terug in het veld, dan blaas je dat af — anders klapt de lijst alsnog
+    // dicht terwijl je aan het typen bent.
+    padEl.addEventListener('blur', () => {
+      clearTimeout(sugVerbergTimer)
+      sugVerbergTimer = setTimeout(verbergSuggesties, 150)
+    })
+    padEl.addEventListener('focus', () => { clearTimeout(sugVerbergTimer); sugVerbergTimer = null })
+    padEl.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown' && sugItems.length) {
+        e.preventDefault(); sugIndex = Math.min(sugItems.length - 1, sugIndex + 1); markeerSuggestie(); return
+      }
+      if (e.key === 'ArrowUp' && sugItems.length) {
+        e.preventDefault(); sugIndex = Math.max(0, sugIndex - 1); markeerSuggestie(); return
+      }
+      if (e.key === 'Escape') { e.preventDefault(); verbergSuggesties(); return }
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        e.stopPropagation()
+        if (sugIndex >= 0) { kiesSuggestie(sugIndex); return }
+        verbergSuggesties()
+        const ingetypt = padEl.value.trim()
+        navigeerNaar(/^deze pc$/i.test(ingetypt) ? DEZE_PC : ingetypt)
+        padEl.blur()
+      }
+    })
+  }
 
   const werkKnop = $('br-usehere')
   if (werkKnop) werkKnop.onclick = async () => {
