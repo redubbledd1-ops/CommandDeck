@@ -530,6 +530,11 @@ check('zonder systeemprompt blijft het veld weg',
     /tab === 'editor'/.test(bron.slice(bron.indexOf('function setTermTab'), bron.indexOf('async function navigeerNaar'))) &&
     !/zetTermSplit\(null\)/.test(bron.slice(bron.indexOf('function setTermTab'), bron.indexOf('async function navigeerNaar'))) &&
     /normaliseerProjectTab\(s\.tab\) === 'editor'/.test(bron))
+  check('bestand in split houdt de preview, niet de verkenner',
+    /normaliseerProjectTab\(s\.tab\) === 'output'/.test(
+      bron.slice(bron.indexOf('function setTermTab'), bron.indexOf('async function navigeerNaar'))) &&
+    /werkSlots\[1\]\.tab = 'output'/.test(
+      bron.slice(bron.indexOf('function zetTermSplit'), bron.indexOf('function sluitSplitAanKant'))))
   check('woordenboek-split wordt niet per project onthouden',
     bron.includes('function isGemengdeSplit') &&
     bron.includes('function wisGemengdeProjectSplits') &&

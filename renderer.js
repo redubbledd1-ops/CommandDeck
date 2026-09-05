@@ -5723,8 +5723,8 @@ function termSplitAan() {
 }
 
 function springNaarOutput() {
-  // Zelfde project gesplitst met editor in één vlak: dat vlak terug naar uitvoer,
-  // verkenner (of het andere paneel) blijft staan.
+  // Zelfde project gesplitst met editor in één vlak: dat vlak blijft; het
+  // andere wordt uitvoer/preview (verkenner wijkt).
   if (termSplitAan() && !splitTweeProjecten()) {
     if (werkSlots && werkSlots.some(s => normaliseerProjectTab(s.tab) === 'editor')) {
       if (projectIsWebsite(projects.find(x => x.id === activeId))) {
@@ -5817,13 +5817,14 @@ function zetTermSplit(richting, houdenInhoud) {
     // Het scherm dat je nu open hebt blijft staan; het andere komt rechts of onder.
     if (!termSplit) {
       if (view === 'project' && termTab === 'editor') {
-        // Bestand open: houd de editor links/boven, verkenner in het nieuwe vlak.
+        // Bestand open: houd de editor, zet preview/uitvoer ernaast (niet de
+        // verkenner — bij sites wil je de live pagina zien terwijl je bewerkt).
         termSplitFirst = 'output'
         zorgVoorSlots()
         werkSlots[0].tab = 'editor'
-        werkSlots[1].tab = 'browser'
-        werkSlotFocus = 1
-        termTab = 'browser'
+        werkSlots[1].tab = 'output'
+        werkSlotFocus = visueelVoorDataSlot(1)
+        termTab = 'output'
       } else {
         termSplitFirst = (view === 'project' && termTab === 'browser') ? 'browser' : 'output'
         zorgVoorSlots()
@@ -6078,7 +6079,11 @@ function pasTermSchermAan() {
     if (pty) pty.hidden = editorAan || !ptyZichtbaar
   }
   const previewOutput = split && splitTabs ? splitTabs.includes('output') : outputZichtbaar
-  pasSitePreviewZicht(previewOutput, editorAan || tab === 'editor', !!(ptyZichtbaar && previewOutput))
+  // Alleen verbergen als de editor de preview-plek inneemt — niet als die
+  // ernaast staat (output|editor bij sites).
+  const previewWegDoorEditor = (!split && tab === 'editor')
+    || (liveEdTwee && werkSlotFocus === 0)
+  pasSitePreviewZicht(previewOutput, previewWegDoorEditor, !!(ptyZichtbaar && previewOutput))
   vulSplitPanelen()
   vulIdleVerkenner()
 
@@ -6216,30 +6221,44 @@ function setTermTab(tab) {
   termTab = tab
   if (splitAan() && werkSlots) {
     if (zelfdeProjectSplit()) {
-      // Bestandseditor mag naast verkenner/preview: vervangt bij voorkeur het
-      // vlak dat níét de verkenner is, zodat je blijft bladeren terwijl je leest.
+      // Bestand naast preview/uitvoer: houd output, vervang de verkenner.
+      // (Anders verdwijnt de live html-pagina en blijft alleen de mappenlijst.)
       if (tab === 'editor') {
-        const bi = werkSlots.findIndex(s => normaliseerProjectTab(s.tab) === 'browser')
-        const doel = bi >= 0 ? 1 - bi : dataSlotVoorVisueel(werkSlotFocus)
+        const oi = werkSlots.findIndex(s => normaliseerProjectTab(s.tab) === 'output')
+        const doel = oi >= 0 ? 1 - oi : dataSlotVoorVisueel(werkSlotFocus)
         werkSlots[doel].tab = 'editor'
         const ander = 1 - doel
         if (normaliseerProjectTab(werkSlots[ander].tab) === 'editor') {
-          werkSlots[ander].tab = 'browser'
+          werkSlots[ander].tab = 'output'
+        } else if (normaliseerProjectTab(werkSlots[ander].tab) !== 'output') {
+          // Geen preview-vlak meer (bijv. alleen verkenner): herstel output ernaast.
+          werkSlots[ander].tab = 'output'
         }
         werkSlotFocus = visueelVoorDataSlot(doel)
       } else {
-        const idx = werkSlots.findIndex(s => normaliseerProjectTab(s.tab) === tab)
-        if (idx >= 0) {
-          werkSlotFocus = visueelVoorDataSlot(idx)
-        } else {
-          const ed = werkSlots.findIndex(s => normaliseerProjectTab(s.tab) === 'editor')
-          const doel = ed >= 0 ? ed : dataSlotVoorVisueel(werkSlotFocus)
-          const ander = 1 - doel
+        // Editor open houden: output/verkenner landt in het ándere vlak.
+        const ed = werkSlots.findIndex(s => normaliseerProjectTab(s.tab) === 'editor')
+        if (ed >= 0) {
+          const ander = 1 - ed
           if (normaliseerProjectTab(werkSlots[ander].tab) === tab) {
             werkSlotFocus = visueelVoorDataSlot(ander)
           } else {
-            werkSlots[doel].tab = tab
-            werkSlotFocus = visueelVoorDataSlot(doel)
+            werkSlots[ander].tab = tab
+            werkSlotFocus = visueelVoorDataSlot(ander)
+          }
+        } else {
+          const idx = werkSlots.findIndex(s => normaliseerProjectTab(s.tab) === tab)
+          if (idx >= 0) {
+            werkSlotFocus = visueelVoorDataSlot(idx)
+          } else {
+            const doel = dataSlotVoorVisueel(werkSlotFocus)
+            const ander = 1 - doel
+            if (normaliseerProjectTab(werkSlots[ander].tab) === tab) {
+              werkSlotFocus = visueelVoorDataSlot(ander)
+            } else {
+              werkSlots[doel].tab = tab
+              werkSlotFocus = visueelVoorDataSlot(doel)
+            }
           }
         }
       }
@@ -9364,17 +9383,20 @@ function voerLezerZoekUit() {
         ? I18N.t('lezer.zoekTreffers', { n: t.zoekIdx + 1, totaal: t.zoekHits.length })
         : I18N.t('lezer.zoekNiets')
   }
-  if (t.zoekIdx >= 0) selecteerLezerZoekHit()
+  // Geen focus pakken: anders springt de cursor na 1 letter terug in het bestand.
+  if (t.zoekIdx >= 0) selecteerLezerZoekHit({ pakFocus: false })
 }
 
-function selecteerLezerZoekHit() {
+function selecteerLezerZoekHit({ pakFocus = false } = {}) {
   const vak = lezerInhoudEl()
   const t = lezerHuidig()
-  const naald = document.getElementById('lezer-zoek-invoer')?.value || ''
+  const zoekInvoer = document.getElementById('lezer-zoek-invoer')
+  const naald = zoekInvoer?.value || ''
   if (!vak || !t) return
   const start = t.zoekHits[t.zoekIdx]
   if (start == null) return
-  vak.focus()
+  const zoekHadFocus = !!(zoekInvoer && document.activeElement === zoekInvoer)
+  if (pakFocus && !zoekHadFocus) vak.focus()
   vak.setSelectionRange(start, start + naald.length)
   // In beeld brengen: selectie alleen is niet genoeg in een lang bestand.
   const voor = vak.value.slice(0, start)
@@ -9388,6 +9410,8 @@ function selecteerLezerZoekHit() {
       n: t.zoekIdx + 1, totaal: t.zoekHits.length,
     })
   }
+  // setSelectionRange mag de focus stelen — zoekbalk teruggeven tijdens typen.
+  if (zoekHadFocus && !pakFocus) zoekInvoer.focus()
 }
 
 function lezerZoekStap(delta) {
@@ -9396,7 +9420,8 @@ function lezerZoekStap(delta) {
   if (!t.zoekHits.length) { voerLezerZoekUit(); return }
   const n = t.zoekHits.length
   t.zoekIdx = (t.zoekIdx + delta + n) % n
-  selecteerLezerZoekHit()
+  // Enter/pijltjes: treffer tonen, focus blijft in de zoekbalk (Escape → bestand).
+  selecteerLezerZoekHit({ pakFocus: false })
 }
 
 // ── Lichte aanvulling (html/css/js) ──────────────────────────────────────────

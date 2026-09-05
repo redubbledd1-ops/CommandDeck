@@ -346,6 +346,10 @@ t('editor mag in split blijven (geen dichtgooien)',
   /function normaliseerProjectTab\(/.test(ren)
   && !/zetTermSplit\(null\)/.test(
     ren.slice(ren.indexOf('function setTermTab'), ren.indexOf('async function navigeerNaar'))))
+t('zoeken in een bestand steelt de focus niet van de zoekbalk',
+  /pakFocus:\s*false/.test(ren.slice(ren.indexOf('function voerLezerZoekUit'), ren.indexOf('function lezerZoekStap')))
+  && /zoekHadFocus/.test(ren)
+  && /function selecteerLezerZoekHit\(\{/.test(ren))
 t('springNaarOutput haalt ook de editor weg',
   /termTab !== 'output'\) setTermTab\('output'\)/.test(ren)
   || /setTermTab\('output'\)/.test(
