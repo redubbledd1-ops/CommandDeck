@@ -497,6 +497,11 @@ async function bepaalToolsVoorProject(p) {
   const loc = p.locations?.[p.activeLocation] || p.locations?.[0]
   if (!loc?.path) return false
 
+  // Al eens vastgesteld wat voor project dit is? Dan niet opnieuw de map
+  // ondervragen bij elke keer openen: het soort verandert niet zomaar, en de
+  // extra projectSoort-aanroep gaf een merkbare hik bij het wisselen.
+  if (p.secties && typeof p.secties.tools === 'boolean') return false
+
   const r = await window.api.projectSoort(loc.path)
   if (!r || !r.ok) return false          // map even niet bereikbaar: later nog eens
 
