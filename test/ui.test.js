@@ -2851,12 +2851,25 @@ function startVraagAutomaat() {
   check('geen split om te beginnen', !$('.terminal-wrap')?.classList.contains('gesplitst'))
   $('[data-split="right"]').click(); await tick(); await tick()
   check('split staat open', $('.terminal-wrap').classList.contains('gesplitst'))
+  // Vanuit de output-tab: de uitvoer staat visueel links (order 1), de
+  // verkenner rechts (order 2).
+  check('vanuit output staat de uitvoer links',
+    $('[data-pane="output"]').style.order === '1' &&
+    $('[data-pane="browser"]').style.order === '2')
   $('#btn-nav-back').click(); await tick(); await tick()
   check('terug klapt de gesplitste weergave dicht',
     !$('.terminal-wrap')?.classList.contains('gesplitst'))
   $('#btn-nav-forward').click(); await tick(); await tick()
   check('vooruit zet de gesplitste weergave terug',
     !!$('.terminal-wrap')?.classList.contains('gesplitst'))
+  // Split dicht, dan vanuit de verkenner-tab splitsen: nu staat de verkenner
+  // links (order 1) en de uitvoer rechts (order 2) — de omgekeerde volgorde.
+  $('[data-split="right"]').click(); await tick(); await tick()
+  $('[data-tab="browser"]').click(); await tick(); await tick()
+  $('[data-split="right"]').click(); await tick(); await tick()
+  check('vanuit de verkenner staat die links',
+    $('[data-pane="browser"]').style.order === '1' &&
+    $('[data-pane="output"]').style.order === '2')
   // Split weer dicht en terug naar de cmd-sectie, zodat de volgende tests van
   // dezelfde stand vertrekken als voorheen.
   $('[data-split="right"]').click(); await tick(); await tick()
