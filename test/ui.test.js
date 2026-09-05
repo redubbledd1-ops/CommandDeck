@@ -415,6 +415,16 @@ window.Element.prototype.scrollIntoView = function (o) { inBeeldGehaald.push(thi
 window.eval(fs.readFileSync(path.join(APP, 'i18n.js'), 'utf8') + '\nglobalThis.I18N = I18N;')
 window.eval(fs.readFileSync(path.join(APP, 'git-tools.js'), 'utf8'))
 window.eval(fs.readFileSync(path.join(APP, 'web-tools.js'), 'utf8'))
+// note-tools.js hoort óók geladen te worden: index.html laadt het (vóór
+// renderer.js), en renderer.js gebruikt NoteTools onvoorwaardelijk (o.a. in
+// het rechtsklikmenu en de verkenner). Zonder deze regel viel de hele suite om
+// met "NoteTools is not defined" zodra zo'n pad werd geraakt.
+window.eval(fs.readFileSync(path.join(APP, 'note-tools.js'), 'utf8'))
+// web-knoppen.js en lezer-aanvul.js horen er in dezelfde volgorde als in
+// index.html bij: het lees-/bewerkpaneel (de "lezer") leunt erop. Zonder deze
+// twee vielen de editor-tabbladtests om zodra ze eindelijk werden bereikt.
+window.eval(fs.readFileSync(path.join(APP, 'web-knoppen.js'), 'utf8'))
+window.eval(fs.readFileSync(path.join(APP, 'lezer-aanvul.js'), 'utf8'))
 window.eval(fs.readFileSync(path.join(APP, 'code-kleuren.js'), 'utf8'))
 window.eval(fs.readFileSync(path.join(APP, 'knoppenrij.js'), 'utf8'))
 window.eval(fs.readFileSync(path.join(APP, 'accounts.js'), 'utf8'))
@@ -1088,7 +1098,9 @@ function startVraagAutomaat() {
 
   // ── verkenner naast de output ──────────────────────────────────────────────
   $$('.proj-item')[0].click(); await tick()
-  check('er zijn twee tabs boven het uitvoervenster', $$('.term-tab').length === 2)
+  // De editor-tab hoort er ook bij, maar staat verborgen tot je een bestand
+  // opent; alleen de zichtbare tabs (output + verkenner) tellen mee.
+  check('er zijn twee tabs boven het uitvoervenster', $$('.term-tab:not([hidden])').length === 2)
   check('het lampje van een draaiende sessie staat uit', $('#pty-punt').hidden === true)
   check('output staat standaard aan', $('[data-tab="output"]').classList.contains('active'))
   check('de verkenner is verborgen', $('#browser').hidden === true)
@@ -4477,7 +4489,9 @@ function startVraagAutomaat() {
     check('er staat een potlood in de kop van opdrachten', !!$('#nav-kies'))
     $('#nav-kies').click(); await tick()
     const items = $$('#ctx-menu .ctx-item')
-    check('het menu toont alle vier de opdrachten', items.length === 4)
+    // cmd, powershell, bat, tekst en woordenboek — de tekst-sectie kwam er
+    // later bij, dus het zijn er nu vijf.
+    check('het menu toont alle vijf de opdrachten', items.length === 5)
     check('en zet een vinkje bij wat aan staat',
       items.every(el => !!el.querySelector('.ti-check')))
 
@@ -4494,7 +4508,7 @@ function startVraagAutomaat() {
     check('het scherm dat je verbergt laat je niet achter',
       $('#cmd-panel').style.display !== 'flex')
 
-    for (const sleutel of ['ps', 'dict']) W.__test.zetNavItem(sleutel, false)
+    for (const sleutel of ['ps', 'dict', 'text']) W.__test.zetNavItem(sleutel, false)
     await tick()
     check('is alles uitgevinkt, dan verdwijnt de hele sectie',
       sectie('cmd').hidden === true && W.__test.zijbalkSectieAan('cmd') === false)
@@ -4666,6 +4680,16 @@ function startVraagAutomaat() {
       $('#lezer-zoek-info').textContent.includes('1')
       && vak.selectionStart >= 0
       && vak.value.slice(vak.selectionStart, vak.selectionEnd).toLowerCase() === 'hallo')
+
+    // De zoekbalk staat nog open van de vorige test. Escape sluit bewust eerst
+    // de zoekbalk (zie renderer.js: "Aanvulling eerst, dan zoekbalk, anders
+    // verdwijnt de editor te vroeg") en pas daarna sluit Escape een tabblad.
+    window.document.dispatchEvent(new window.KeyboardEvent('keydown', {
+      key: 'Escape', bubbles: true, cancelable: true,
+    }))
+    await tick()
+    check('escape sluit eerst de zoekbalk, niet meteen het tabblad',
+      $('#lezer-zoek').hidden === true && $$('.lezer-tab').length === 2)
 
     // Escape sluit één tab; de andere blijft. Daarna nog eens → output.
     kiesKnop('niet opslaan')
