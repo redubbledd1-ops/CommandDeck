@@ -1245,6 +1245,17 @@ function startVraagAutomaat() {
     ($('.proj-header-name')?.textContent || '').includes('dd_crypto') &&
     $('.terminal-wrap').classList.contains('twee-projecten'))
 
+  // Vangnet: focus heen en weer wisselen houdt beide projecten en de
+  // twee-projecten-split intact (eindigt weer op het eerste project).
+  $$('.proj-item')[1].click(); await tick(); await tick()
+  check('naar het tweede project houdt de split',
+    ($('.proj-header-name')?.textContent || '').includes('tweede') &&
+    !!$('.terminal-wrap')?.classList.contains('twee-projecten'))
+  $$('.proj-item')[0].click(); await tick(); await tick()
+  check('en weer terug naar het eerste ook',
+    ($('.proj-header-name')?.textContent || '').includes('dd_crypto') &&
+    !!$('.terminal-wrap')?.classList.contains('twee-projecten'))
+
   $('#btn-nav-dict').click(); await tick(); await tick()
   check('woordenboek mag naast een project als je het zelf opent',
     $('#werk').classList.contains('gesplitst') &&
