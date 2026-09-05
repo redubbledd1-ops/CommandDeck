@@ -415,6 +415,7 @@ window.Element.prototype.scrollIntoView = function (o) { inBeeldGehaald.push(thi
 window.eval(fs.readFileSync(path.join(APP, 'i18n.js'), 'utf8') + '\nglobalThis.I18N = I18N;')
 window.eval(fs.readFileSync(path.join(APP, 'git-tools.js'), 'utf8'))
 window.eval(fs.readFileSync(path.join(APP, 'web-tools.js'), 'utf8'))
+window.eval(fs.readFileSync(path.join(APP, 'note-tools.js'), 'utf8'))
 window.eval(fs.readFileSync(path.join(APP, 'code-kleuren.js'), 'utf8'))
 window.eval(fs.readFileSync(path.join(APP, 'knoppenrij.js'), 'utf8'))
 window.eval(fs.readFileSync(path.join(APP, 'accounts.js'), 'utf8'))
@@ -1333,7 +1334,15 @@ function startVraagAutomaat() {
   check('het andere project opent in zijn eigen map', $('#br-path').value === 'C:\\gekozen')
   $$('.proj-item')[0].click(); await tick(); await tick()
   $('[data-tab="browser"]').click(); await tick(); await tick()
-  check('terug in het eerste project blijft de verkenner in de submap', $('#br-path').value === 'C:\\a\\lib')
+  check('terug in het eerste project begint de verkenner weer bij de projectmap', $('#br-path').value === 'C:\\a')
+  // via opdrachten mag de map wél blijven hangen
+  const libRij2 = $$('.br-item').find(el => el.textContent.includes('lib'))
+  libRij2.dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true })); await tick(); await tick()
+  check('opnieuw de submap in', $('#br-path').value === 'C:\\a\\lib')
+  $('#btn-nav-cmd').click(); await tick(); await tick()
+  $$('.proj-item')[0].click(); await tick(); await tick()
+  $('[data-tab="browser"]').click(); await tick(); await tick()
+  check('na opdrachten blijft de verkenner in de submap', $('#br-path').value === 'C:\\a\\lib')
   const andereIdx = [...$$('.proj-label')].findIndex(e => e.textContent === 'andere app')
   $$('.proj-edit')[andereIdx].click(); await tick()
   $('#modal-proj .btn-delete').click(); await tick()
@@ -2189,9 +2198,18 @@ function startVraagAutomaat() {
 
   // terug naar het project, zodat de app daar ook weer opstart
   $$('.proj-item')[0].click(); await tick()
+  $('[data-tab="browser"]').click(); await tick(); await tick()
+  const libNaHerstart = $$('.br-item').find(el => el.textContent.includes('lib'))
+  if (libNaHerstart) {
+    libNaHerstart.dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true }))
+    await tick(); await tick()
+  }
+  check('voor herstart staat de verkenner in een submap', $('#br-path').value === 'C:\\a\\lib')
   let w3 = await herstart()
   check('na herstart staat het project weer op verkenner',
     w3.document.getElementById('browser') && w3.document.getElementById('browser').hidden === false)
+  check('na herstart begint de verkenner weer bij de projectmap',
+    w3.document.getElementById('br-path').value === 'C:\\a')
   global.window = window; global.document = window.document
 
   $$('.proj-item')[0].click(); await tick()
@@ -3826,6 +3844,7 @@ function startVraagAutomaat() {
     w.eval(fs.readFileSync(path.join(APP, 'i18n.js'), 'utf8') + '\nglobalThis.I18N = I18N;')
     w.eval(fs.readFileSync(path.join(APP, 'git-tools.js'), 'utf8'))
     w.eval(fs.readFileSync(path.join(APP, 'web-tools.js'), 'utf8'))
+    w.eval(fs.readFileSync(path.join(APP, 'note-tools.js'), 'utf8'))
     w.eval(fs.readFileSync(path.join(APP, 'code-kleuren.js'), 'utf8'))
     w.eval(fs.readFileSync(path.join(APP, 'knoppenrij.js'), 'utf8'))
     w.eval(fs.readFileSync(path.join(APP, 'accounts.js'), 'utf8'))

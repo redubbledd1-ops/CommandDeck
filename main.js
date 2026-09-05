@@ -387,7 +387,8 @@ const DEFAULT_SETTINGS = {
   termTabs: {},
   // Per project: output en verkenner tegelijk, naast of onder elkaar
   termSplits: {},
-  // Per project (en voor cmd/ps) de laatst geopende map in de verkenner
+  // Per cmd/ps: de laatst geopende map in de verkenner. Projecten beginnen
+  // steeds opnieuw bij hun locatie (niet over herstarts heen onthouden).
   verkennerPaden: {},
   // Hoe de verkenner eruitziet en waarop hij sorteert
   verkenner: {
