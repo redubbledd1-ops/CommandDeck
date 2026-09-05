@@ -2834,6 +2834,23 @@ function startVraagAutomaat() {
   $('#btn-nav-cmd').click(); await tick(); await tick()
   check('ergens anders heen wist het vooruit-spoor', $('#btn-nav-forward').disabled === true)
 
+  // ── de gesplitste weergave hoort ook in de geschiedenis ─────────────────────
+  $$('.proj-item')[0].click(); await tick(); await tick()
+  $('[data-tab="output"]').click(); await tick()
+  check('geen split om te beginnen', !$('.terminal-wrap')?.classList.contains('gesplitst'))
+  $('[data-split="right"]').click(); await tick(); await tick()
+  check('split staat open', $('.terminal-wrap').classList.contains('gesplitst'))
+  $('#btn-nav-back').click(); await tick(); await tick()
+  check('terug klapt de gesplitste weergave dicht',
+    !$('.terminal-wrap')?.classList.contains('gesplitst'))
+  $('#btn-nav-forward').click(); await tick(); await tick()
+  check('vooruit zet de gesplitste weergave terug',
+    !!$('.terminal-wrap')?.classList.contains('gesplitst'))
+  // Split weer dicht en terug naar de cmd-sectie, zodat de volgende tests van
+  // dezelfde stand vertrekken als voorheen.
+  $('[data-split="right"]').click(); await tick(); await tick()
+  $('#btn-nav-cmd').click(); await tick(); await tick()
+
   // ── cd naar een map die niet bestaat ───────────────────────────────────────
   const cwdVoor = settings.cmd.cwd
   const nVoor = executed.length

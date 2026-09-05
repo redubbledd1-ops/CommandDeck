@@ -1596,18 +1596,37 @@ let navStack    = []
 let navIndex    = -1
 let navBezig    = false   // voorkomt dat het toepassen zichzelf weer opslaat
 
+// De gesplitste weergave hoort ook bij "waar je bent": zonder deze momentopname
+// zou terug/vooruit een split niet kunnen terugzetten en zou navPush denken dat
+// er niets veranderde als je alleen de split opende, sloot of het vlak wisselde.
+function splitMomentopname() {
+  if (!termSplit || !Array.isArray(werkSlots) || werkSlots.length !== 2) return null
+  return {
+    dir: termSplit,
+    first: termSplitFirst === 'browser' ? 'browser' : 'output',
+    focus: werkSlotFocus === 1 ? 1 : 0,
+    slots: werkSlots.map(s => ({
+      view: s.view || 'project',
+      projectId: (s.view || 'project') === 'project' ? s.projectId : undefined,
+      tab: normaliseerProjectTab(s.tab),
+    })),
+  }
+}
+
 function huidigeLocatie() {
   return {
     view,
     projectId: activeId,
     tab: termTab,
     dir: termTab === 'browser' ? browserPath : null,
+    split: splitMomentopname(),
   }
 }
 
 function zelfdeLocatie(a, b) {
   return a && b && a.view === b.view && a.projectId === b.projectId
     && a.tab === b.tab && a.dir === b.dir
+    && JSON.stringify(a.split || null) === JSON.stringify(b.split || null)
 }
 
 function navPush() {
@@ -1627,6 +1646,33 @@ function navPush() {
 async function pasLocatieToe(loc) {
   navBezig = true
   try {
+    // Stond hier een split? Zet die exact terug zoals hij was. herstelTermSplit
+    // (via pasWerkSchermAan) laat dit met rust zolang navBezig aanstaat, dus de
+    // teruggezette vlakken blijven staan.
+    if (loc.split && Array.isArray(loc.split.slots) && loc.split.slots.length === 2) {
+      termSplit = loc.split.dir
+      termSplitFirst = loc.split.first === 'browser' ? 'browser' : 'output'
+      werkSlots = loc.split.slots.map(normaliseerSlot)
+      werkSlotFocus = loc.split.focus === 1 ? 1 : 0
+      const f = werkSlots[werkSlotFocus]
+      view = f.view || 'project'
+      if (view === 'project') {
+        if (f.projectId) activeId = f.projectId
+        termTab = normaliseerProjectTab(f.tab)
+        if (termTab === 'browser') haalVerkennerOp(f.projectId)
+      } else if (view === 'cmd' || view === 'ps') {
+        lastShellView = view
+      }
+      richtTermOpSlot(f)
+      pasWerkSchermAan()
+      renderSidebar()
+      keurStatusNa()
+      return
+    }
+    // Geen split op deze plek: een eventuele open split eerst netjes sluiten,
+    // anders blijft hij hangen terwijl de geschiedenis een enkel scherm wil.
+    if (splitAan()) sluitSplitVoorView()
+
     // Alleen opnieuw opbouwen als je echt naar een ander scherm of project
     // gaat: setView zet de verkenner terug naar de werkmap, en dat is precies
     // wat je bij het teruglopen door mappen níét wilt.
@@ -5428,6 +5474,7 @@ function focusWerkSlot(slot) {
   pasWerkSchermAan()
   renderSidebar()
   bewaarTermSplit()
+  navPush()
   keurStatusNa()
 }
 
@@ -5450,6 +5497,27 @@ function plaatsInSplit(v) {
   zorgVoorSlots()
   const visueelDoel = werkSlotFocus === 1 ? 1 : 0
   zetSlotsOpSchermvolgorde()
+  // Een tweede, ánder project bij een split van één project (uitvoer|verkenner):
+  // het nieuwe project neemt het uitvoervlak over, zodat het oorspronkelijke
+  // project zijn verkenner in het andere vlak houdt. Zonder dit belandde het
+  // nieuwe project in het gefocuste (verkenner-)vlak en verdween de verkenner
+  // van het eerste project.
+  if (v === 'project' && zelfdeProjectSplit() && werkSlots[0].projectId !== activeId) {
+    let vlak = werkSlots.findIndex(s => normaliseerProjectTab(s.tab) !== 'browser')
+    if (vlak < 0) vlak = visueelDoel
+    werkSlots[vlak] = { view: 'project', projectId: activeId, tab: 'output' }
+    werkSlotFocus = vlak
+    view = 'project'
+    termTab = 'output'
+    richtTermOpSlot(werkSlots[vlak])
+    pasWerkSchermAan()
+    renderSidebar()
+    rememberView()
+    navPush()
+    keurStatusNa()
+    bewaarTermSplit()
+    return
+  }
   const nieuw = nieuwSlot(v)
   const al = werkSlots.findIndex(s => zelfdeSlot(s, v))
   if (al >= 0) {
@@ -5807,6 +5875,25 @@ function herstelTermSplit(ctx) {
   // die niet terugzetten.
   if (ctx?.id === CMD_CTX_ID || ctx?.id === PS_CTX_ID) return
   if (splitGemengd()) return
+  // Bij het terugzetten van een navigatielocatie (terug/vooruit) staat de split
+  // al goed in werkSlots; laat de herstel-uit-opgeslagen-staat hem dan met rust.
+  if (navBezig && termSplit && Array.isArray(werkSlots) && werkSlots.length === 2) return
+  // Een verse, levende twee-projecten-split (net gemaakt in plaatsInSplit toen
+  // je op het tweede project klikte) staat al goed in werkSlots, maar is nog
+  // niet opgeslagen: bewaarTermSplit() draait pas ná pasWerkSchermAan(). Zonder
+  // deze uitzondering leest de herstelcode hieronder een leeg record en gooit
+  // hij de split meteen weer weg -- dan lijkt de klik op het tweede project
+  // niets te doen. Alleen overslaan als beide vlakken naar bestaande projecten
+  // wijzen en het net getekende project er één van is; een verwijderd project
+  // of een vreemd ctx valt hierbuiten en loopt gewoon door de herstelcode.
+  if (termSplit && Array.isArray(werkSlots) && werkSlots.length === 2
+      && werkSlots[0].view === 'project' && werkSlots[1].view === 'project'
+      && werkSlots[0].projectId && werkSlots[1].projectId
+      && werkSlots[0].projectId !== werkSlots[1].projectId
+      && [werkSlots[0].projectId, werkSlots[1].projectId].includes(ctx?.id)
+      && werkSlots.every(s => projects.some(p => p.id === s.projectId))) {
+    return
+  }
   const raw = (settings.termSplits || {})[ctx?.id]
   const gelezen = leesTermSplit(raw)
   if (!gelezen) { termSplit = null; termSplitFirst = 'output'; werkSlots = null; werkSlotFocus = 0; return }
@@ -5899,6 +5986,9 @@ function zetTermSplit(richting, houdenInhoud) {
   planSplitPlusVervers()
   if (termSplit && !splitGemengd() && !browserItems.length) navigeerNaar(browserPath || currentCwd())
   requestAnimationFrame(() => pasPtyMaatAan(ptySessies.get(activeTermId)))
+  // Split openen of sluiten is een stap in de geschiedenis: zo kan terug/vooruit
+  // de gesplitste weergave terugzetten of juist weer dichtklappen.
+  navPush()
 }
 
 // Min links/boven sluit dat vlak; het andere (rechts/onder) blijft staan.
