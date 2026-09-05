@@ -1526,7 +1526,9 @@ window.addEventListener('DOMContentLoaded', async () => {
       return
     }
     if (splitTweeProjecten() && werkSplit.slots.some(s => s.projectId === projectId)) {
-      appendLineNaar(projectId, 'terminal-andere', type, text)
+      // Het andere vlak schrijft naar zijn eigen terminal-element via dezelfde
+      // appendLine — geen apart pad meer nodig.
+      appendLine(type, text, projectId)
     }
   })
 })
@@ -4827,6 +4829,35 @@ function termEl(base, id = activeTermId) {
   return document.getElementById(base)
 }
 
+// In een twee-projecten-split hoort elk project bij een vast vlak: slot 0 in het
+// output-paneel (#terminal / #pty-host / #browser-andere), slot 1 in het
+// verkenner-paneel (#terminal-andere / #pty-host-andere / #browser). Zo hoeft er
+// niets meer op focus verplaatst te worden — beide vlakken zijn zelfstandig.
+function slotVanProject(id) {
+  if (splitTweeProjecten() && werkSplit.slots) {
+    if (werkSplit.slots[0].projectId === id) return 0
+    if (werkSplit.slots[1].projectId === id) return 1
+  }
+  return -1
+}
+
+// Het terminal-element (uitvoer-log) voor een context: het tweede vlak krijgt
+// #terminal-andere, al het andere #terminal in zijn eigen paneel.
+function termElVoorId(id = activeTermId) {
+  return slotVanProject(id) === 1 ? document.getElementById('terminal-andere') : termEl('terminal', id)
+}
+
+// Het pty-host-element (levende xterm) voor een context, op dezelfde manier.
+function ptyHostVoorId(id = activeTermId) {
+  return slotVanProject(id) === 1 ? document.getElementById('pty-host-andere') : document.getElementById('pty-host')
+}
+
+// Is de uitvoer van deze context op dit moment in beeld (eigen vlak of het
+// gefocuste)? Zo ja, dan mag er live in getekend worden.
+function ctxInBeeld(id) {
+  return id === activeTermId || slotVanProject(id) >= 0
+}
+
 function cwdVoorProject(pid) {
   if (!pid || pid === activeId) return currentCwd()
   const p = projects.find(x => x.id === pid)
@@ -5675,16 +5706,19 @@ function wireWerkSplit() {
   })
 }
 
+function bewaarTerminalEl(pid, el) {
+  if (el && pid) termOutput[pid] = el.innerHTML.replace(/<span class="t-cursor"><\/span>/g, '')
+}
+
 function bewaarZichtbareUitvoer() {
-  const term = document.getElementById('terminal')
-  if (term && activeTermId) {
-    termOutput[activeTermId] = term.innerHTML.replace(/<span class="t-cursor"><\/span>/g, '')
+  // Twee projecten: slot 0 in #terminal, slot 1 in #terminal-andere. Anders is
+  // #terminal van het gefocuste project.
+  if (splitTweeProjecten() && werkSplit.slots) {
+    bewaarTerminalEl(werkSplit.slots[0].projectId, document.getElementById('terminal'))
+    bewaarTerminalEl(werkSplit.slots[1].projectId, document.getElementById('terminal-andere'))
+    return
   }
-  const andere = document.getElementById('terminal-andere')
-  if (andere && splitTweeProjecten()) {
-    const idleId = werkSplit.slots[1 - werkSplit.focus].projectId
-    if (idleId) termOutput[idleId] = andere.innerHTML.replace(/<span class="t-cursor"><\/span>/g, '')
-  }
+  bewaarTerminalEl(activeTermId, document.getElementById('terminal'))
 }
 
 function bewaarTermSplit(extraId) {
@@ -5736,32 +5770,6 @@ function kiesProjectInSplit(id) {
   bewaarTermSplit(id)
 }
 
-function zetLiveInSlot(slot) {
-  if (!splitTweeProjecten()) return
-  const pane0 = levend('.term-pane[data-pane="output"]')
-  const pane1 = levend('.term-pane[data-pane="browser"]')
-  if (!pane0 || !pane1) return
-  const live = slot === 0 ? pane0 : pane1
-  const idle = slot === 0 ? pane1 : pane0
-  const term = document.getElementById('terminal')
-  const pty = document.getElementById('pty-host')
-  const andere = document.getElementById('terminal-andere')
-  const ptyAndere = document.getElementById('pty-host-andere')
-  const naamLive = live.querySelector('.term-pane-naam')
-  const naamIdle = idle.querySelector('.term-pane-naam')
-  if (term && term.parentNode !== live) {
-    if (naamLive) naamLive.after(term)
-    else live.prepend(term)
-  }
-  if (pty && term) term.after(pty)
-  else if (pty && naamLive) naamLive.after(pty)
-  if (andere && andere.parentNode !== idle) {
-    if (naamIdle) naamIdle.after(andere)
-    else idle.prepend(andere)
-  }
-  if (ptyAndere && andere) andere.after(ptyAndere)
-}
-
 function pasPaneNamenAan() {
   const twee = splitTweeProjecten()
   levenden('.term-pane').forEach(pane => {
@@ -5774,59 +5782,60 @@ function pasPaneNamenAan() {
   })
 }
 
+// Twee projecten naast elkaar: elk vlak is zelfstandig. Slot 0 woont in het
+// output-paneel (#terminal / #pty-host / #browser-andere), slot 1 in het
+// verkenner-paneel (#terminal-andere / #pty-host-andere / #browser). Er wordt
+// niets meer op focus verplaatst; beide vlakken worden gewoon gevuld.
 function vulSplitPanelen() {
   const andere = document.getElementById('terminal-andere')
   const ptyAndere = document.getElementById('pty-host-andere')
   if (!splitTweeProjecten()) {
-    if (andere) { andere.hidden = true; andere.removeAttribute('data-gevuld'); andere.innerHTML = '' }
+    const term = document.getElementById('terminal')
+    if (term) term.removeAttribute('data-pid')
+    if (andere) { andere.hidden = true; andere.removeAttribute('data-pid'); andere.innerHTML = '' }
     if (ptyAndere) { ptyAndere.hidden = true; ptyAndere.replaceChildren() }
     return
   }
-  const idleId = werkSplit.slots[1 - werkSplit.focus].projectId
-  const idlePty = ptySessies.get(idleId)
-  if (andere) {
-    andere.hidden = !!idlePty
-    if (!andere.dataset.gevuld) {
-      andere.innerHTML = (termOutput[idleId] || '') + '<span class="t-cursor"></span>'
-      andere.dataset.gevuld = '1'
-      andere.scrollTop = andere.scrollHeight
-    }
-  }
-  if (ptyAndere) {
-    ptyAndere.hidden = !idlePty
-    if (idlePty) {
-      if (idlePty.houder.parentNode !== ptyAndere) ptyAndere.replaceChildren(idlePty.houder)
-      pasPtyMaatAan(idlePty)
-    } else ptyAndere.replaceChildren()
-  }
-  zetLiveInSlot(werkSplit.focus)
+  vulSlotTerminal(werkSplit.slots[0].projectId, document.getElementById('terminal'), document.getElementById('pty-host'))
+  vulSlotTerminal(werkSplit.slots[1].projectId, andere, ptyAndere)
   pasPaneNamenAan()
   toonSlotInhoud()
 }
 
+// Vul één vlak met zijn eigen project: de bewaarde uitvoer in het terminal-
+// element (alleen als er een ánder project stond, zodat live-uitvoer niet
+// overschreven wordt) en zijn eigen pty-sessie in de host.
+function vulSlotTerminal(pid, term, ptyHost) {
+  if (term && term.dataset.pid !== String(pid || '')) {
+    term.innerHTML = (termOutput[pid] || '') + '<span class="t-cursor"></span>'
+    term.dataset.pid = String(pid || '')
+    term.scrollTop = term.scrollHeight
+  }
+  if (ptyHost) {
+    const sessie = ptySessies.get(pid)
+    if (sessie) {
+      if (sessie.houder.parentNode !== ptyHost) ptyHost.replaceChildren(sessie.houder)
+      pasPtyMaatAan(sessie)
+    } else ptyHost.replaceChildren()
+  }
+}
+
 function toonSlotInhoud() {
   if (!splitTweeProjecten() || !werkSplit.slots) return
-  const term = document.getElementById('terminal')
-  const pty = document.getElementById('pty-host')
-  const andere = document.getElementById('terminal-andere')
-  const ptyAndere = document.getElementById('pty-host-andere')
-  const br = document.getElementById('browser')
-  const brAndere = document.getElementById('browser-andere')
+  const el = (n) => document.getElementById(n)
+  zetSlotZicht(werkSplit.slots[0], el('terminal'), el('pty-host'), el('browser-andere'))
+  zetSlotZicht(werkSplit.slots[1], el('terminal-andere'), el('pty-host-andere'), el('browser'))
+}
 
-  const liveTab = normaliseerProjectTab(werkSplit.slots[werkSplit.focus].tab)
-  const idleId = werkSplit.slots[1 - werkSplit.focus].projectId
-  const idleTab = normaliseerProjectTab(werkSplit.slots[1 - werkSplit.focus].tab)
-  const livePty = ptySessies.get(activeTermId)
-  const idlePty = ptySessies.get(idleId)
-
-  if (term) term.hidden = liveTab !== 'output' || !!livePty
-  if (pty) pty.hidden = liveTab !== 'output' || !livePty
-  if (andere) andere.hidden = idleTab !== 'output' || !!idlePty
-  if (ptyAndere) ptyAndere.hidden = idleTab !== 'output' || !idlePty
-
-  // Slot 0 gebruikt altijd #browser-andere, slot 1 #browser.
-  if (brAndere) brAndere.hidden = werkSplit.slots[0].tab !== 'browser'
-  if (br) br.hidden = werkSplit.slots[1].tab !== 'browser'
+// Toon per vlak de terminal of pty (tab 'output') of de verkenner (tab
+// 'browser'), afhankelijk van de tab van dat slot en of het een levende sessie
+// heeft.
+function zetSlotZicht(slot, term, pty, br) {
+  const tab = normaliseerProjectTab(slot.tab)
+  const heeftPty = !!ptySessies.get(slot.projectId)
+  if (term) term.hidden = tab !== 'output' || heeftPty
+  if (pty) pty.hidden = tab !== 'output' || !heeftPty
+  if (br) br.hidden = tab !== 'browser'
 }
 
 function vulIdleVerkenner() {
@@ -6899,9 +6908,12 @@ function wireTerminal(ctx, opts = {}) {
   wireBrowser(ctx, opts)
 
   if (termOutput[ctx.id]) {
-    const term = $id('terminal')
-    term.innerHTML = termOutput[ctx.id] + '<span class="t-cursor"></span>'
-    term.scrollTop = term.scrollHeight
+    const term = termElVoorId(ctx.id)
+    if (term) {
+      term.innerHTML = termOutput[ctx.id] + '<span class="t-cursor"></span>'
+      term.dataset.pid = String(ctx.id)
+      term.scrollTop = term.scrollHeight
+    }
   }
 
   wireTermSplit()
@@ -13203,30 +13215,14 @@ function schoonUitvoer(tekst) {
   return kaal.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
 }
 
-function appendLineNaar(termId, elId, type, text) {
-  text = schoonUitvoer(text)
-  const term = document.getElementById(elId)
-  if (!termOutput[termId]) termOutput[termId] = ''
-  if (!term) return
-  term.querySelector('.t-cursor')?.remove()
-  if (type === 'sep') {
-    const hr = document.createElement('div'); hr.className = 't-sep'; term.appendChild(hr)
-  } else {
-    const div = document.createElement('div'); div.className = `t-${type}`; div.textContent = text; term.appendChild(div)
-  }
-  const cursor = document.createElement('span'); cursor.className = 't-cursor'; term.appendChild(cursor)
-  const teveel = term.childElementCount - MAX_UITVOERREGELS
-  for (let i = 0; i < teveel; i++) term.firstElementChild?.remove()
-  term.scrollTop = term.scrollHeight
-  termOutput[termId] = term.innerHTML.replace('<span class="t-cursor"></span>', '')
-}
-
-function appendLine(type, text) {
-  const term = termEl('terminal')
+function appendLine(type, text, id = activeTermId) {
+  const term = termElVoorId(id)
   if (!term) return
   text = schoonUitvoer(text)
-  // Er komt uitvoer binnen: dan wil je die zien, niet de verkenner.
-  if (type !== 'sep') springNaarOutput()
+  // Er komt uitvoer binnen: dan wil je die zien, niet de verkenner. Alleen het
+  // gefocuste vlak springt naar voren; het andere vlak toont zijn uitvoer in
+  // zijn eigen paneel zonder van tab te wisselen.
+  if (type !== 'sep' && id === activeTermId) springNaarOutput()
   term.querySelector('.t-cursor')?.remove()
 
   if (type === 'sep') {
@@ -13244,10 +13240,13 @@ function appendLine(type, text) {
   for (let i = 0; i < teveel; i++) term.firstElementChild?.remove()
 
   term.scrollTop = term.scrollHeight
-  if (!termOutput[activeTermId]) termOutput[activeTermId] = ''
-  termOutput[activeTermId] = term.innerHTML.replace('<span class="t-cursor"></span>', '')
-  plaatsStatus()
+  if (!termOutput[id]) termOutput[id] = ''
+  termOutput[id] = term.innerHTML.replace('<span class="t-cursor"></span>', '')
+  if (id === activeTermId) plaatsStatus()
 
+  // Statusdetectie hoort bij het gefocuste vlak; het andere vlak verandert de
+  // status-pil niet.
+  if (id !== activeTermId) return
   // Detect flutter install complete — app is running on device
   const installDonePatterns = [
     /flutter run.*key commands/i,
@@ -14604,7 +14603,7 @@ function ververPtyStatus() {
 // De terminal van een sessie leeft in zijn eigen los element. Dat overleeft het
 // opnieuw opbouwen van de weergave: we hangen hem er daarna weer in.
 function toonPtySessie() {
-  const host = document.getElementById('pty-host')
+  const host = ptyHostVoorId(activeTermId)
   if (!host) return
   const s = ptySessies.get(activeTermId)
   if (!s) { host.replaceChildren(); return }
@@ -14819,9 +14818,9 @@ function aiModelNaam(s) {
 // weergave in beeld, dan gaat het via de DOM; staat hij dat niet, dan schrijven
 // we alleen in de bewaarde uitvoer, zodat het er staat als je terugkomt.
 function aiHtmlErbij(id, html) {
-  const term = (id === activeTermId) ? document.getElementById('terminal') : null
+  const term = ctxInBeeld(id) ? termElVoorId(id) : null
   if (!term) { termOutput[id] = (termOutput[id] || '') + html; return }
-  springNaarOutput()
+  if (id === activeTermId) springNaarOutput()
   term.querySelector('.t-cursor')?.remove()
   term.insertAdjacentHTML('beforeend', html)
   const cursor = document.createElement('span')
@@ -14829,7 +14828,7 @@ function aiHtmlErbij(id, html) {
   term.appendChild(cursor)
   term.scrollTop = term.scrollHeight
   termOutput[id] = term.innerHTML.replace('<span class="t-cursor"></span>', '')
-  plaatsStatus()
+  if (id === activeTermId) plaatsStatus()
 }
 
 function aiRegel(id, klasse, tekst) {
@@ -14855,11 +14854,11 @@ function aiStroomStuk(id, tekst) {
   const s = aiSessies[id]
   if (!s || !s.divId) return
   s.lopend += tekst
-  if (id === activeTermId) {
+  if (ctxInBeeld(id)) {
     const el = document.getElementById(s.divId)
     if (el) {
       el.appendChild(document.createTextNode(tekst))
-      const term = document.getElementById('terminal')
+      const term = termElVoorId(id)
       if (term) term.scrollTop = term.scrollHeight
     }
   }
@@ -14880,10 +14879,10 @@ function aiStroomBewaar(id) {
 function aiStroomWeg(id) {
   const s = aiSessies[id]
   if (!s || !s.divId) return
-  const el = (id === activeTermId) ? document.getElementById(s.divId) : null
+  const el = ctxInBeeld(id) ? document.getElementById(s.divId) : null
   if (el) {
     el.remove()
-    const term = document.getElementById('terminal')
+    const term = termElVoorId(id)
     if (term) termOutput[id] = term.innerHTML.replace('<span class="t-cursor"></span>', '')
   } else {
     const knip = s.voor.lastIndexOf('<div class="t-ai"')

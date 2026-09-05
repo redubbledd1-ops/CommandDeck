@@ -63,6 +63,7 @@ let ptyErBij = { ok: true, reden: '' }
 // renderer die de sessie kent doet er iets mee.
 let ptyDataCbs = []
 let ptyExitCbs = []
+let outputCbs = []
 const ptyData = (d) => ptyDataCbs.forEach(cb => cb(d))
 const ptyExit = (d) => ptyExitCbs.forEach(cb => cb(d))
 let editorStarts = []
@@ -371,7 +372,7 @@ const api = {
   relaunch: () => {},
   updateAndRestart: async (o) => { updates.push(o || null); return updateAntwoord },
   runtimeInfo: async () => ({ packaged: false, version: '1.0.0' }),
-  onOutput: () => () => {},
+  onOutput: (cb) => { outputCbs.push(cb); return () => {} },
   aiProviders: async () => [{
     id: 'openai', label: 'OpenAI', merk: 'OpenAI',
     sleutelBron: 'opgeslagen', heeftSleutel: true, sleutelNodig: true,
@@ -442,7 +443,8 @@ window.eval(fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8')
   + '\n  zetNavItem, zetZijbalkSectie,'
   + '\n  verwijderMap, folderOp,'
   + '\n  verfLezer,'
-  + '\n  gekoppeldeRepoAdressen, zetBewerkt: (id) => { editingId = id } };')
+  + '\n  gekoppeldeRepoAdressen, zetBewerkt: (id) => { editingId = id },'
+  + '\n  splitSlotIds: () => (werkSplit.slots || []).map(s => s.projectId) };')
 startVraagAutomaat()
 const W = window
 const inBevrorenPaneel = (el) => {
@@ -1255,6 +1257,22 @@ function startVraagAutomaat() {
   check('en weer terug naar het eerste ook',
     ($('.proj-header-name')?.textContent || '').includes('dd_crypto') &&
     !!$('.terminal-wrap')?.classList.contains('twee-projecten'))
+
+  // Uitvoer-routing: elk project schrijft naar zijn eigen vlak (slot 0 →
+  // #terminal, slot 1 → #terminal-andere), ongeacht welk vlak de focus heeft.
+  // Dit is de kern van de per-slot rendering: het tweede scherm is zelfstandig.
+  {
+    const ids = W.__test.splitSlotIds()
+    outputCbs.forEach(cb => cb({ projectId: ids[0], type: 'out', text: 'SLOT0_MARK' }))
+    outputCbs.forEach(cb => cb({ projectId: ids[1], type: 'out', text: 'SLOT1_MARK' }))
+    await tick()
+    const t0 = $('#terminal')?.textContent || ''
+    const t1 = $('#terminal-andere')?.textContent || ''
+    check('uitvoer van slot 0 landt in #terminal',
+      t0.includes('SLOT0_MARK') && !t0.includes('SLOT1_MARK'))
+    check('uitvoer van slot 1 landt in #terminal-andere',
+      t1.includes('SLOT1_MARK') && !t1.includes('SLOT0_MARK'))
+  }
 
   $('#btn-nav-dict').click(); await tick(); await tick()
   check('woordenboek mag naast een project als je het zelf opent',
