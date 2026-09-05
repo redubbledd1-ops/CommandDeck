@@ -136,8 +136,8 @@ iets draait — dat doet `springNaarOutput()` al.
 Herkennen: html gevonden en geen Flutter → `p.website = true`, te overrulen in
 het projectvenster. Startbestand: de gevonden `index.html` (besteStart).
 
-De split blijft twee panelen (output/verkenner); naar de editor gaan zet een
-open split eerst dicht.
+De split blijft twee panelen; de bestandseditor mag één van die twee zijn
+(naast verkenner, preview, woordenboek of een ander project).
 
 ---
 

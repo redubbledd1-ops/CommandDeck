@@ -342,8 +342,14 @@ t('lichte aanvulling in de editor',
   && /pasLezerAanvulToe/.test(ren)
   && css.includes('.lezer-aanvul')
   && css.includes('max-height: 220px'))
+t('editor mag in split blijven (geen dichtgooien)',
+  /function normaliseerProjectTab\(/.test(ren)
+  && !/zetTermSplit\(null\)/.test(
+    ren.slice(ren.indexOf('function setTermTab'), ren.indexOf('async function navigeerNaar'))))
 t('springNaarOutput haalt ook de editor weg',
-  /termTab !== 'output'\) setTermTab\('output'\)/.test(ren))
+  /termTab !== 'output'\) setTermTab\('output'\)/.test(ren)
+  || /setTermTab\('output'\)/.test(
+    ren.slice(ren.indexOf('function springNaarOutput'), ren.indexOf('function leesTermSplit'))))
 
 t('slepen gaat langs één plek die kijkt wat het is',
   /async function verwerkGesleept\(/.test(ren))

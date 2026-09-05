@@ -525,6 +525,11 @@ check('zonder systeemprompt blijft het veld weg',
     bron.includes('function plaatsInSplit') &&
     bron.includes('werk-vlak') &&
     html.includes('id="werk"'))
+  check('bestanden-editor mag in split naast verkenner of woordenboek',
+    bron.includes('function normaliseerProjectTab') &&
+    /tab === 'editor'/.test(bron.slice(bron.indexOf('function setTermTab'), bron.indexOf('async function navigeerNaar'))) &&
+    !/zetTermSplit\(null\)/.test(bron.slice(bron.indexOf('function setTermTab'), bron.indexOf('async function navigeerNaar'))) &&
+    /normaliseerProjectTab\(s\.tab\) === 'editor'/.test(bron))
   check('woordenboek-split wordt niet per project onthouden',
     bron.includes('function isGemengdeSplit') &&
     bron.includes('function wisGemengdeProjectSplits') &&
