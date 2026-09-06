@@ -315,5 +315,31 @@ function rij(b, ids, extra) {
     !/quickUit/.test(stand) && !/quickVolgorde/.test(stand))
 }
 
+// ── Sectie aan/uit + mappen dicht ────────────────────────────────────────────
+{
+  const b = bron({
+    cmdFolders: [
+      { id: 'm1', sectie: 'run', label: 'A', open: true },
+      { id: 'm2', sectie: 'run', label: 'B', open: true },
+      { id: 'm3', sectie: 'snel', label: 'C', open: true },
+    ],
+  })
+  t('sectie staat standaard aan', K.sectieAan(b, 'run') === true)
+  t('uit zetten klapt mappen van die sectie dicht', K.zetSectie(b, 'run', false) === true)
+  t('sectie is nu uit', K.sectieAan(b, 'run') === false)
+  t('run-mappen zijn dicht', b.cmdFolders.filter(f => f.sectie === 'run').every(f => f.open === false))
+  t('andere sectie blijft open', b.cmdFolders.find(f => f.id === 'm3').open === true)
+  t('dichte map + sectie aan via openMapEnSectie',
+    K.openMapEnSectie(b, 'run', 'm1') === true
+    && K.sectieAan(b, 'run') === true
+    && b.cmdFolders.find(f => f.id === 'm1').open === true)
+  t('andere map blijft dicht', b.cmdFolders.find(f => f.id === 'm2').open === false)
+  // Zelfde helpers werken voor snelrij-bron (settings.cmd)
+  const snel = bron({ cmdFolders: [{ id: 's1', sectie: 'snel', label: 'X', open: true }] })
+  t('snelrij gebruikt dezelfde zetSectie',
+    K.zetSectie(snel, 'snel', false) && !K.sectieAan(snel, 'snel')
+    && snel.cmdFolders[0].open === false)
+}
+
 console.log(ok ? '\nALLE KNOPPENRIJ-TESTS GESLAAGD' : '\nER ZIJN TESTS GEFAALD')
 process.exit(ok ? 0 : 1)

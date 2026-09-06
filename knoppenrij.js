@@ -77,6 +77,52 @@
     return !!f && f.open !== false
   }
 
+  // Hele rij (knoppen/snelkoppelingen) aan of uit. Staat in bron.secties[sectie],
+  // net als bij een project: false = uit, anders aan.
+  function sectieAan(bron, sectie) {
+    return !(bron && bron.secties && bron.secties[sectie] === false)
+  }
+
+  // Alle mappen van deze rij dichtklappen. Gebruikt als de rij uit gaat: de
+  // knoppen verdwijnen, de mapnamen blijven in de kop klikbaar.
+  function klapMappenDicht(bron, sectie) {
+    if (!bron) return false
+    let gedaan = false
+    for (const f of mappenVan(bron, sectie)) {
+      if (f.open === false) continue
+      f.open = false
+      gedaan = true
+    }
+    return gedaan
+  }
+
+  // Zet de rij aan/uit. Bij uit: alle mappen dicht. Geeft terug of iets
+  // veranderde (sectie of mapstand). Opslaan/hertekenen blijft van de aanroeper.
+  function zetSectie(bron, sectie, aan) {
+    if (!bron) return false
+    const was = sectieAan(bron, sectie)
+    const wil = !!aan
+    let gedaan = false
+    if (was !== wil) {
+      bron.secties = { ...(bron.secties || {}), [sectie]: wil }
+      gedaan = true
+    }
+    if (!wil && klapMappenDicht(bron, sectie)) gedaan = true
+    return gedaan
+  }
+
+  // Dichte map aanklikken terwijl de rij uit staat: map open + rij weer aan.
+  // Zo hoef je niet eerst het schuifje te zoeken.
+  function openMapEnSectie(bron, sectie, mapId) {
+    if (!bron) return false
+    const f = mapOp(bron, mapId)
+    if (!f) return false
+    let gedaan = false
+    if (f.open === false) { f.open = true; gedaan = true }
+    if (zetSectie(bron, sectie, true)) gedaan = true
+    return gedaan
+  }
+
   // Slepen rekent met id's, niet met plekken. Een knop kan van de rij in een map
   // springen en andersom, en dan zegt "plek 3" niets meer: welke lijst zou dat
   // zijn? Het id blijft hetzelfde, waar hij ook heen gaat.
@@ -353,6 +399,7 @@
   return {
     MAP_PREFIX, isMapId, mapIdVan, nieuwMapId, verschuif, migreer,
     mappenVan, mapOp, mapOpen, zetInMap,
+    sectieAan, klapMappenDicht, zetSectie, openMapEnSectie,
     mapVanKnop, mapIdVanKnop, autoMapVoor,
     zichtbaar, volgorde, zichtbareIds, knoppenInMap, idsInBeeld, rijVolgorde, knopRij,
     verplaatsVolgorde, verplaatsKnop, legInMap,

@@ -298,7 +298,7 @@
   "project.locationLabel": "locatie:",
   "project.openFolderButton": "openen",
   "project.releaseToggleTitle": "Voegt --release toe aan run-commando's",
-  "project.sectionToggleTitle": "De hele sectie aan of uit voor dit project",
+  "project.sectionToggleTitle": "Hele rij aan of uit — uit klapt alle mappen dicht; klik een map om weer aan te zetten",
   "project.cmdSortToast": "Sleep de knoppen of gebruik de pijltjes",
   "project.cmdSortHint": "Sleep knoppen of gebruik de pijltjes. Escape om te stoppen.",
   "project.defaultLocationLabel": "map",

@@ -425,13 +425,29 @@ function ontdubbelCustomEditors() {
 
 // Hele sectie aan of uit. Handiger dan alle vinkjes los omzetten als je
 // bijvoorbeeld bij een niet-Flutter project de tools niet wilt zien.
+// Bij uitzetten klappen alle mappen dicht — die blijven als chips in de kop.
 function sectieAan(p, sectie) {
-  return !(p.secties && p.secties[sectie] === false)
+  const bron = rijVoor(p, sectie).bron
+  return Knoppenrij.sectieAan(bron, sectie)
 }
 
 function zetSectie(p, sectie, aan) {
-  p.secties = { ...(p.secties || {}), [sectie]: !!aan }
-  saveProjects()
+  const rij = rijVoor(p, sectie)
+  Knoppenrij.zetSectie(rij.bron, sectie, aan)
+  rij.bewaar()
+}
+
+function sectieToggleHtml(sectie, aan) {
+  return `<label class="toggle-switch" title="${esc(I18N.t('project.sectionToggleTitle'))}">
+    <input type="checkbox" data-sectie-toggle="${esc(sectie)}" ${aan ? 'checked' : ''} />
+    <span class="toggle-slider"></span>
+  </label>`
+}
+
+function bedraadSectieToggles(p, wortel = document) {
+  wortel.querySelectorAll('[data-sectie-toggle]').forEach(el => {
+    el.onchange = () => zetSectie(p, el.dataset.sectieToggle, el.checked)
+  })
 }
 
 // 'tools' was een eigen sectie onder uitvoeren, met een eigen kop, een eigen
@@ -3602,19 +3618,28 @@ function legInMap(p, sectie, knopId, mapId) {
 }
 
 function bedraadMapKoppen(p, sectie, grid) {
-  const rij = rijVoor(p, sectie)
   grid.querySelectorAll('[data-map]').forEach(kop => {
-    const f = folderOp(rij.bron, kop.dataset.map)
-    if (!f) return
     kop.onclick = (e) => {
       e.preventDefault()
       e.stopPropagation()
-      f.open = f.open === false
-      rij.bewaar()
+      // Verse rij/map: settings.cmd kan na saveSettings een nieuwe kopie zijn.
+      const live = rijVoor(p, sectie)
+      const f = folderOp(live.bron, kop.dataset.map)
+      if (!f) return
+      // Dichte map + rij uit: eerst de rij weer aan, anders zie je niets.
+      if (f.open === false && !Knoppenrij.sectieAan(live.bron, sectie)) {
+        Knoppenrij.openMapEnSectie(live.bron, sectie, f.id)
+      } else {
+        f.open = f.open === false
+      }
+      live.bewaar()
     }
     kop.oncontextmenu = (e) => {
       e.preventDefault()
       e.stopPropagation()
+      const live = rijVoor(p, sectie)
+      const f = folderOp(live.bron, kop.dataset.map)
+      if (!f) return
       toonContextMenu(e.clientX, e.clientY, [
         { label: I18N.t('folder.rename'), icoon: 'ti-pencil', doe: () => hernoemMap(p, sectie, f.id) },
         { label: I18N.t('folder.dissolve'), icoon: 'ti-folder-off', doe: () => hefMappenOp(p, sectie, [f.id]) },
@@ -4233,10 +4258,7 @@ function renderMain() {
     <div class="cmd-section ${runAan ? '' : 'sectie-uit'}" data-sectieblok="run">
       <div class="cmd-section-label-row">
         <div class="cmd-section-label">${esc(I18N.t('project.buttonsSectionLabel'))}</div>
-        <label class="toggle-switch" title="${esc(I18N.t('project.sectionToggleTitle'))}">
-          <input type="checkbox" id="toggle-sectie-run" ${runAan ? 'checked' : ''} />
-          <span class="toggle-slider"></span>
-        </label>
+        ${sectieToggleHtml('run', runAan)}
         ${dichteMappenHtml(p, 'run')}
         ${kopActiesHtml('run')}
       </div>
@@ -4299,10 +4321,7 @@ function renderMain() {
     bedraadKnopWissen(p, blok.dataset.sectieblok, blok.querySelector('.cmd-grid'))
   })
 
-  const runToggle = document.getElementById('toggle-sectie-run')
-  if (runToggle) runToggle.onchange = (e) => {
-    zetSectie(p, 'run', e.target.checked); renderMain()
-  }
+  bedraadSectieToggles(p)
 
   // Flutter commands
   main.querySelectorAll('.cmd-btn[data-cmd]').forEach(btn => {
@@ -4817,8 +4836,8 @@ function wisProjectVerkenner(pid) {
 // actieve project — ook als je even bij opdrachten kijkt (activeId blijft).
 function verkennerProjectenInBeeld() {
   const ids = new Set()
-  if (splitTweeProjecten() && werkSlots) {
-    for (const s of werkSlots) {
+  if (splitTweeProjecten() && werkSplit.slots) {
+    for (const s of werkSplit.slots) {
       if (s && s.view === 'project' && s.projectId) ids.add(s.projectId)
     }
   } else if (activeId) {
@@ -7324,10 +7343,12 @@ function renderCmdPanel() {
   // ook al ligt het in een dichte map of staat het even uit -- dan is een regel
   // tekst boven de rij alleen ruimte die de knoppen naar beneden duwt.
   const heeftSnel = snelHeeftKnoppen(SNEL_SECTIE.cmd)
+  const snelAan = sectieAan(null, SNEL_SECTIE.cmd)
   const quickMarkup = `
-    <div class="cmd-section" data-sectieblok="${SNEL_SECTIE.cmd}">
+    <div class="cmd-section ${snelAan ? '' : 'sectie-uit'}" data-sectieblok="${SNEL_SECTIE.cmd}">
       <div class="cmd-section-label-row">
         <div class="cmd-section-label">${esc(I18N.t('cmd.quickCmdsLabel'))}</div>
+        ${sectieToggleHtml(SNEL_SECTIE.cmd, snelAan)}
         ${dichteMappenHtml(null, SNEL_SECTIE.cmd)}
         ${kopActiesHtml(SNEL_SECTIE.cmd)}
       </div>
@@ -7389,6 +7410,7 @@ function renderCmdPanel() {
   })
 
   bedraadCmdSnel()
+  bedraadSectieToggles(null, panel)
   bedraadWisKnoppen()
   bedraadKnopWissen(cmdContext(), 'snel', document.getElementById('cmd-snel-grid'))
   bedraadAiKnoppen(cmdContext())
@@ -7541,10 +7563,12 @@ function renderPsPanel() {
 
   const snelGrid = psSnelGridHtml()
   const heeftSnel = snelHeeftKnoppen(SNEL_SECTIE.ps)
+  const snelAan = sectieAan(null, SNEL_SECTIE.ps)
   const quickMarkup = `
-    <div class="cmd-section" data-sectieblok="${SNEL_SECTIE.ps}">
+    <div class="cmd-section ${snelAan ? '' : 'sectie-uit'}" data-sectieblok="${SNEL_SECTIE.ps}">
       <div class="cmd-section-label-row">
         <div class="cmd-section-label">${esc(I18N.t('cmd.quickCmdsLabel'))}</div>
+        ${sectieToggleHtml(SNEL_SECTIE.ps, snelAan)}
         ${dichteMappenHtml(null, SNEL_SECTIE.ps)}
         ${kopActiesHtml(SNEL_SECTIE.ps)}
       </div>
@@ -7597,6 +7621,7 @@ function renderPsPanel() {
   })
 
   bedraadPsSnel()
+  bedraadSectieToggles(null, panel)
   bedraadWisKnoppen()
   bedraadKnopWissen(psContext(), 'ps-snel', document.getElementById('ps-snel-grid'))
   bedraadAiKnoppen(psContext())

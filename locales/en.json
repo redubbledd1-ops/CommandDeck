@@ -298,7 +298,7 @@
   "project.locationLabel": "location:",
   "project.openFolderButton": "open",
   "project.releaseToggleTitle": "Adds --release to run commands",
-  "project.sectionToggleTitle": "Turns the whole section on or off for this project",
+  "project.sectionToggleTitle": "Whole row on or off — off collapses all folders; click a folder to turn it back on",
   "project.cmdSortToast": "Drag buttons or use the arrows",
   "project.cmdSortHint": "Drag buttons or use the arrows. Press Escape when done.",
   "project.defaultLocationLabel": "folder",

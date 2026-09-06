@@ -2501,7 +2501,7 @@ function startVraagAutomaat() {
     !$('.cmd-grid > .cmd-btn[data-cmd="run-android"]'))
   check('--release staat op de kop van die map',
     !!$('[data-map-groep] #toggle-release'))
-  check('en de rij staat standaard aan', $('#toggle-sectie-run').checked === true)
+  check('en de rij staat standaard aan', $('[data-sectie-toggle="run"]').checked === true)
   check('de knoppen zijn zichtbaar', $$('.cmd-section.sectie-uit').length === 0)
 
   // Een map dichtklappen doet wat de tools-schakelaar deed: de knoppen uit het
@@ -2520,13 +2520,33 @@ function startVraagAutomaat() {
   $('.cmd-map-kop').click(); await tick()
   check('weer openklappen zet ze terug', !!$('[data-map-groep] [data-cmd="run-android"]'))
 
-  $('#toggle-sectie-run').checked = false
-  $('#toggle-sectie-run').dispatchEvent(new window.Event('change')); await tick()
+  $('[data-sectie-toggle="run"]').checked = false
+  $('[data-sectie-toggle="run"]').dispatchEvent(new window.Event('change')); await tick()
   check('de hele rij kan ook inklappen',
     $('[data-sectieblok="run"]').classList.contains('sectie-uit') && projects[0].secties.run === false)
-  $('#toggle-sectie-run').checked = true
-  $('#toggle-sectie-run').dispatchEvent(new window.Event('change')); await tick()
-  check('en weer uitklappen', !$('[data-sectieblok="run"]').classList.contains('sectie-uit'))
+  check('uit zetten klapt alle mappen dicht',
+    (projects[0].cmdFolders || []).filter(f => f.sectie === 'run').every(f => f.open === false))
+  check('dichte mappen blijven in de kop zichtbaar',
+    !!$('.cmd-section-label-row .cmd-map-kop.dicht'))
+  // Klik op dichte map: rij weer aan + die map open
+  $('.cmd-section-label-row .cmd-map-kop.dicht').click(); await tick()
+  check('klik op dichte map zet knoppen weer aan',
+    !$('[data-sectieblok="run"]').classList.contains('sectie-uit') && projects[0].secties.run === true)
+  check('en opent die map',
+    !!$('[data-map-groep] [data-cmd="run-android"]'))
+  $('[data-sectie-toggle="run"]').checked = false
+  $('[data-sectie-toggle="run"]').dispatchEvent(new window.Event('change')); await tick()
+  $('[data-sectie-toggle="run"]').checked = true
+  $('[data-sectie-toggle="run"]').dispatchEvent(new window.Event('change')); await tick()
+  check('en weer uitklappen via schuifje', !$('[data-sectieblok="run"]').classList.contains('sectie-uit'))
+  // Schuifje-aan laat mappen expres dicht; open alles weer zodat latere tests
+  // (editors, pub-get, …) knoppen in het raster kunnen vinden.
+  for (let i = 0; i < 10; i++) {
+    const dicht = $('.cmd-section-label-row .cmd-map-kop.dicht')
+    if (!dicht) break
+    dicht.click(); await tick()
+  }
+  check('flutter-map weer open na herstel', !!$('[data-map-groep] [data-cmd="run-android"]'))
 
   // ook in de projectinstellingen
   $$('.proj-edit')[0].click(); await tick()
@@ -4412,12 +4432,49 @@ function startVraagAutomaat() {
     $('#btn-nav-cmd').click(); await tick(); await tick()
     const blok = $('[data-sectieblok="snel"]')
     check('de cmd-snelrij is een gewoon knoppenblok', !!blok && !!blok.querySelector('.cmd-grid'))
+    check('cmd-snelrij heeft dezelfde aan/uit-schakelaar', !!blok.querySelector('[data-sectie-toggle="snel"]'))
+    check('en staat standaard aan', blok.querySelector('[data-sectie-toggle="snel"]').checked === true)
     // Zijn er knoppen -- ook als ze in een dichte map liggen of uit staan --
     // dan hoort er geen regel tekst boven de rij te staan. Die duwde de
     // knoppen alleen maar naar beneden.
     check('en zonder uitlegregel erboven', !blok.querySelector('.hint-row'))
     check('en de knoppen dragen hun id, niet hun plek',
       !!blok.querySelector('.cmd-btn[data-volgorde-id]'))
+
+    // Zelfde gedrag als bij een project: uit = mappen dicht, klik map = weer aan.
+    const snelMap = window.Knoppenrij.nieuweMap(W.__test.snelRij('snel'), 'toggle-test')
+    const snelKnop = window.Knoppenrij.zichtbareIds(W.__test.snelRij('snel')).find(id => !id.startsWith('map:'))
+    check('er is een snelknop om in de testmap te leggen', !!snelKnop)
+    if (snelKnop) window.Knoppenrij.legInMap(W.__test.snelRij('snel'), snelKnop, snelMap.id)
+    settings.cmd.cmdFolders.find(f => f.id === snelMap.id).open = true
+    window.api.saveSettings(settings)
+    $('#btn-nav-cmd').click(); await tick(); await tick()
+    $('[data-sectie-toggle="snel"]').checked = false
+    $('[data-sectie-toggle="snel"]').dispatchEvent(new window.Event('change')); await tick()
+    check('cmd-snelrij uitzetten bewaart secties.snel=false', settings.cmd.secties?.snel === false)
+    check('en klapt de snelmap dicht',
+      (settings.cmd.cmdFolders || []).find(f => f.id === snelMap.id)?.open === false)
+    check('sectie-uit class staat op het blok',
+      $('[data-sectieblok="snel"]').classList.contains('sectie-uit'))
+    const dichtSnel = $(`[data-sectieblok="snel"] .cmd-map-kop.dicht[data-map="${snelMap.id}"]`)
+    check('dichte snelmap staat in de kop', !!dichtSnel)
+    check('mapkop is bedraad', !!(dichtSnel && typeof dichtSnel.onclick === 'function'))
+    if (dichtSnel && dichtSnel.onclick) {
+      dichtSnel.onclick({ preventDefault() {}, stopPropagation() {} })
+      await tick(); await tick()
+    }
+    check('klik dichte snelmap zet rij weer aan', settings.cmd.secties?.snel === true)
+    check('en opent de map',
+      (settings.cmd.cmdFolders || []).find(f => f.id === snelMap.id)?.open !== false)
+    // Opruimen zodat latere snelrij-tests dezelfde losse knoppen zien.
+    window.Knoppenrij.hefMappen(W.__test.snelRij('snel'), [snelMap.id])
+    settings.cmd.secties = { ...(settings.cmd.secties || {}), snel: true }
+    window.api.saveSettings(settings)
+
+    $('#btn-nav-ps').click(); await tick(); await tick()
+    check('powershell-snelrij heeft ook een schakelaar',
+      !!$('[data-sectieblok="ps-snel"] [data-sectie-toggle="ps-snel"]'))
+    $('#btn-nav-cmd').click(); await tick(); await tick()
 
     // De oude vorm (quickVolgorde/quickUit) verhuist eenmalig.
     settings.cmd.quickVolgorde = ['quick:e3', 'quick:e1']
@@ -4559,7 +4616,7 @@ function startVraagAutomaat() {
     // Past de kolom niet in de hoogte, dan hoort het bovenste deel te schuiven
     // in plaats van onderaan afgeknipt te worden.
     check('de knoppenkop van een project kan schuiven',
-      /\.proj-chrome,\n#cmd-panel > \.cmd-section,\n#ps-panel > \.cmd-section \{[^}]*overflow-y: auto/.test(css))
+      /\.proj-chrome,\r?\n#cmd-panel > \.cmd-section,\r?\n#ps-panel > \.cmd-section \{[^}]*overflow-y: auto/.test(css))
     check('en de terminal eronder houdt een bodem',
       /\.terminal-wrap \{ min-height: 150px; \}/.test(css))
     check('in bat schuiven de opties en houdt het tekstvak een bodem',
