@@ -1369,6 +1369,17 @@ function isAutofixEligible(cmdKey, cmd) {
   return /\bflutter\s+(run|build|install)\b/i.test(cmd || '')
 }
 
+const CONFLICT_CMD_KEYS = new Set([
+  'run-android', 'run-windows', 'run-chrome',
+  'build-apk', 'build-web', 'build-windows',
+  'clean', 'pub-get',
+])
+
+function isConflictCheckEligible(cmdKey, cmd) {
+  if (cmdKey && CONFLICT_CMD_KEYS.has(cmdKey)) return true
+  return /\bflutter\s+(run|build|install|clean|pub)\b/i.test(cmd || '')
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', async () => {
   try {
@@ -15926,6 +15937,17 @@ async function executeCmd(project, cmd, cmdKey = null, opties = {}) {
   // Je start iets: dan wil je de uitvoer zien, niet de verkenner.
   springNaarOutput()
 
+  // Flutter run/build/install: eerst checken of Gradle/Dart/Android Studio
+  // (ook van buiten CommandDeck) in de weg zit — met risico's, vóór er iets
+  // gebeurt. Zie regelProcesConflict.
+  if (!opties.geenConflictCheck && isConflictCheckEligible(cmdKey, cmd)) {
+    const door = await regelProcesConflict(werkmap, cmdKey, cmd)
+    if (!door) {
+      setStatus('ended', I18N.t('conflict.geannuleerdStatus'))
+      return { success: false, cancelled: true }
+    }
+  }
+
   const autoFixOn = settings.autoFix?.enabled !== false
   const useAutofix = autoFixOn && isAutofixEligible(cmdKey, cmd)
 
@@ -15980,6 +16002,17 @@ async function executeCmd(project, cmd, cmdKey = null, opties = {}) {
       if (!opties.geenSlotHerstel) {
         const opnieuw = await regelGitSlot(project, werkmap)
         if (opnieuw) return await executeCmd(project, cmd, cmdKey, { ...opties, geenSlotHerstel: true })
+      }
+    }
+
+    // Autofix zag een flutter-lock / file-lock: zelfde dialoog als vooraf.
+    // force: ook tonen zonder harde dader — met tips (VS Code/Cursor e.d.).
+    if (result && result.conflict && !opties.geenConflictHerstel) {
+      const door = await regelProcesConflict(werkmap, cmdKey, cmd, { force: true })
+      if (door) {
+        return await executeCmd(project, cmd, cmdKey, {
+          ...opties, geenConflictCheck: true, geenConflictHerstel: true,
+        })
       }
     }
     return result
@@ -16079,6 +16112,147 @@ async function regelGitSlot(project, pad) {
   }
   appendLine('ok', '✓ ' + I18N.t('git.slot.weggehaald'))
   return true
+}
+
+// ── Processen die run/install blokkeren ──────────────────────────────────────
+// Zelfde idee als git.slot: eerst eerlijk zeggen wát er draait (ook Android
+// Studio / Gradle van buiten CommandDeck), met hoe gevaarlijk stoppen is,
+// en pas daarna laten kiezen. Niets stil doden.
+// opties.force: na een mislukte install ook tonen als we geen harde dader
+// vonden — met tips (VS Code/Cursor) als die openstaan.
+async function regelProcesConflict(cwd, cmdKey, cmd, opties = {}) {
+  const scan = window.api && window.api.conflictScan
+  if (typeof scan !== 'function') return true
+
+  let info = null
+  try { info = await scan({ cwd, cmdKey, cmd }) } catch { info = null }
+  if (!info) return true
+  if (!info.hasConflict && !opties.force) return true
+
+  const regels = []
+  if (info.eigenCommandoDraait) {
+    regels.push(I18N.t('conflict.regelEigen'))
+  }
+  for (const p of (info.processes || [])) {
+    const gevaarKey = p.danger === 'hoog' ? 'conflict.gevaarHoog'
+      : p.danger === 'middel' ? 'conflict.gevaarMiddel'
+      : 'conflict.gevaarLaag'
+    const padKey = p.padMatch ? 'conflict.padMatch' : 'conflict.padOnbekend'
+    regels.push(I18N.t('conflict.regel', {
+      label: p.label || p.name,
+      pid: p.pid,
+      gevaar: I18N.t(gevaarKey),
+      pad: I18N.t(padKey),
+    }))
+  }
+  for (const lock of (info.locks || [])) {
+    const minuten = Math.floor((lock.ouderdomMs || 0) / 60000)
+    regels.push(I18N.t('conflict.regelLock', {
+      pad: lock.pad,
+      ouderdom: minuten >= 1
+        ? I18N.t('conflict.ouderdomMin', { minuten })
+        : I18N.t('conflict.ouderdomNet'),
+    }))
+  }
+
+  // Soft tips: VS Code/Cursor staan open — alleen als hint, nooit als "dader"
+  const editors = info.editors || []
+  const toonEditorTips = editors.length > 0 && (
+    opties.force
+    || info.onduidelijk
+    || !(info.processes || []).length
+    || (info.processes || []).every(p => !p.padMatch)
+  )
+  if (toonEditorTips) {
+    regels.push(I18N.t('conflict.mogelijkKop'))
+    for (const e of editors) {
+      regels.push(I18N.t(
+        e.padMatch ? 'conflict.mogelijkEditorPad' : 'conflict.mogelijkEditor',
+        { label: e.label, count: e.count || 1 },
+      ))
+    }
+    regels.push(I18N.t('conflict.mogelijkTip'))
+  } else if (opties.force && !info.hasConflict) {
+    regels.push(I18N.t('conflict.mogelijkKop'))
+    regels.push(I18N.t('conflict.mogelijkOnbekend'))
+    regels.push(I18N.t('conflict.mogelijkTip'))
+  }
+
+  const onbekend = opties.force && !info.hasConflict
+  const max = onbekend ? 'middel' : (info.maxDanger || 'middel')
+  const tekstKey = onbekend ? 'conflict.tekstOnbekend'
+    : info.onduidelijk && toonEditorTips ? 'conflict.tekstOnduidelijk'
+    : max === 'hoog' ? 'conflict.tekstHoog'
+    : max === 'middel' ? 'conflict.tekstMiddel'
+    : 'conflict.tekstLaag'
+
+  const killable = (info.killablePids || []).length > 0 || info.eigenCommandoDraait
+  const knoppen = [
+    { label: I18N.t('common.cancel'), waarde: '' },
+    { label: I18N.t('conflict.door'), waarde: 'door', soort: max === 'hoog' ? 'gevaar' : '' },
+    { label: I18N.t('conflict.taakbeheer'), waarde: 'taakbeheer' },
+  ]
+  if (killable) {
+    knoppen.splice(2, 0, {
+      label: I18N.t('conflict.stop'),
+      waarde: 'stop',
+      soort: max === 'laag' ? 'primair' : 'gevaar',
+    })
+  } else {
+    knoppen[knoppen.length - 1].soort = 'primair'
+  }
+
+  const keuze = await vraagKeuze({
+    titel: I18N.t(onbekend ? 'conflict.titelOnbekend' : 'conflict.titel'),
+    tekst: I18N.t(tekstKey),
+    regels,
+    knoppen,
+  })
+
+  if (!keuze) return false
+  if (keuze === 'door') return true
+
+  if (keuze === 'taakbeheer') {
+    const ok = await window.api.openTaskManager().catch(() => false)
+    if (!ok) {
+      await meldKort(I18N.t('conflict.titel'), I18N.t('conflict.taakbeheerMislukt'))
+    } else {
+      appendLine('info', I18N.t('conflict.taakbeheerGeopend'))
+    }
+    return await vraagJaNee(
+      I18N.t('conflict.titel'),
+      I18N.t('conflict.naTaakbeheer'),
+      I18N.t('conflict.door'),
+    )
+  }
+
+  if (keuze === 'stop') {
+    if (max !== 'laag') {
+      const heeftHoog = (info.processes || []).some(p => p.danger === 'hoog' || !p.killable)
+      const zeker = await vraagJaNee(
+        I18N.t('conflict.killTitel'),
+        I18N.t(heeftHoog ? 'conflict.killTekstHoog' : 'conflict.killTekstMiddel'),
+        I18N.t('conflict.stop'),
+        'gevaar',
+        regels.slice(0, 12),
+      )
+      if (!zeker) return false
+    }
+    const r = await window.api.conflictKill({ pids: info.killablePids || [] }).catch(() => null)
+    if (!r || (!r.ok && !(r.gestopt && r.gestopt.length))) {
+      await meldKort(I18N.t('conflict.titel'), I18N.t('conflict.stopMislukt'))
+      return false
+    }
+    const n = (r.gestopt || []).length
+    appendLine('ok', '✓ ' + I18N.t('conflict.gestopt', { aantal: n || 1 }))
+    if (r.mislukt && r.mislukt.length) {
+      appendLine('warn', I18N.t('conflict.stopDeels', { aantal: r.mislukt.length }))
+    }
+    await new Promise(res => setTimeout(res, 600))
+    return true
+  }
+
+  return false
 }
 
 // ── Achterlopen opmerken ─────────────────────────────────────────────────────
@@ -17355,7 +17529,8 @@ async function herstelKoppeling(project, pad, staat, opties = {}) {
 
   // Het dode adres gaat er in hetzelfde commando af, zodat je nooit met twee
   // remotes achterblijft waarvan er één niet werkt.
-  await executeCmd(project, GitTools.herstelCommando(staat, { naam, prive: zicht === 'prive' }), 'git-koppelen')
+  const herstelUit = await executeCmd(project, GitTools.herstelCommando(staat, { naam, prive: zicht === 'prive' }), 'git-koppelen')
+  if (herstelUit && herstelUit.success) await beschermMainNaAanmaken(pad)
   await controleerKoppeling(pad, true)
 }
 
@@ -17518,7 +17693,8 @@ async function koppelGithub(project) {
     const cmd = GitTools.koppelCommando(GitTools.KOPPEL_GH, {
       naam: GitTools.veiligeRepoNaam(naam), prive: zicht === 'prive',
     })
-    await executeCmd(project, cmd, 'git-koppelen')
+    const uit = await executeCmd(project, cmd, 'git-koppelen')
+    if (uit && uit.success) await beschermMainNaAanmaken(pad)
     await controleerKoppeling(pad, true)
     return
   }
@@ -17548,10 +17724,32 @@ async function koppelGithub(project) {
   const url = GitTools.normaliseerRepoUrl(ruw)
   if (!url) { await meldKort(I18N.t('git.link.urlBadTitle'), I18N.t('git.link.urlBadText')); return }
 
-  await executeCmd(project, GitTools.koppelCommando(GitTools.KOPPEL_URL, {
+  const urlUit = await executeCmd(project, GitTools.koppelCommando(GitTools.KOPPEL_URL, {
     url, branch: staat.branch || 'main',
   }), 'git-koppelen')
+  // Best-effort: als jij de repo net zelf aanmaakte op github.com, bescherm
+  // hem ook. Bij andermans repo faalt dit stil (geen admin).
+  if (urlUit && urlUit.success) await beschermMainNaAanmaken(pad)
   await controleerKoppeling(pad, true)
+}
+
+// Na een verse GitHub-repo: default branch beschermen (geen force-push, geen
+// delete). Soft: mislukken mag de koppeling niet terugdraaien.
+async function beschermMainNaAanmaken(pad) {
+  const fn = window.api && window.api.gitBeschermMain
+  if (typeof fn !== 'function' || !pad) return
+  const r = await fn(pad).catch(() => null)
+  if (!r) return
+  if (r.ok && r.reden === 'gezet') {
+    appendLine('ok', '✓ ' + I18N.t('git.protect.ok'))
+    showToast(I18N.t('git.protect.toast'))
+  } else if (r.ok && r.reden === 'al') {
+    // Al gedaan — geen toast-spam.
+  } else if (r.reden === 'geen-rechten' || r.reden === 'geen-github') {
+    // Verwacht bij andermans of niet-GitHub remotes.
+  } else if (!r.ok) {
+    appendLine('warn', I18N.t('git.protect.fail'))
+  }
 }
 
 async function runCmd(project, cmdKey) {

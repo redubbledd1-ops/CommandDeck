@@ -1735,6 +1735,52 @@
     return { eigenaar: m[1], repo: m[2] }
   }
 
+  // Na `gh repo create` zet CommandDeck een ruleset op de default branch:
+  // geen delete, geen force-push. Geen verplichte PR — solo pushen blijft
+  // mogelijk. ~DEFAULT_BRANCH dekt main én master. De naam is vast zodat we
+  // hem herkennen en niet dubbel zetten.
+  const BESCHERM_RULESET_NAAM = 'Protect default branch'
+
+  function mainBeschermingBody() {
+    return {
+      name: BESCHERM_RULESET_NAAM,
+      target: 'branch',
+      enforcement: 'active',
+      conditions: {
+        ref_name: {
+          include: ['~DEFAULT_BRANCH'],
+          exclude: [],
+        },
+      },
+      rules: [
+        { type: 'deletion' },
+        { type: 'non_fast_forward' },
+      ],
+    }
+  }
+
+  // Heeft deze repo onze ruleset al (op naam), of een lijst met rulesets
+  // waarvan er al één delete + force-push blokkeert? De list-API geeft soms
+  // geen rules-array mee — dan telt alleen de naam.
+  function heeftMainBescherming(rulesets) {
+    const lijst = Array.isArray(rulesets) ? rulesets : []
+    return lijst.some(r => {
+      if (!r) return false
+      if (r.name === BESCHERM_RULESET_NAAM) return true
+      const regels = Array.isArray(r.rules) ? r.rules : []
+      return regels.some(x => x && x.type === 'deletion')
+        && regels.some(x => x && x.type === 'non_fast_forward')
+    })
+  }
+
+  // Effectieve regels op een branch (uit GET .../rules/branches/{branch}).
+  // Zo zien we ook bescherming die niet via onze ruleset-naam loopt.
+  function branchHeeftBasisBescherming(regels) {
+    const lijst = Array.isArray(regels) ? regels : []
+    return lijst.some(r => r && r.type === 'deletion')
+      && lijst.some(r => r && r.type === 'non_fast_forward')
+  }
+
   // De inlogstroom van de GitHub-CLI. --web opent je browser en toont een code;
   // dat is de enige variant die zonder token-plakwerk werkt en waarbij er nooit
   // een wachtwoord door de app heen gaat.
@@ -2047,6 +2093,7 @@
     achterstandKeuzes, pullCommando,
     globaalIdentiteitCommando, globaalGhGebruikerCommando, accountActiveerStappen,
     koppelingProblemen, ghRepoUitUrl,
+    BESCHERM_RULESET_NAAM, mainBeschermingBody, heeftMainBescherming, branchHeeftBasisBescherming,
     ghLoginCommando, ghInstallCommando, parseGhAccounts, parseGhLoginCode, parseGhLoginUrl, nieuwGhAccount,
     parseGhUser, parseGhEmails, noreplyEmail, ghIdentiteit,
     diffCommando, isHoofdtak, parseTrack, branchOmschrijving, branchHeeftEigenWerk,

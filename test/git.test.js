@@ -784,6 +784,25 @@ t('ssh-adressen tellen net zo goed',
 t('ergens anders dan github levert niets op',
   G.ghRepoUitUrl('https://gitlab.com/iemand/iets.git') === null
   && G.ghRepoUitUrl('') === null)
+
+// Na een verse repo: basisbescherming (geen delete, geen force-push) zonder
+// verplichte PR — solo pushen blijft mogelijk.
+t('bescherming-body heeft vaste naam en default-branch',
+  G.mainBeschermingBody().name === G.BESCHERM_RULESET_NAAM
+  && G.mainBeschermingBody().conditions.ref_name.include[0] === '~DEFAULT_BRANCH')
+t('bescherming-body blokkeert delete en force-push',
+  G.mainBeschermingBody().rules.map(r => r.type).join() === 'deletion,non_fast_forward')
+t('onze ruleset-naam telt als al beschermd',
+  G.heeftMainBescherming([{ name: G.BESCHERM_RULESET_NAAM }]) === true)
+t('andere naam zonder regels telt niet',
+  G.heeftMainBescherming([{ name: 'iets anders' }]) === false)
+t('andere naam mét delete+nff telt wel',
+  G.heeftMainBescherming([{ name: 'x', rules: [{ type: 'deletion' }, { type: 'non_fast_forward' }] }]) === true)
+t('effectieve branch-regels: delete + nff = beschermd',
+  G.branchHeeftBasisBescherming([{ type: 'deletion' }, { type: 'non_fast_forward' }]) === true)
+t('alleen delete is nog niet genoeg',
+  G.branchHeeftBasisBescherming([{ type: 'deletion' }]) === false)
+
 t('zonder profiel valt er niets te activeren',
   G.accountActiveerStappen(null, true).length === 0)
 t('een profiel zonder GitHub-account zet alleen de naam',
@@ -796,6 +815,10 @@ t('een profiel zonder GitHub-account zet alleen de naam',
 // nergens dat dát de eerste stap is.
 const rendererBron2 = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer.js'), 'utf8')
 const zorgBlok = (rendererBron2.match(/async function zorgVoorGithub\(\)[\s\S]*?\n\}/) || [''])[0]
+
+t('na gh create roept de UI bescherming aan',
+  /beschermMainNaAanmaken\(pad\)/.test(rendererBron2)
+  && /gitBeschermMain/.test(require('fs').readFileSync(require('path').join(__dirname, '..', 'preload.js'), 'utf8')))
 
 t('de koppelknop vraagt eerst of GitHub klaarstaat',
   /const ghKlaar = await zorgVoorGithub\(\)/.test(rendererBron2))
