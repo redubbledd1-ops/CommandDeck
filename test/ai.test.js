@@ -476,7 +476,7 @@ check('zonder systeemprompt blijft het veld weg',
     bron.includes('terminalMarkup({ splitbaar: true })') &&
     bron.includes('function zetTermSplit') &&
     bron.includes('function springNaarOutput') &&
-    bron.includes('termSplitFirst') &&
+    bron.includes('werkSplit.first') &&
     bron.includes('ti-minus'))
   check('het plusje wordt eerder zichtbaar zonder grotere klikcirkel',
     bron.includes("classList.toggle('zichtbaar'") &&
@@ -516,8 +516,10 @@ check('zonder systeemprompt blijft het veld weg',
     bron.includes('function vulIdleVerkenner') &&
     !/splitTweeProjecten\(\) && tab === 'browser'/.test(
       bron.slice(bron.indexOf('function setTermTab'), bron.indexOf('async function navigeerNaar'))))
-  check('elk project onthoudt zijn eigen verkenner-map',
+  check('elk project onthoudt zijn verkenner-map alleen binnen het project',
     bron.includes('function bewaarVerkennerPad') &&
+    bron.includes('function wisVerkennerBuitenBeeld') &&
+    bron.includes('function schoonVerkennerPadenBijStart') &&
     bron.includes('verkennerPaden') &&
     bron.includes('bergVerkennerOp()') &&
     /view === 'cmd'/.test(bron.slice(bron.indexOf('function verkennerPid'), bron.indexOf('function verkennerStaat'))) &&
@@ -535,7 +537,7 @@ check('zonder systeemprompt blijft het veld weg',
   check('bestand in split houdt de preview, niet de verkenner',
     /normaliseerProjectTab\(s\.tab\) === 'output'/.test(
       bron.slice(bron.indexOf('function setTermTab'), bron.indexOf('async function navigeerNaar'))) &&
-    /werkSlots\[1\]\.tab = 'output'/.test(
+    /werkSplit\.slots\[1\]\.tab = 'output'/.test(
       bron.slice(bron.indexOf('function zetTermSplit'), bron.indexOf('function sluitSplitAanKant'))))
   check('woordenboek-split wordt niet per project onthouden',
     bron.includes('function isGemengdeSplit') &&
@@ -552,8 +554,8 @@ check('zonder systeemprompt blijft het veld weg',
     bron.includes('function plaatsInSplit'))
   check('een nieuwe split-keuze landt in het gerichte vlak, rechts of onder',
     bron.includes('function visueelSlotVoorTermPane') &&
-    bron.includes('function zetSlotsOpSchermvolgorde') &&
-    /werkSlotFocus = 1/.test(bron.slice(bron.indexOf('function zorgVoorSlots'), bron.indexOf('function paneelEl'))) &&
+    bron.includes('function visueelVoorDataSlot') &&
+    /werkSplit\.focus = 1/.test(bron.slice(bron.indexOf('function zorgVoorSlots'), bron.indexOf('function paneelEl'))) &&
     bron.includes('const visueelDoel'))
   check('opdrachten kunnen naast een project in split',
     !/\(a\.view === 'project' && heeftEigenTerminal\(b\)\)/.test(bron) &&

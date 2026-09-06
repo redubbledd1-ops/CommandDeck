@@ -6,6 +6,7 @@ const crypto = require('crypto')
 const { spawn, execFileSync, execFile } = require('child_process')
 const { analyzeFailure, isAutofixEligible, isFlutterCommand,
         looksLikeFlutterMissing, FLUTTER_MISSING_HELP } = require('./install-fixer')
+const ProcessConflict = require('./process-conflict')
 const { parseFlutterAndroidDevices } = require('./flutter-devices')
 const { buildSed } = require('./bat-exe')
 const { BUILTIN_COMMANDS } = require('./cmd-library')
@@ -387,7 +388,8 @@ const DEFAULT_SETTINGS = {
   termTabs: {},
   // Per project: output en verkenner tegelijk, naast of onder elkaar
   termSplits: {},
-  // Per project (en voor cmd/ps) de laatst geopende map in de verkenner
+  // Per cmd/ps: de laatst geopende map in de verkenner. Projecten beginnen
+  // steeds opnieuw bij hun locatie (niet over herstarts heen onthouden).
   verkennerPaden: {},
   // Hoe de verkenner eruitziet en waarop hij sorteert
   verkenner: {
@@ -2246,6 +2248,80 @@ ipcMain.handle('git:koppelingDiagnose', (_, dir) => {
   }
 
   return { identiteit: ident, credentialGebruiker, ghActief, viaGh, pushRecht, remote }
+})
+
+// Default branch beschermen na een verse GitHub-repo: geen delete, geen
+// force-push. Draait stil via de API; de terminal toont alleen of het lukte.
+// Zonder admin-rechten (bijv. andermans repo) faalt het soft — koppelen zelf
+// blijft dan gewoon werken.
+ipcMain.handle('git:beschermMain', (_, dir) => {
+  if (!padToegestaan(dir)) return { ok: false, reden: 'pad' }
+  if (!dir || !fs.existsSync(dir) || !heeftGit()) return { ok: false, reden: 'geen-git' }
+  if (!ghBeschikbaar()) return { ok: false, reden: 'geen-gh' }
+
+  const remote = String(gitUit(dir, ['remote', 'get-url', 'origin']) || '').trim()
+  const rp = GitTools.ghRepoUitUrl(remote)
+  if (!rp) return { ok: false, reden: 'geen-github' }
+
+  const api = (pad, extra = []) => {
+    try {
+      return execFileSync('gh', ['api', pad, ...extra], {
+        encoding: 'utf8', timeout: 15000, windowsHide: true, env: childEnv(),
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+    } catch (e) {
+      const err = new Error(String((e && (e.stderr || e.message)) || '').trim())
+      err.status = e && e.status
+      err.stderr = String((e && e.stderr) || '').trim()
+      throw err
+    }
+  }
+
+  try {
+    // Al beschermd? Niet opnieuw zetten — GitHub klaagt dan over een dubbele
+    // naam, en een tweede ruleset met dezelfde regels heeft geen zin.
+    let bestaande = []
+    try {
+      bestaande = JSON.parse(api(`repos/${rp.eigenaar}/${rp.repo}/rulesets`) || '[]')
+    } catch { bestaande = [] }
+    if (GitTools.heeftMainBescherming(bestaande)) {
+      return { ok: true, reden: 'al', repo: `${rp.eigenaar}/${rp.repo}` }
+    }
+
+    // Ook klassieke / andere rulesets: kijk wat er effectief op de default
+    // branch staat. Zonder die check zetten we dubbel als de naam anders is.
+    try {
+      const meta = JSON.parse(api(`repos/${rp.eigenaar}/${rp.repo}`) || '{}')
+      const branch = String((meta && meta.default_branch) || 'main').trim() || 'main'
+      const regels = JSON.parse(api(`repos/${rp.eigenaar}/${rp.repo}/rules/branches/${encodeURIComponent(branch)}`) || '[]')
+      if (GitTools.branchHeeftBasisBescherming(regels)) {
+        return { ok: true, reden: 'al', repo: `${rp.eigenaar}/${rp.repo}` }
+      }
+    } catch { /* geen regels of geen recht: dan proberen we te zetten */ }
+
+    const body = JSON.stringify(GitTools.mainBeschermingBody())
+    execFileSync('gh', ['api', `repos/${rp.eigenaar}/${rp.repo}/rulesets`, '-X', 'POST', '--input', '-'], {
+      encoding: 'utf8', timeout: 15000, windowsHide: true, env: childEnv(),
+      input: body,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+    return { ok: true, reden: 'gezet', repo: `${rp.eigenaar}/${rp.repo}` }
+  } catch (e) {
+    const tekst = String((e && (e.stderr || e.message)) || '').toLowerCase()
+    let reden = 'mislukt'
+    if (/403|not.?admin|insufficient|must have admin/i.test(tekst)) reden = 'geen-rechten'
+    else if (/404|not found/i.test(tekst)) reden = 'niet-gevonden'
+    else if (/422|already|duplicate|name.*taken/i.test(tekst)) {
+      // Race of UI: ruleset bestaat intussen. Behandel als gelukt.
+      return { ok: true, reden: 'al', repo: `${rp.eigenaar}/${rp.repo}` }
+    }
+    return {
+      ok: false,
+      reden,
+      fout: String((e && (e.stderr || e.message)) || '').trim().slice(0, 300),
+      repo: `${rp.eigenaar}/${rp.repo}`,
+    }
+  }
 })
 
 // Git zijn inloggegevens bij gh laten ophalen. Dat is de enige manier om er
@@ -4153,9 +4229,11 @@ function killFlutterProcesses() {
 }
 
 async function applyFix(fix, cwd, projectId) {
+  // Stil alle flutter/dart doden doen we niet meer: de gebruiker krijgt eerst
+  // een conflictdialoog met risico's. Dit type blijft in analyzeFailure staan
+  // zodat runWithAutofix `conflict: true` kan teruggeven.
   if (fix.type === 'kill') {
-    await killFlutterProcesses()
-    sendOutput(projectId, 'fix', '⟳ Flutter/Dart processen gestopt')
+    sendOutput(projectId, 'warn', '⚠ Er lijkt een ander proces in de weg te zitten — stop het eerst via de dialoog.')
     return
   }
 
@@ -4220,15 +4298,28 @@ async function runWithAutofix({ projectId, cmd, cwd, cmdKey, autoFixEnabled }) {
     return { success: false, autoFixed: false, manual: true, matchedRules: analysis.matchedRules }
   }
 
-  if (!analysis.fixes.length) {
+  // Lock / ander proces: geen stille kill. Renderer toont de conflictdialoog.
+  const killFix = analysis.fixes.find(f => f.type === 'kill')
+  const fixes = analysis.fixes.filter(f => f.type !== 'kill')
+  if (killFix && !fixes.length) {
+    sendOutput(projectId, 'warn', '⚠ Install mislukt door een ander proces (Flutter-lock / bestand vergrendeld).')
+    sendOutput(projectId, 'info', 'Stop dat proces via de dialoog, of open Taakbeheer, en probeer opnieuw.')
+    sendOutput(projectId, 'sep', '')
+    return { success: false, autoFixed: false, conflict: true, matchedRules: analysis.matchedRules }
+  }
+
+  if (!fixes.length) {
     sendOutput(projectId, 'info', 'Geen bekende auto-fix voor deze fout.')
     return { success: false, autoFixed: false }
   }
 
   sendOutput(projectId, 'fix', `⟳ Install mislukt — auto-fix: ${analysis.summary}`)
   sendOutput(projectId, 'sep', '')
+  if (killFix) {
+    sendOutput(projectId, 'warn', '⚠ Er draait mogelijk nog een blokkerend proces — controleer dat na deze fix.')
+  }
 
-  for (const fix of analysis.fixes) {
+  for (const fix of fixes) {
     if (cancelRequested) return cancelledResult(false)
     await applyFix(fix, cwd, projectId)
   }
@@ -4466,6 +4557,29 @@ ipcMain.handle('cmd:kill', async () => {
   await killFlutterProcesses()
   return true
 })
+
+// Vooraf checken of flutter/gradle/Android Studio de run/install blokkeert.
+// Doden gebeurt pas na bevestiging in de renderer (cmd:conflictKill).
+ipcMain.handle('cmd:conflictScan', (_, opts = {}) => {
+  return ProcessConflict.scanConflicts({
+    cwd: opts.cwd || '',
+    cmdKey: opts.cmdKey || null,
+    cmd: opts.cmd || '',
+    eigenCommandoDraait: !!activeProc,
+  })
+})
+
+ipcMain.handle('cmd:conflictKill', async (_, opts = {}) => {
+  const pids = Array.isArray(opts.pids) ? opts.pids : []
+  if (activeProc) {
+    cancelRequested = true
+    try { activeProc.kill() } catch {}
+    activeProc = null
+  }
+  return ProcessConflict.killPids(pids)
+})
+
+ipcMain.handle('cmd:openTaskManager', () => ProcessConflict.openTaskManager())
 
 // ── Relaunch (update knop) ────────────────────────────────────────────────────
 ipcMain.handle('app:relaunch', () => {

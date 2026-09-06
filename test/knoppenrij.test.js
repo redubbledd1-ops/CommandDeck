@@ -181,6 +181,20 @@ function rij(b, ids, extra) {
   b.cmdFolders.push({ id: 'p1', sectie: 'run', label: 'programma\'s', open: true, auto: 'prog' })
   t('met programma\'s-map gaat ollama daarheen',
     (K.mapVanKnop(r, 'ai:ollama') || {}).id === 'p1')
+
+  // Een AI-dienstknop (ai:gemini) hoort in de ai-map, maar valt terug op de
+  // programma's-map als er geen ai-map is. Andersom dan de prog-soort.
+  {
+    const bb = bron({ cmdFolders: [{ id: 'pp', sectie: 'run', label: 'prog', open: true, auto: 'prog' }] })
+    const soorten = [{ auto: 'ai', label: 'ai', fallbackAuto: 'prog',
+      toets: (id) => id.startsWith('ai:') && !id.startsWith('ai:prog:') }]
+    const rr = { bron: bb, sectie: 'run', autoSoorten: soorten }
+    t('gemini valt zonder ai-map terug op de programma\'s-map',
+      (K.autoMapVoor(rr, 'ai:gemini') || {}).id === 'pp')
+    bb.cmdFolders.push({ id: 'aa', sectie: 'run', label: 'ai', open: true, auto: 'ai' })
+    t('en met een ai-map gaat gemini daar juist heen',
+      (K.autoMapVoor(rr, 'ai:gemini') || {}).id === 'aa')
+  }
   t('en gemini-cli ook', (K.mapVanKnop(r, 'ai:prog:gemini') || {}).id === 'p1')
   t('claude blijft bij ai', (K.mapVanKnop(r, 'ai:claude') || {}).id === 'ai1')
 

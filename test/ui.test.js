@@ -63,6 +63,7 @@ let ptyErBij = { ok: true, reden: '' }
 // renderer die de sessie kent doet er iets mee.
 let ptyDataCbs = []
 let ptyExitCbs = []
+let outputCbs = []
 const ptyData = (d) => ptyDataCbs.forEach(cb => cb(d))
 const ptyExit = (d) => ptyExitCbs.forEach(cb => cb(d))
 let editorStarts = []
@@ -371,7 +372,7 @@ const api = {
   relaunch: () => {},
   updateAndRestart: async (o) => { updates.push(o || null); return updateAntwoord },
   runtimeInfo: async () => ({ packaged: false, version: '1.0.0' }),
-  onOutput: () => () => {},
+  onOutput: (cb) => { outputCbs.push(cb); return () => {} },
   aiProviders: async () => [{
     id: 'openai', label: 'OpenAI', merk: 'OpenAI',
     sleutelBron: 'opgeslagen', heeftSleutel: true, sleutelNodig: true,
@@ -442,7 +443,9 @@ window.eval(fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8')
   + '\n  zetNavItem, zetZijbalkSectie,'
   + '\n  verwijderMap, folderOp,'
   + '\n  verfLezer,'
-  + '\n  gekoppeldeRepoAdressen, zetBewerkt: (id) => { editingId = id } };')
+  + '\n  gekoppeldeRepoAdressen, zetBewerkt: (id) => { editingId = id },'
+  + '\n  editorsZelfde,'
+  + '\n  splitSlotIds: () => (werkSplit.slots || []).map(s => s.projectId) };')
 startVraagAutomaat()
 const W = window
 const inBevrorenPaneel = (el) => {
@@ -490,6 +493,20 @@ function startVraagAutomaat() {
 ;(async () => {
   window.document.dispatchEvent(new window.Event('DOMContentLoaded'))
   await tick(); await tick()
+
+  // ── editors ontdubbelen: aparte catalogus-items blijven apart ───────────────
+  check('Claude Code en de Claude-app worden niet samengevoegd',
+    W.__test.editorsZelfde(
+      { catalogId: 'claudeCode', path: 'C:\\a\\claude.exe' },
+      { catalogId: 'claudeDesktop', path: 'C:\\b\\Claude.exe' }) === false)
+  check('maar twee keer hetzelfde catalogus-item wél',
+    W.__test.editorsZelfde(
+      { catalogId: 'claudeCode', path: 'C:\\a\\claude.exe' },
+      { catalogId: 'claudeCode', path: 'C:\\b\\claude.exe' }) === true)
+  check('en zonder catalogus-id telt dezelfde exe-stam nog steeds als hetzelfde',
+    W.__test.editorsZelfde(
+      { path: 'C:\\a\\notepad++.exe' },
+      { path: 'C:\\b\\notepad++.exe' }) === true)
 
   // ── sidebar ────────────────────────────────────────────────────────────────
   check('cmd-knop staat boven de projecten-sectie',
@@ -1245,6 +1262,33 @@ function startVraagAutomaat() {
     ($('.proj-header-name')?.textContent || '').includes('dd_crypto') &&
     $('.terminal-wrap').classList.contains('twee-projecten'))
 
+  // Vangnet: focus heen en weer wisselen houdt beide projecten en de
+  // twee-projecten-split intact (eindigt weer op het eerste project).
+  $$('.proj-item')[1].click(); await tick(); await tick()
+  check('naar het tweede project houdt de split',
+    ($('.proj-header-name')?.textContent || '').includes('tweede') &&
+    !!$('.terminal-wrap')?.classList.contains('twee-projecten'))
+  $$('.proj-item')[0].click(); await tick(); await tick()
+  check('en weer terug naar het eerste ook',
+    ($('.proj-header-name')?.textContent || '').includes('dd_crypto') &&
+    !!$('.terminal-wrap')?.classList.contains('twee-projecten'))
+
+  // Uitvoer-routing: elk project schrijft naar zijn eigen vlak (slot 0 →
+  // #terminal, slot 1 → #terminal-andere), ongeacht welk vlak de focus heeft.
+  // Dit is de kern van de per-slot rendering: het tweede scherm is zelfstandig.
+  {
+    const ids = W.__test.splitSlotIds()
+    outputCbs.forEach(cb => cb({ projectId: ids[0], type: 'out', text: 'SLOT0_MARK' }))
+    outputCbs.forEach(cb => cb({ projectId: ids[1], type: 'out', text: 'SLOT1_MARK' }))
+    await tick()
+    const t0 = $('#terminal')?.textContent || ''
+    const t1 = $('#terminal-andere')?.textContent || ''
+    check('uitvoer van slot 0 landt in #terminal',
+      t0.includes('SLOT0_MARK') && !t0.includes('SLOT1_MARK'))
+    check('uitvoer van slot 1 landt in #terminal-andere',
+      t1.includes('SLOT1_MARK') && !t1.includes('SLOT0_MARK'))
+  }
+
   $('#btn-nav-dict').click(); await tick(); await tick()
   check('woordenboek mag naast een project als je het zelf opent',
     $('#werk').classList.contains('gesplitst') &&
@@ -1345,7 +1389,15 @@ function startVraagAutomaat() {
   check('het andere project opent in zijn eigen map', $('#br-path').value === 'C:\\gekozen')
   $$('.proj-item')[0].click(); await tick(); await tick()
   $('[data-tab="browser"]').click(); await tick(); await tick()
-  check('terug in het eerste project blijft de verkenner in de submap', $('#br-path').value === 'C:\\a\\lib')
+  check('terug in het eerste project begint de verkenner weer bij de projectmap', $('#br-path').value === 'C:\\a')
+  // via opdrachten mag de map wél blijven hangen
+  const libRij2 = $$('.br-item').find(el => el.textContent.includes('lib'))
+  libRij2.dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true })); await tick(); await tick()
+  check('opnieuw de submap in', $('#br-path').value === 'C:\\a\\lib')
+  $('#btn-nav-cmd').click(); await tick(); await tick()
+  $$('.proj-item')[0].click(); await tick(); await tick()
+  $('[data-tab="browser"]').click(); await tick(); await tick()
+  check('na opdrachten blijft de verkenner in de submap', $('#br-path').value === 'C:\\a\\lib')
   const andereIdx = [...$$('.proj-label')].findIndex(e => e.textContent === 'andere app')
   $$('.proj-edit')[andereIdx].click(); await tick()
   $('#modal-proj .btn-delete').click(); await tick()
@@ -2201,9 +2253,18 @@ function startVraagAutomaat() {
 
   // terug naar het project, zodat de app daar ook weer opstart
   $$('.proj-item')[0].click(); await tick()
+  $('[data-tab="browser"]').click(); await tick(); await tick()
+  const libNaHerstart = $$('.br-item').find(el => el.textContent.includes('lib'))
+  if (libNaHerstart) {
+    libNaHerstart.dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true }))
+    await tick(); await tick()
+  }
+  check('voor herstart staat de verkenner in een submap', $('#br-path').value === 'C:\\a\\lib')
   let w3 = await herstart()
   check('na herstart staat het project weer op verkenner',
     w3.document.getElementById('browser') && w3.document.getElementById('browser').hidden === false)
+  check('na herstart begint de verkenner weer bij de projectmap',
+    w3.document.getElementById('br-path').value === 'C:\\a')
   global.window = window; global.document = window.document
 
   $$('.proj-item')[0].click(); await tick()
@@ -2840,12 +2901,25 @@ function startVraagAutomaat() {
   check('geen split om te beginnen', !$('.terminal-wrap')?.classList.contains('gesplitst'))
   $('[data-split="right"]').click(); await tick(); await tick()
   check('split staat open', $('.terminal-wrap').classList.contains('gesplitst'))
+  // Vanuit de output-tab: de uitvoer staat visueel links (order 1), de
+  // verkenner rechts (order 2).
+  check('vanuit output staat de uitvoer links',
+    $('[data-pane="output"]').style.order === '1' &&
+    $('[data-pane="browser"]').style.order === '2')
   $('#btn-nav-back').click(); await tick(); await tick()
   check('terug klapt de gesplitste weergave dicht',
     !$('.terminal-wrap')?.classList.contains('gesplitst'))
   $('#btn-nav-forward').click(); await tick(); await tick()
   check('vooruit zet de gesplitste weergave terug',
     !!$('.terminal-wrap')?.classList.contains('gesplitst'))
+  // Split dicht, dan vanuit de verkenner-tab splitsen: nu staat de verkenner
+  // links (order 1) en de uitvoer rechts (order 2) — de omgekeerde volgorde.
+  $('[data-split="right"]').click(); await tick(); await tick()
+  $('[data-tab="browser"]').click(); await tick(); await tick()
+  $('[data-split="right"]').click(); await tick(); await tick()
+  check('vanuit de verkenner staat die links',
+    $('[data-pane="browser"]').style.order === '1' &&
+    $('[data-pane="output"]').style.order === '2')
   // Split weer dicht en terug naar de cmd-sectie, zodat de volgende tests van
   // dezelfde stand vertrekken als voorheen.
   $('[data-split="right"]').click(); await tick(); await tick()
@@ -3855,6 +3929,7 @@ function startVraagAutomaat() {
     w.eval(fs.readFileSync(path.join(APP, 'i18n.js'), 'utf8') + '\nglobalThis.I18N = I18N;')
     w.eval(fs.readFileSync(path.join(APP, 'git-tools.js'), 'utf8'))
     w.eval(fs.readFileSync(path.join(APP, 'web-tools.js'), 'utf8'))
+    w.eval(fs.readFileSync(path.join(APP, 'note-tools.js'), 'utf8'))
     w.eval(fs.readFileSync(path.join(APP, 'code-kleuren.js'), 'utf8'))
     w.eval(fs.readFileSync(path.join(APP, 'knoppenrij.js'), 'utf8'))
     w.eval(fs.readFileSync(path.join(APP, 'accounts.js'), 'utf8'))
@@ -4213,7 +4288,10 @@ function startVraagAutomaat() {
     // map een eenrichtingsstraat.
     const eigen = { id: 'mtest', sectie: 'run', label: 'test', open: true }
     proj.cmdFolders = [...proj.cmdFolders, eigen]
-    const los = rij().find(id => id.indexOf('map:') !== 0)
+    // Neem bewust een git-knop uit de git-map: dan is er gegarandeerd een losse
+    // knop om mee te testen, los van hoeveel editors er globaal gevonden zijn.
+    const los = W.__test.knoppenInMap(proj, 'run', git.id)[0]
+    W.__test.verplaatsKnopId(proj, 'run', los, null, null, false)
     W.__test.legInMap(proj, 'run', los, eigen.id)
     check('een knop in een map verdwijnt uit de rij',
       !rij().includes(los) && W.__test.knoppenInMap(proj, 'run', eigen.id).includes(los))
@@ -4314,8 +4392,11 @@ function startVraagAutomaat() {
       gemengd[0].indexOf('map:') === 0 && gemengd[0] !== 'map:' + mappen[0].id)
 
     // De rij breekt niet uit zichzelf af, dus zonder het lege blok schuift de
-    // eerste losse knop naast de laatste map.
+    // eerste losse knop naast de laatste map. Zorg voor minstens één losse knop
+    // (haal er één uit een map), los van hoeveel editors er globaal zijn.
     mappen.forEach(f => { f.open = true })
+    const losMaken = W.__test.knoppenInMap(proj, 'run', mappen[0].id)[0]
+    if (losMaken) W.__test.zetKnopInMap(proj, losMaken, null)
     const rijHtml = W.__test.cmdGridHtml(proj, 'run')
     const laatsteGroep = rijHtml.lastIndexOf('cmd-map-groep')
     const breek = rijHtml.indexOf('cmd-rij-breek')
