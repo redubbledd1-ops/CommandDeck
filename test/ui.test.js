@@ -4154,6 +4154,25 @@ function startVraagAutomaat() {
     check('en met lange paden aan ook', !$('[data-git-actie="langepaden"]'))
     $('#modal-proj-save').click(); await tick(); await tick()
 
+    // ── Oude kopie / koppeling niet afgemaakt ────────────────────────────────
+    // Een overgezette map: adres in .git/config, branch 'master', remote leeg.
+    // Ziet er "gekoppeld" uit, maar de eerste push zou de oude staat publiceren.
+    gitStaatNu = maakStaat({ ...gezond, upstream: null, branch: 'master', remoteLeeg: true })
+    $$('.proj-edit')[0].click(); await tick(); await tick()
+    const op = $$('.git-set-probleem').map(e => e.textContent)
+    check('een oude kopie wordt als fout gemeld', op.some(x => x.toLowerCase().includes('oude kopie')))
+    check('met een knop om de koppeling af te maken',
+      !!$('.git-set-probleem.e-fout [data-git-actie="koppeling-afmaken"]'))
+    $('#modal-proj-save').click(); await tick(); await tick()
+
+    // Adres + commits, branch volgt niets, verder niks verdachts: "koppeling
+    // niet afgemaakt" is óók een fout — push -u zou anders blind draaien.
+    gitStaatNu = maakStaat({ ...gezond, upstream: null })
+    $$('.proj-edit')[0].click(); await tick(); await tick()
+    check('een niet-afgemaakte koppeling is een fout',
+      !!$('.git-set-probleem.e-fout [data-git-actie="koppeling-afmaken"]'))
+    $('#modal-proj-save').click(); await tick(); await tick()
+
     // Bij een nieuw project is er nog geen map om iets over te zeggen.
     $('#btn-add-proj').click(); await tick()
     check('een nieuw project toont geen git-onderhoud', $('#f-git-sectie').hidden)

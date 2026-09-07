@@ -1755,6 +1755,95 @@ t('niet-gepusht werk blijft onveilig bij een kapotte koppeling',
 t('pushen kan niet zonder werkende koppeling',
   G.pushCommando(repoMetRemote({ remoteOk: false })) === null)
 
+// ── Oude kopie / koppeling niet afgemaakt ────────────────────────────────────
+{
+  const basis = { isRepo: true, remotes: ['origin'], remoteOk: true, branch: 'main', commits: true }
+
+  // Niks aan de hand: branch volgt de remote.
+  t('een branch met upstream is geen oude kopie',
+    G.oudeKopieVerdenking(G.maakStaat({ ...basis, upstream: 'origin/main' })) === null)
+  // Geen upstream, maar verder niks verdachts -> nog geen oordeel (main heeft
+  // nog niet kunnen fetchen).
+  t('geen upstream alleen is nog geen oude kopie',
+    G.oudeKopieVerdenking(G.maakStaat({ ...basis })) === null)
+
+  // Geen gedeelde voorouder met de remote-default: vrijwel zeker een losse kopie.
+  const los = G.maakStaat({ ...basis, remoteHead: 'main', deeltGeschiedenis: false })
+  t('geen gedeelde geschiedenis -> geschiedenis-los',
+    G.oudeKopieVerdenking(los).soort === 'geschiedenis-los')
+  t('en de indicator wordt amber, niet onveilig',
+    G.indicator(los).oudeVersie === 'geschiedenis-los'
+    && G.indicator(los).aandacht === true
+    && G.indicator(los).onveilig === false)
+
+  // Adres + commits, maar de remote is leeg en je zit niet op de default.
+  const leeg = G.maakStaat({ ...basis, branch: 'master', remoteLeeg: true })
+  t('lege remote naast lokale commits -> remote-leeg',
+    G.oudeKopieVerdenking(leeg).soort === 'remote-leeg')
+  // Maar een verse repo die je bewust op main aanmaakt is dat niet.
+  t('op de default met een lege remote is geen oude kopie',
+    G.oudeKopieVerdenking(G.maakStaat({ ...basis, branch: 'main', remoteHead: 'main', remoteLeeg: true })) === null)
+
+  // master lokaal terwijl de remote main gebruikt.
+  const afwijkend = G.maakStaat({ ...basis, branch: 'master', remoteHead: 'main', deeltGeschiedenis: true })
+  t('master naast een remote-main -> branch-af',
+    G.oudeKopieVerdenking(afwijkend).soort === 'branch-af')
+
+  // Gewoon achter, verder niks van jezelf.
+  const achter = G.maakStaat({ ...basis, remoteHead: 'main', deeltGeschiedenis: true,
+                               achterVanDefault: 4, voorVanDefault: 0 })
+  t('alleen achterlopen zonder upstream -> achter-zonder-upstream',
+    G.oudeKopieVerdenking(achter).soort === 'achter-zonder-upstream')
+
+  // pushCommando blokkeert de gevaarlijke gevallen, niet de rest.
+  t('push wordt geblokkeerd bij een losse geschiedenis', G.pushCommando(los) === null)
+  t('push wordt geblokkeerd bij een lege remote', G.pushCommando(leeg) === null)
+  t('push -u blijft voor een gewone eerste keer',
+    G.pushCommando(G.maakStaat({ ...basis })) === 'git push -u origin main')
+
+  // gitProblemen tilt "nooit gepusht" op tot fout, en meldt de oude kopie.
+  const probsHalf = G.gitProblemen(G.maakStaat({ ...basis }))
+  const gu = probsHalf.find(p => p.id === 'geen-upstream')
+  t('geen-upstream met commits is een fout', gu && gu.ernst === 'fout' && gu.actie === 'koppeling-afmaken')
+  const probsOud = G.gitProblemen(los).find(p => p.id === 'oude-kopie')
+  t('een oude kopie is een fout met een afmaak-knop',
+    probsOud && probsOud.ernst === 'fout' && probsOud.actie === 'koppeling-afmaken')
+
+  // koppelingAf: adres + volgende upstream = klaar; adres zonder upstream = niet.
+  t('koppelingAf is waar met een geldige upstream',
+    G.maakStaat({ ...basis, upstream: 'origin/main' }).koppelingAf === true)
+  t('koppelingAf is onwaar zonder upstream',
+    G.maakStaat({ ...basis }).koppelingAf === false)
+  t('koppelingAf is onwaar als de upstream-remote weg is',
+    G.maakStaat({ ...basis, remotes: ['origin'], upstream: 'weg/main' }).koppelingAf === false)
+}
+
+// ── afmaakKoppelingCommando ──────────────────────────────────────────────────
+{
+  const s = G.maakStaat({ isRepo: true, remotes: ['origin'], remoteOk: true, branch: 'main', commits: true })
+  t('afmaken is een simpele push -u',
+    G.afmaakKoppelingCommando(s, { branch: 'main' }) === 'git push -u origin main')
+  t('met een hernoeming ervoor',
+    G.afmaakKoppelingCommando(s, { branch: 'main', hernoemVan: 'master' })
+      === 'git branch -m master main && git push -u origin main')
+  t('valt terug op de huidige branch als er geen wordt opgegeven',
+    G.afmaakKoppelingCommando(s, {}) === 'git push -u origin main')
+  t('zonder enige branch geen commando',
+    G.afmaakKoppelingCommando(G.maakStaat({ isRepo: true, remotes: ['origin'], branch: null }), {}) === null)
+}
+
+// ── repoNaamVoorstel ─────────────────────────────────────────────────────────
+{
+  const metUrl = G.maakStaat({ isRepo: true, remoteLijst: [{ naam: 'origin', url: 'https://github.com/redubbledd1-ops/DayKit' }] })
+  t('de repo-naam komt uit de bestaande remote-url, ook zonder .git',
+    G.repoNaamVoorstel(metUrl, 'Heel Andere Naam', 'C:\\x\\daykit-map') === 'DayKit')
+  const zonderUrl = G.maakStaat({ isRepo: true, remotes: [] })
+  t('zonder url valt hij terug op de mapnaam',
+    G.repoNaamVoorstel(zonderUrl, 'Project X', 'C:\\Users\\a\\Desktop\\DD-Music') === 'DD-Music')
+  t('en zonder pad op de projectnaam',
+    G.repoNaamVoorstel(zonderUrl, 'Project X', '') === 'Project-X')
+}
+
 // ── De teksten bestaan ───────────────────────────────────────────────────────
 for (const sleutel of ['git.ind.broken', 'git.ind.brokenTitle', 'git.repair.title',
                        'git.repair.new', 'git.repair.url', 'git.repair.drop',
@@ -1762,11 +1851,25 @@ for (const sleutel of ['git.ind.broken', 'git.ind.brokenTitle', 'git.repair.titl
                        'git.koppel.stuk.weg', 'git.koppel.stuk.inloggen',
                        'git.push.inlogTitel', 'git.push.inlogTekstVerkeerd',
                        'git.push.inlogTekstGeenGh', 'git.push.inlogInstalleren',
-                       'git.push.inlogUitlegTekst', 'git.push.inlogOpnieuw']) {
+                       'git.push.inlogUitlegTekst', 'git.push.inlogOpnieuw',
+                       'git.ind.afmaken', 'git.ind.afmakenTitle',
+                       'git.ind.oudeKopie', 'git.ind.oudeKopieTitle',
+                       'git.oudeKopie.titel', 'git.oudeKopie.tekst.geschiedenis-los',
+                       'git.oudeKopie.tekst.remote-leeg', 'git.oudeKopie.tekst.achter-zonder-upstream',
+                       'git.oudeKopie.losmaken', 'git.oudeKopie.alsNieuw',
+                       'git.oudeKopie.losmakenTitel', 'git.oudeKopie.losmakenTekst',
+                       'git.afmaak.titel', 'git.afmaak.tekst', 'git.afmaak.tekstHernoem', 'git.afmaak.ok',
+                       'git.opstart.titel', 'git.opstart.tekst', 'git.opstart.regel',
+                       'git.opstart.detail.geschiedenis-los', 'git.opstart.detail.remote-leeg',
+                       'git.opstart.detail.branch-af', 'git.opstart.detail.achter-zonder-upstream',
+                       'git.opstart.detail.half', 'git.opstart.bekijken', 'git.opstart.later',
+                       'gitset.prob.oude-kopie', 'gitset.actie.koppeling-afmaken']) {
   t('tekst ' + sleutel + ' staat in nl en en', !!nl[sleutel] && !!en[sleutel])
 }
 t('de kapotte-koppeling-indicator heeft opmaak in style.css',
   fs.readFileSync(path.join(APP, 'style.css'), 'utf8').includes('.git-ind-stuk'))
+t('de aandacht-indicator (oude kopie / afmaken) heeft opmaak in style.css',
+  fs.readFileSync(path.join(APP, 'style.css'), 'utf8').includes('.git-ind-aandacht'))
 
 // ── De bedrading ─────────────────────────────────────────────────────────────
 // Deze controle kost netwerk. Staat hij in git:info, dan draait hij mee met de
@@ -1822,6 +1925,32 @@ t('de kapotte-koppeling-indicator heeft opmaak in style.css',
   t('vóór een push wordt het GitHub-account rechtgezet',
     ren.includes('zorgVoorJuisteGithubPush'))
   t('bij het wisselen van account vervalt wat we wisten', ren.includes('gitRemoteGedaan.clear()'))
+
+  // Oude kopie / koppeling niet afgemaakt: eigen weg, opstartmelding, push-slot.
+  t('er is een afmaakweg voor een niet-afgemaakte koppeling',
+    ren.includes('async function maakKoppelingAf') && ren.includes('GitTools.afmaakKoppelingCommando'))
+  t('bij opstart worden onafgemaakte koppelingen samengevat',
+    ren.includes('async function meldOnafgemaakteKoppelingen')
+    && ren.includes('meldOnafgemaakteKoppelingen()'))
+  t('de push-knop weigert bij een oude kopie of niet-afgemaakte koppeling',
+    /cmdKey === 'git-push'[\s\S]{0,400}oudeKopieVerdenking/.test(ren))
+  t('koppelen leidt een oude kopie naar de herstelweg',
+    /koppelGithub[\s\S]*?oudeKopieVerdenking/.test(ren))
+  t('de repo-naam bij opnieuw koppelen komt uit repoNaamVoorstel',
+    ren.includes('GitTools.repoNaamVoorstel('))
+  t('de git-sectie heeft een knop voor "koppeling afmaken"',
+    ren.includes("actie === 'koppeling-afmaken'"))
+
+  const main2 = fs.readFileSync(path.join(APP, 'main.js'), 'utf8')
+  const infoBody2 = main2.slice(main2.indexOf("ipcMain.handle('git:info'"))
+    .slice(0, main2.slice(main2.indexOf("ipcMain.handle('git:info'")).indexOf('\n})'))
+  t('git:info leest de remote-default-branch lokaal',
+    infoBody2.includes('symbolic-ref') && infoBody2.includes('refs/remotes/'))
+  t('git:info vergelijkt HEAD met de default als er geen upstream is',
+    infoBody2.includes('rev-list') && infoBody2.includes('merge-base')
+    && infoBody2.includes('deeltGeschiedenis'))
+  t('de leeg-remote-uitslag wordt doorgegeven',
+    main2.includes('leeg: !!uitslag.leeg'))
 }
 
 

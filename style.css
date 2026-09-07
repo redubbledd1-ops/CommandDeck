@@ -632,6 +632,9 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
 /* De remote bestaat wel in .git/config maar antwoordt niet. Rood, want dit is
    geen ontbrekende koppeling maar een kapotte: er stáát iets, en het werkt niet. */
 .git-ind-stuk   { color: #f87171; font-weight: 600; }
+/* Koppeling niet afgemaakt, of de map lijkt een oude kopie. Amber: aandacht
+   nodig voordat je pusht, maar je raakt geen werk kwijt. */
+.git-ind-aandacht { color: var(--amber); font-weight: 600; }
 /* Een andere locatie van dit project heeft ook werk staan. */
 .git-ind-anders { color: var(--amber); opacity: 0.85; }
 

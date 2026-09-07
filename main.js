@@ -1698,10 +1698,11 @@ function controleerRemote(dir, remote) {
     delete env.SSH_ASKPASS
     execFile('git', GitTools.lsRemoteArgs(remote), {
       cwd: dir, encoding: 'utf8', timeout: 15000, windowsHide: true, env,
-    }, (e, _stdout, stderr) => {
+    }, (e, stdout, stderr) => {
       if (e && e.code === 'ENOENT') { resolve({ ok: null, reden: 'onbekend' }); return }
       if (e && (e.signal === 'SIGTERM' || e.killed)) { resolve({ ok: null, reden: 'netwerk' }); return }
-      if (!e) { resolve(GitTools.remoteUitslag(0, '')); return }
+      // stdout meegeven: leeg betekent een repo zonder refs (nooit gepusht).
+      if (!e) { resolve(GitTools.remoteUitslag(0, stdout)); return }
       const tekst = String(stderr || '') + ' ' + String((e && e.message) || '')
       resolve(GitTools.remoteUitslag(e && typeof e.status === 'number' ? e.status : 1, tekst))
     })
@@ -1723,11 +1724,11 @@ ipcMain.handle('git:remoteCheck', async (_, dir) => {
   const url = staat.remoteUrl
 
   const bekend = remoteUitCache(dir, url)
-  if (bekend) return { ok: bekend.ok, reden: bekend.reden, remote, url, uitCache: true }
+  if (bekend) return { ok: bekend.ok, reden: bekend.reden, leeg: !!bekend.leeg, remote, url, uitCache: true }
 
   const uitslag = await controleerRemote(dir, remote)
-  remoteCache.set(remoteSleutel(dir, url), { ok: uitslag.ok, reden: uitslag.reden, tijd: Date.now() })
-  return { ok: uitslag.ok, reden: uitslag.reden, remote, url }
+  remoteCache.set(remoteSleutel(dir, url), { ok: uitslag.ok, reden: uitslag.reden, leeg: !!uitslag.leeg, tijd: Date.now() })
+  return { ok: uitslag.ok, reden: uitslag.reden, leeg: !!uitslag.leeg, remote, url }
 })
 
 // ── .gitignore ───────────────────────────────────────────────────────────────
@@ -1826,11 +1827,39 @@ ipcMain.handle('git:info', async (_, dir) => {
   const gitignore = fs.existsSync(path.join(dir, '.gitignore'))
   const langePaden = String(langeUit || '').trim() === 'true'
 
-  let remoteOk = null, remoteReden = ''
+  let remoteOk = null, remoteReden = '', remoteLeeg = false
+  let remoteHead = null, voorVanDefault = 0, achterVanDefault = 0, deeltGeschiedenis = null
   if (remoteLijst.length) {
     const kies = GitTools.maakStaat({ beschikbaar: true, isRepo: true, remoteLijst, upstream: st.upstream })
     const bekend = remoteUitCache(dir, kies.remoteUrl)
-    if (bekend) { remoteOk = bekend.ok; remoteReden = bekend.reden }
+    if (bekend) { remoteOk = bekend.ok; remoteReden = bekend.reden; remoteLeeg = !!bekend.leeg }
+
+    // Wat is de default-branch van de remote, en — als deze branch niets volgt —
+    // hoe verhoudt HEAD zich ertoe? Alles lokaal en read-only: `symbolic-ref`
+    // leest refs/remotes/<remote>/HEAD (gevuld na een clone of `fetch`), de rest
+    // is puur graven in de lokale objectdatabase. Zonder een eerdere fetch komt
+    // remoteHead als null terug en zwijgt de oude-kopie-herkenning.
+    const remoteNaam = kies.remote || 'origin'
+    const headUit = await gitUitAsync(dir, ['symbolic-ref', '--quiet', '--short', `refs/remotes/${remoteNaam}/HEAD`], env)
+    const rh = String(headUit || '').trim().replace(new RegExp('^' + remoteNaam.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/'), '')
+    remoteHead = rh || null
+
+    if (remoteHead && !st.upstream) {
+      const doel = `${remoteNaam}/${remoteHead}`
+      const [telUit, baseUit] = await Promise.all([
+        gitUitAsync(dir, ['rev-list', '--left-right', '--count', `HEAD...${doel}`], env),
+        gitUitAsync(dir, ['merge-base', 'HEAD', doel], env),
+      ])
+      const m = String(telUit || '').trim().match(/^(\d+)\s+(\d+)$/)
+      if (m) {
+        voorVanDefault = parseInt(m[1], 10)
+        achterVanDefault = parseInt(m[2], 10)
+        // merge-base geeft niets (exit 1) als HEAD en de default geen gedeelde
+        // voorouder hebben. Alleen betekenisvol als het tellen lukte — dan weten
+        // we dat `doel` een geldige ref is.
+        deeltGeschiedenis = !!String(baseUit || '').trim()
+      }
+    }
   }
 
   return GitTools.maakStaat({
@@ -1840,6 +1869,7 @@ ipcMain.handle('git:info', async (_, dir) => {
     ahead: st.ahead, behind: st.behind, vuil: st.vuil,
     conflicten: st.conflicten, stashes, bestanden: st.bestanden,
     remoteOk, remoteReden,
+    remoteHead, voorVanDefault, achterVanDefault, deeltGeschiedenis, remoteLeeg,
     gitignore, langePaden, windows: process.platform === 'win32',
     naam: ident.naam, email: ident.email,
   })

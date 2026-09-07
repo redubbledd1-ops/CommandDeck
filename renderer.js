@@ -868,9 +868,10 @@ async function ververesAlleGitStaten(forceer = false) {
     for (const loc of projectLocaties(p)) await ververesGitPad(loc.pad, forceer)
   }
   meldGitProjectenAanMain()
-  // Niet awaiten: het opstarten mag niet wachten op een netwerkaanroep per
-  // project. Wat eruit komt, komt vanzelf binnen en tekent dan opnieuw.
-  controleerAlleKoppelingen()
+  // Teruggeven zodat een aanroeper die de netwerkcontrole nodig heeft (de
+  // opstartmelding hieronder) erop kan wachten. De poll-lus awaait niet en
+  // merkt hier niets van.
+  return controleerAlleKoppelingen()
 }
 
 // ── Klopt de koppeling nog? ─────────────────────────────────────────────────
@@ -920,6 +921,53 @@ async function controleerAlleKoppelingen() {
     }
   } finally {
     gitControleBezig = false
+  }
+}
+
+// Eén keer per sessie, bij het opstarten: welke projecten hebben op deze pc wel
+// een adres, maar wijst de huidige branch nergens naartoe of lijkt de map een
+// oude kopie? Dat is precies wat er misgaat op een pc waar oude projectmappen
+// zijn overgezet: ze zien er "gekoppeld en bij" uit terwijl de eerste push een
+// verouderde geschiedenis publiceert. Niet-blokkerend: één samenvatting met een
+// knop om ze langs te lopen.
+let opstartKoppelMeldingGedaan = false
+async function meldOnafgemaakteKoppelingen() {
+  if (opstartKoppelMeldingGedaan) return
+  opstartKoppelMeldingGedaan = true
+
+  const verdacht = []
+  for (const p of projects) {
+    const staat = gitStaatVan(p)
+    if (!staat || !staat.isRepo || !staat.commits) continue
+    const oud = GitTools.oudeKopieVerdenking(staat)
+    const half = !!staat.heeftRemote && !staat.upstream && !staat.koppelingStuk
+    if (!oud && !half) continue
+    const detail = oud
+      ? I18N.t('git.opstart.detail.' + oud.soort, {
+          branch: oud.branch || staat.branch || '', doel: oud.remoteHead || staat.remoteHead || 'main',
+          achter: oud.achter || 0,
+        })
+      : I18N.t('git.opstart.detail.half')
+    verdacht.push({ project: p, regel: I18N.t('git.opstart.regel', { project: p.name, detail }) })
+  }
+  if (!verdacht.length) return
+
+  const keuze = await vraagKeuze({
+    titel: I18N.t('git.opstart.titel'),
+    tekst: I18N.t('git.opstart.tekst'),
+    regels: verdacht.map(v => v.regel),
+    knoppen: [
+      { label: I18N.t('git.opstart.later'), waarde: '' },
+      { label: I18N.t('git.opstart.bekijken'), waarde: 'kijk', soort: 'primair' },
+    ],
+  })
+  if (keuze !== 'kijk') return
+
+  for (const v of verdacht) {
+    await selectProject(v.project.id)
+    const pad = actieveLocPad(v.project)
+    const staat = gitStaten[pad]
+    if (staat) await herstelKoppeling(v.project, pad, staat)
   }
 }
 
@@ -1006,12 +1054,14 @@ function gitIndicatorHtml(p) {
   if (i.vuil)   delen.push(`<span class="git-ind-dirty" title="${esc(I18N.t('git.ind.dirtyTitle'))}">${i.vuil}${esc(I18N.t('git.ind.dirtyShort'))}</span>`)
   if (i.koppelingStuk) delen.push(`<span class="git-ind-stuk" title="${esc(I18N.t('git.ind.brokenTitle'))}">${esc(I18N.t('git.ind.broken'))}</span>`)
   else if (!i.gekoppeld) delen.push(`<span class="git-ind-los" title="${esc(I18N.t('git.ind.noRemoteTitle'))}">${esc(I18N.t('git.ind.noRemote'))}</span>`)
+  else if (i.oudeVersie) delen.push(`<span class="git-ind-aandacht" title="${esc(I18N.t('git.ind.oudeKopieTitle'))}">${esc(I18N.t('git.ind.oudeKopie'))}</span>`)
+  else if (i.koppelingHalf) delen.push(`<span class="git-ind-aandacht" title="${esc(I18N.t('git.ind.afmakenTitle'))}">${esc(I18N.t('git.ind.afmaken'))}</span>`)
   else if (!i.volgt) delen.push(`<span class="git-ind-los" title="${esc(I18N.t('git.ind.noUpstreamTitle'))}">${esc(I18N.t('git.ind.noUpstream'))}</span>`)
 
   const anders = andereLocatiesOnveilig(p)
   if (anders) delen.push(`<span class="git-ind-anders" title="${esc(I18N.t('git.ind.otherLocTitle'))}">+${anders}</span>`)
 
-  return `<span class="git-ind ${i.onveilig || anders ? 'onveilig' : ''}">
+  return `<span class="git-ind ${i.onveilig || i.aandacht || anders ? 'onveilig' : ''}">
       <i class="ti ti-git-branch"></i>
       <span class="git-ind-branch">${esc(i.branch)}</span>
       ${delen.join('')}
@@ -1492,7 +1542,14 @@ window.addEventListener('DOMContentLoaded', async () => {
     controleerAchterstand()
   }, 800)
 
-  setTimeout(() => { ververesAlleGitStaten(true) }, 3500)
+  setTimeout(async () => {
+    // ververesAlleGitStaten geeft de netwerkcontrole terug; die vult "remote is
+    // leeg" en de default-branch, en daar hangt de oude-kopie-herkenning van af.
+    try { await ververesAlleGitStaten(true) } catch {}
+    // Nog een ronde git:info zodat de zojuist opgehaalde uitslag in de staat zit.
+    for (const p of projects) { try { await ververesGitStaat(p, true) } catch {} }
+    meldOnafgemaakteKoppelingen()
+  }, 3500)
 
   // Het main-proces houdt het sluiten tegen en vraagt ons na te kijken.
   try { window.api.opAfsluitControle((info) => controleerVoorAfsluiten(info)) } catch {}
@@ -16958,6 +17015,14 @@ async function schrijfGitCmd(project, cmdKey) {
     if (!cmd) return
 
   } else if (cmdKey === 'git-push') {
+    // Nooit blind `push -u` als de map een oude kopie lijkt of de koppeling
+    // nooit is afgemaakt: dat is precies hoe een verouderde geschiedenis de
+    // waarheid wordt. Eerst nakijken / afmaken via herstelKoppeling.
+    if (GitTools.oudeKopieVerdenking(staat) || (staat.heeftRemote && !staat.upstream)) {
+      await herstelKoppeling(project, actieveLocPad(project), staat)
+      await ververesGitStaat(project, true)
+      return
+    }
     // Zonder upstream is het een push -u; dat is een ander commando en de
     // vraag zegt dat er ook bij, want daarna volgt je branch de remote.
     const sleutel = staat.upstream ? 'git.push.text' : 'git.push.textEerste'
@@ -17535,7 +17600,16 @@ async function zetLangePaden(project) {
 
 async function herstelKoppeling(project, pad, staat, opties = {}) {
   const probleem = GitTools.koppelingProbleem(staat)
-  if (!probleem) return
+
+  // Geen aantoonbaar kapot adres, maar de koppeling is op deze pc nooit
+  // afgemaakt (branch volgt niets) of de map lijkt een oude, overgezette kopie.
+  // Die hebben hun eigen, rustiger weg — zie maakKoppelingAf.
+  const oud = GitTools.oudeKopieVerdenking(staat)
+  const half = !!staat.heeftRemote && !staat.upstream && !staat.koppelingStuk
+  if (!probleem) {
+    if (oud || half) { await maakKoppelingAf(project, pad, staat, oud); return }
+    return
+  }
 
   // 403 / verkeerd account is geen dood adres. Eerst inloggen of wisselen;
   // een nieuwe repo aanmaken is hier bijna altijd de verkeerde knop.
@@ -17608,7 +17682,7 @@ async function herstelKoppeling(project, pad, staat, opties = {}) {
   const naam = await vraagTekst({
     titel: I18N.t('git.link.nameTitle'),
     tekst: I18N.t('git.link.nameText'),
-    waarde: GitTools.veiligeRepoNaam(project.name),
+    waarde: GitTools.repoNaamVoorstel(staat, project.name, pad),
     okLabel: I18N.t('common.next'),
   })
   if (!naam) return
@@ -17628,6 +17702,61 @@ async function herstelKoppeling(project, pad, staat, opties = {}) {
   // remotes achterblijft waarvan er één niet werkt.
   const herstelUit = await executeCmd(project, GitTools.herstelCommando(staat, { naam, prive: zicht === 'prive' }), 'git-koppelen')
   if (herstelUit && herstelUit.success) await beschermMainNaAanmaken(pad)
+  await controleerKoppeling(pad, true)
+}
+
+// Koppelen afmaken op een pc waar dat nooit gebeurde, of nakijken of deze map
+// wel de goede versie is. Twee gevallen:
+//
+//   1. Lijkt een oude kopie -> eerst de vraag: is dit überhaupt de juiste
+//      versie? Zo nee: adres losmaken zodat er niets per ongeluk gepusht wordt.
+//   2. Gewoon nog niet afgemaakt -> `git push -u`, met een `git branch -m`
+//      ervoor als de branch lokaal 'master' heet en de remote 'main' gebruikt.
+async function maakKoppelingAf(project, pad, staat, oud) {
+  const remote = staat.remote || 'origin'
+  const branch = staat.branch || ''
+  const doel = staat.remoteHead || 'main'
+
+  if (oud && (oud.soort === 'geschiedenis-los' || oud.soort === 'remote-leeg' || oud.soort === 'achter-zonder-upstream')) {
+    const keuze = await vraagKeuze({
+      titel: I18N.t('git.oudeKopie.titel'),
+      tekst: I18N.t('git.oudeKopie.tekst.' + oud.soort, { branch, remote, doel, achter: oud.achter || 0 }),
+      regels: [staat.remoteUrl || remote],
+      knoppen: [
+        { label: I18N.t('common.cancel'), waarde: '' },
+        { label: I18N.t('git.oudeKopie.losmaken'), waarde: 'los', soort: 'gevaar' },
+        { label: I18N.t('git.oudeKopie.alsNieuw'), waarde: 'nieuw' },
+      ],
+    })
+    if (!keuze) return
+    if (keuze === 'los') {
+      const ja = await vraagJaNee(I18N.t('git.oudeKopie.losmakenTitel'),
+        I18N.t('git.oudeKopie.losmakenTekst', { remote }), I18N.t('git.oudeKopie.losmaken'), 'gevaar')
+      if (!ja) return
+      await executeCmd(project, GitTools.ontkoppelCommando(staat), 'git-koppelen')
+      await controleerKoppeling(pad, true)
+      return
+    }
+    // 'nieuw': bewust deze inhoud als waarheid nemen -> door naar de push-stap.
+  }
+
+  const HOOFD = ['main', 'master']
+  const hernoem = branch && doel && branch !== doel && HOOFD.includes(branch) && HOOFD.includes(doel)
+  const cmd = GitTools.afmaakKoppelingCommando(staat, {
+    branch: hernoem ? doel : branch,
+    hernoemVan: hernoem ? branch : '',
+  })
+  if (!cmd) { await meldKort(I18N.t('git.link.urlBadTitle'), I18N.t('git.link.urlBadText')); return }
+
+  const ja = await vraagJaNee(
+    I18N.t('git.afmaak.titel'),
+    hernoem ? I18N.t('git.afmaak.tekstHernoem', { van: branch, naar: doel, remote })
+            : I18N.t('git.afmaak.tekst', { branch, remote }),
+    I18N.t('git.afmaak.ok'), 'primair')
+  if (!ja) return
+  if (!await zorgVoorJuisteGithubPush(project)) return
+  await executeCmd(project, cmd, 'git-koppelen')
+  await ververesGitStaat(project, true)
   await controleerKoppeling(pad, true)
 }
 
@@ -17703,6 +17832,14 @@ async function koppelGithub(project) {
   // Kapot heeft zijn eigen weg. Die vraagt niet eerst naar gh: wie alleen het
   // adres wil verbeteren hoeft daar niets voor te installeren.
   if (staat.koppelingStuk) { await herstelKoppeling(project, pad, staat); return }
+
+  // Er staat een adres, maar de koppeling is nooit afgemaakt (branch volgt
+  // niets) of de map lijkt een oude kopie. Niet "al gekoppeld" zeggen: dan zou
+  // de eerstvolgende push blind een verouderde geschiedenis publiceren.
+  if (GitTools.oudeKopieVerdenking(staat) || (staat.heeftRemote && !staat.upstream)) {
+    await herstelKoppeling(project, pad, staat)
+    return
+  }
 
   // Hier stond alleen "is gh geïnstalleerd". Maar wie hem niet heeft, of hem
   // wel heeft maar nooit inlogde, kreeg meteen de omweg via de browser
@@ -18705,6 +18842,7 @@ function bindGitSectie(p, pad, staat, koppelProblemen = []) {
     const actie = el.dataset.gitActie
     const nu = gitStaten[pad] || staat
     if (actie === 'herstellen')  await herstelKoppeling(p, pad, nu)
+    else if (actie === 'koppeling-afmaken') await herstelKoppeling(p, pad, nu)
     else if (actie === 'koppelen') await koppelGithub(p)
     else if (actie === 'commit')   await schrijfGitCmd(p, 'git-commit')
     else if (actie === 'push')     await schrijfGitCmd(p, 'git-push')

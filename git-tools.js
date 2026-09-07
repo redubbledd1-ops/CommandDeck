@@ -241,11 +241,16 @@
   // De uitslag van één controle omzetten naar iets waar maakStaat mee verder
   // kan. `ok: null` betekent: we weten het nog steeds niet. Dat is geen fout,
   // dat is eerlijk — en het laat de knoppen staan.
+  //
+  // Bij code 0 is `tekst` de stdout van `ls-remote`: leeg = een repo zonder
+  // enkele ref (net aangemaakt, nooit gepusht). Dat is geen fout, maar wél iets
+  // waar de oude-kopie-herkenning op afgaat — een lege remote naast lokale
+  // commits betekent dat de eerste push jouw geschiedenis tot waarheid maakt.
   function remoteUitslag(code, tekst) {
-    if (code === 0) return { ok: true, reden: '' }
+    if (code === 0) return { ok: true, reden: '', leeg: !String(tekst || '').trim() }
     const reden = remoteFoutReden(tekst)
-    if (reden === 'netwerk' || reden === 'onbekend') return { ok: null, reden }
-    return { ok: false, reden }
+    if (reden === 'netwerk' || reden === 'onbekend') return { ok: null, reden, leeg: false }
+    return { ok: false, reden, leeg: false }
   }
 
   // Het commando dat de controle doet. --exit-code maakt een lege repo ook een
@@ -273,7 +278,12 @@
                        bestanden = [], nieuweBestanden = [],
                        remoteOk = null, remoteReden = '', remoteUrl = '', remoteLijst = [],
                        gitignore = null, langePaden = null, windows = false,
-                       naam = '', email = '' } = {}) {
+                       naam = '', email = '',
+                       // Wat de remote-default is (`main`/`master`), en hoe de huidige
+                       // branch zich daartoe verhoudt als er géén upstream is. Alleen
+                       // gevuld nadat main een keer heeft kunnen fetchen; anders null/0.
+                       remoteHead = null, voorVanDefault = 0, achterVanDefault = 0,
+                       deeltGeschiedenis = null, remoteLeeg = false } = {}) {
     // Twee vormen die hetzelfde beschrijven: alleen namen (zoals `git remote`
     // geeft) of namen mét adres (`git remote -v`). Beide mogen, want de tests
     // en de oudere aanroepen kennen alleen de eerste.
@@ -297,6 +307,13 @@
       : remoteOk === false ? KOPPELING_STUK
       : KOPPELING_ONBEKEND
 
+    // Volgt de branch waar de upstream naar wijst nog een bestaande remote? Een
+    // upstream `github/main` terwijl er alleen `origin` is, is net zo stuk als
+    // geen upstream. "Klaar met koppelen" is dus iets anders dan "er hangt een
+    // adres aan": pas als de huidige branch echt ergens naartoe wijst.
+    const upstreamRemoteBestaat = !!upstream && (!uitUpstream || lijst.includes(uitUpstream))
+    const koppelingAf = heeftRemote && upstreamRemoteBestaat
+
     return {
       beschikbaar: !!beschikbaar,
       isRepo: !!isRepo,
@@ -305,6 +322,10 @@
       gekoppeld: koppeling === KOPPELING_OK || koppeling === KOPPELING_ONBEKEND,
       koppeling,
       koppelingStuk: koppeling === KOPPELING_STUK,
+      // Wél een adres, maar de huidige branch wijst nergens naartoe: koppelen is
+      // op deze pc nooit afgemaakt. Losse vlag naast `gekoppeld` zodat commit en
+      // push offline blijven werken, maar de kop dit wél kan tonen.
+      koppelingAf: !!koppelingAf,
       // Er stáát wel een adres, ook als het niet werkt. Dat verschil heeft de
       // herstelknop nodig: een dood adres moet weg vóór je een nieuw aanmaakt.
       heeftRemote,
@@ -334,6 +355,13 @@
       windows: !!windows,
       naam: String(naam || '').trim(),
       email: String(email || '').trim(),
+      // Voor de oude-kopie-herkenning. Alleen betekenisvol nadat main heeft
+      // gefetcht; tot die tijd remoteHead null en de tellingen 0.
+      remoteHead: remoteHead ? String(remoteHead).trim() : null,
+      voorVanDefault: voorVanDefault || 0,
+      achterVanDefault: achterVanDefault || 0,
+      deeltGeschiedenis: deeltGeschiedenis === null ? null : !!deeltGeschiedenis,
+      remoteLeeg: !!remoteLeeg,
     }
   }
 
@@ -421,12 +449,68 @@
       schoon: vuil === 0 && ahead === 0 && behind === 0,
       // Werk dat alleen op deze pc bestaat. Niet-vastgelegde wijzigingen, of
       // commits die nog nergens heen zijn gepusht. Dit is de vraag waar de
-      // afsluitcontrole op afgaat.
+      // afsluitcontrole op afgaat — dus hier blijft alleen echt verlieslijdend
+      // werk in staan, niet "koppeling niet af".
       onveilig: vuil > 0 || ahead > 0,
       // De remote heeft iets wat jij niet hebt. Alleen betrouwbaar kort na een
       // fetch — zonder fetch blijft dit 0, ook al staat er werk klaar.
       achter: behind > 0,
+      // Er hangt een adres aan, maar de huidige branch is er nooit naartoe
+      // gepusht. Geen verlies-risico, wél iets om af te maken vóór je pusht.
+      koppelingHalf: !!staat.heeftRemote && !staat.upstream,
+      // Deze map lijkt een oude, overgezette kopie. Zie oudeKopieVerdenking.
+      oudeVersie: (oudeKopieVerdenking(staat) || {}).soort || null,
+      // Waar de kop amber van wordt: aandacht nodig, maar niet "je raakt werk
+      // kwijt". Los van `onveilig` zodat de afsluitcontrole hier niet op afgaat.
+      aandacht: !!oudeKopieVerdenking(staat)
+        || (!!staat.heeftRemote && !staat.upstream && !!staat.commits),
     }
+  }
+
+  // ── Lijkt dit een oude kopie? ──────────────────────────────────────────────
+  // Een map die van een andere pc is overgezet houdt zijn .git/config, dus er
+  // staat een remote — maar de huidige branch tracket niets, heet anders dan de
+  // remote-default, of deelt geen enkele commit met wat er op de remote staat.
+  // Dan ziet het project er "gekoppeld en bij" uit terwijl het een verouderde
+  // snapshot is die je niet als waarheid wilt pushen.
+  //
+  //   'geschiedenis-los'        HEAD en de remote-default hebben geen gedeelde
+  //                             voorouder — vrijwel zeker een losse oude kopie
+  //   'remote-leeg'             er hangt een adres aan, jij hebt commits, maar de
+  //                             remote is leeg: de eerste push maakt jouw
+  //                             (mogelijk oude) geschiedenis tot de waarheid
+  //   'branch-af'               jij zit op 'master' terwijl de remote 'main' als
+  //                             default heeft (of andersom)
+  //   'achter-zonder-upstream'  je loopt achter op de remote-default en hebt zelf
+  //                             niets extra's — een gewone verouderde checkout
+  //
+  // Alleen betekenisvol nadat main een keer heeft kunnen fetchen (remoteHead /
+  // deeltGeschiedenis gevuld). Tot die tijd geeft dit null terug en zwijgt de
+  // app, in plaats van te gokken.
+  function oudeKopieVerdenking(staat) {
+    if (!staat || !staat.isRepo || !staat.heeftRemote || !staat.commits) return null
+
+    if (staat.deeltGeschiedenis === false) {
+      return { soort: 'geschiedenis-los', branch: staat.branch || null,
+               remoteHead: staat.remoteHead || null }
+    }
+
+    const head = String(staat.remoteHead || '').trim()
+    if (staat.remoteLeeg && !(head && staat.branch === head)) {
+      return { soort: 'remote-leeg', branch: staat.branch || null }
+    }
+
+    if (head && staat.branch && staat.branch !== head
+        && HOOFDTAKKEN.includes(staat.branch) && HOOFDTAKKEN.includes(head)) {
+      return { soort: 'branch-af', branch: staat.branch, remoteHead: head }
+    }
+
+    if (!staat.upstream && (staat.achterVanDefault || 0) > 0 && (staat.voorVanDefault || 0) === 0) {
+      return { soort: 'achter-zonder-upstream', branch: staat.branch || null,
+               achter: staat.achterVanDefault || 0, remoteHead: head || null }
+    }
+
+    return null
   }
 
   // Waarom een project onveilig is, in de volgorde waarin je het wilt horen.
@@ -1125,7 +1209,7 @@
   function herstelCommando(staat, opties = {}) {
     const { naam = '', url = '', prive = true } = opties
     const remote = (staat && staat.remote) || 'origin'
-    const branch = (staat && staat.branch) || 'main'
+    const branch = veiligeBranchNaam(opties.branch || (staat && staat.branch) || 'main') || 'main'
     if (url) {
       const schoon = normaliseerRepoUrl(url)
       if (!schoon) return null
@@ -1137,6 +1221,22 @@
       return `git remote remove ${remote} && gh repo create ${repo} ${prive ? '--private' : '--public'} --source=. --push`
     }
     return null
+  }
+
+  // Koppelen afmaken op een pc waar dat nooit gebeurde: er staat een remote,
+  // maar de huidige branch wijst nergens naartoe. `git push -u` zet dat goed.
+  // Heet de branch lokaal `master` terwijl de remote `main` als default heeft
+  // (of andersom), dan gaat een `git branch -m` daaraan vooraf — anders zet je
+  // een tweede hoofdtak op de remote naast de bestaande.
+  function afmaakKoppelingCommando(staat, opties = {}) {
+    const remote = (staat && staat.remote) || 'origin'
+    const doel = veiligeBranchNaam(opties.branch || (staat && staat.branch) || '')
+    if (!doel) return null
+    const van = veiligeBranchNaam(opties.hernoemVan || '')
+    const delen = []
+    if (van && van !== doel) delen.push(`git branch -m ${van} ${doel}`)
+    delen.push(`git push -u ${remote} ${doel}`)
+    return delen.join(' && ')
   }
 
   // Losmaken zonder iets nieuws: het adres eraf, de geschiedenis blijft.
@@ -1209,9 +1309,24 @@
       uit.push({ id: 'lange-paden', ernst: 'let-op', actie: 'langepaden' })
     }
 
+    // Deze map lijkt een oude, overgezette kopie. Bovenaan de "wat later pijn
+    // doet"-groep: het is niet kapot, maar één push maakt de verkeerde
+    // geschiedenis tot waarheid.
+    const oud = oudeKopieVerdenking(staat)
+    if (oud) {
+      uit.push({ id: 'oude-kopie', ernst: 'fout', actie: 'koppeling-afmaken',
+                 soort: oud.soort, branch: oud.branch || '', remoteHead: oud.remoteHead || '' })
+    }
+
     if (!staat.commits) uit.push({ id: 'geen-commits', ernst: 'info', actie: 'commit' })
     else if (!staat.heeftRemote) uit.push({ id: 'geen-remote', ernst: 'info', actie: 'koppelen' })
-    else if (!staat.koppelingStuk && !staat.upstream) uit.push({ id: 'geen-upstream', ernst: 'let-op', actie: 'push' })
+    else if (!staat.koppelingStuk && !staat.upstream && !oud) {
+      // Wél een adres, wél commits (deze tak is via de if hierboven bereikt),
+      // maar deze branch is er nooit naartoe gepusht — koppelen is nooit
+      // afgemaakt. Dat is een fout: de push-knop zou anders blind
+      // `push -u origin <branch>` doen, mogelijk vanaf een verkeerde branchnaam.
+      uit.push({ id: 'geen-upstream', ernst: 'fout', actie: 'koppeling-afmaken' })
+    }
 
     // Twee remotes is zelden bedoeld en bijna altijd het spoor van een eerdere
     // koppelpoging. Het is niet kapot, maar het is wel hoe een push in de
@@ -1333,6 +1448,12 @@
   function pushCommando(staat) {
     if (!staat || !staat.gekoppeld) return null
     if (staat.upstream) return 'git push'
+    // Geen upstream én de map lijkt een oude kopie of een lege remote: dan is
+    // `push -u` precies hoe een verouderde snapshot de waarheid wordt. De caller
+    // (renderer) leidt dit naar "koppeling afmaken / nakijken" in plaats van
+    // hier blind een commando te geven.
+    const oud = oudeKopieVerdenking(staat)
+    if (oud && (oud.soort === 'geschiedenis-los' || oud.soort === 'remote-leeg')) return null
     const remote = staat.remote || 'origin'
     const branch = staat.branch
     if (!branch) return null
@@ -1956,6 +2077,19 @@
     return veiligeRepoNaam(stuk)
   }
 
+  // Welke repo-naam vul je voor bij "opnieuw koppelen"? Niet blind de
+  // projectnaam uit CommandDeck: die is hernoembaar en klopt na een rename niet
+  // meer met de repo. De bestaande remote-URL is de betrouwbaarste bron (ook een
+  // kapot adres heeft meestal de juiste naam), daarna de mapnaam op schijf, en
+  // pas als laatste de weergavenaam van het project.
+  function repoNaamVoorstel(staat, projectNaam, mapPad) {
+    const uitUrl = repoNaamUitUrl((staat && staat.remoteUrl) || '')
+    if (uitUrl) return uitUrl
+    const seg = String(mapPad || '').replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean).pop() || ''
+    if (seg) return veiligeRepoNaam(seg)
+    return veiligeRepoNaam(projectNaam || '')
+  }
+
   // Waar de bestanden terechtkomen. Is de gekozen locatie al de reponaam,
   // dan is dat de map zelf; anders komt er een map met die naam onder.
   function cloneDoelPad(url, locatiePad) {
@@ -2077,7 +2211,8 @@
     KOPPELING_GEEN, KOPPELING_ONBEKEND, KOPPELING_OK, KOPPELING_STUK,
     remoteFoutReden, remoteUitslag, lsRemoteArgs, koppelingProbleem,
     parseDeniedGebruiker, githubEigenaarUitUrl, zelfdeGhNaam, pushInlogProbleem,
-    herstelCommando, ontkoppelCommando, KOPPEL_HERSTEL,
+    herstelCommando, ontkoppelCommando, KOPPEL_HERSTEL, afmaakKoppelingCommando,
+    oudeKopieVerdenking, repoNaamVoorstel,
     parseRemoteRegels, remoteWegCommando, remoteUrlCommando,
     projectSoorten, gitignoreVoor, bouwrommel, NEGEER_BLOKKEN, langePadenCommando,
     gitProblemen, ergsteErnst,
