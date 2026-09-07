@@ -59,6 +59,7 @@ contextBridge.exposeInMainWorld('api', {
   gitRemoteVergeet:(p)   => ipcRenderer.invoke('git:remoteVergeet', p),
   gitIgnoreVoorstel:(p)  => ipcRenderer.invoke('git:gitignoreVoorstel', p),
   gitIgnoreSchrijf: (o)  => ipcRenderer.invoke('git:gitignoreSchrijf', o),
+  gitHistOpzij:    (o)  => ipcRenderer.invoke('git:histOpzij', o || {}),
   gitGhLogin:    (o)     => ipcRenderer.invoke('git:ghLogin', o || {}),
   // Vroeger kwam hier alleen de code binnen. Nu een object met code én adres,
   // zodat het venster een "Kopieer link"-knop kan tonen. Een oude vorm (kale

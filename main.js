@@ -1767,6 +1767,61 @@ ipcMain.handle('git:gitignoreSchrijf', (_, { dir, inhoud, erbij } = {}) => {
   }
 })
 
+// ── De geschiedenis opzij zetten ─────────────────────────────────────────────
+// Zit er een bestand in de geschiedenis dat GitHub weigert (boven de 100 MB),
+// dan komt geen enkele push daar nog langs: het bestand uit de map halen helpt
+// niet, want de commit waarin het zit blijft bestaan. Ook een nieuwe branch
+// niet — die sleept dezelfde voorouders mee. Er zijn twee uitwegen,
+// `git filter-repo` of opnieuw beginnen, en de tweede kan de app zelf.
+//
+// Weggooien doet hij daarbij niet. De .git-map gaat opzij onder een naam met de
+// datum erin; hernoem je die terug, dan is er niets gebeurd. Dat is het verschil
+// tussen een knop die je durft in te drukken en een die je niet durft.
+ipcMain.handle('git:histOpzij', (_, { dir } = {}) => {
+  if (!padToegestaan(dir) || !dir || !fs.existsSync(dir)) return { ok: false, reden: 'geen-map' }
+  const gitMap = path.join(dir, '.git')
+  if (!fs.existsSync(gitMap)) return { ok: false, reden: 'geen-repo' }
+
+  // Een stash zit in .git en nergens anders. Die zou hier uit beeld raken
+  // zonder dat je het merkt, en dat is precies het soort verlies waarvan je
+  // pas een week later ontdekt dat het gebeurd is.
+  const stash = gitUit(dir, ['stash', 'list'])
+  if (stash === null) return { ok: false, reden: 'geen-git' }
+  if (String(stash).trim()) return { ok: false, reden: 'stashes' }
+
+  // Staat er al werk op de remote, dan is de geschiedenis niet meer alleen van
+  // jou en gaat opnieuw beginnen niet zomaar. Vers meten en niet uit de cache:
+  // dit is het moment waarop het antwoord moet kloppen. Lukt het meten niet,
+  // dan is het antwoord nee — een leeg antwoord van een mislukte aanroep mag
+  // hier nooit als "leeg dus veilig" doorgaan.
+  const url = String(gitUit(dir, ['remote', 'get-url', 'origin']) || '').trim()
+  if (url) {
+    let heads = ''
+    try {
+      heads = execFileSync('git', ['ls-remote', '--heads', url], {
+        cwd: dir, encoding: 'utf8', timeout: 20000, windowsHide: true,
+        env: childEnv(), stdio: ['ignore', 'pipe', 'pipe'],
+      })
+    } catch { return { ok: false, reden: 'remote-onbekend' } }
+    if (String(heads || '').trim()) return { ok: false, reden: 'remote-niet-leeg' }
+  }
+
+  const stempel = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '')
+  const doel = path.join(dir, '.git-oud-' + stempel)
+  if (fs.existsSync(doel)) return { ok: false, reden: 'bestaat-al' }
+  try {
+    fs.renameSync(gitMap, doel)
+  } catch (e) {
+    return { ok: false, reden: String((e && e.message) || 'onbekend') }
+  }
+
+  // Het oordeel over deze map slaat nergens meer op: er is geen repo meer.
+  const voor = String(dir) + '\u0000'
+  for (const sleutel of [...remoteCache.keys()]) if (sleutel.startsWith(voor)) remoteCache.delete(sleutel)
+
+  return { ok: true, oud: path.basename(doel), url }
+})
+
 // Na koppelen, herstellen of een mislukte push wil je niet nog een half uur
 // naar het oude oordeel kijken.
 ipcMain.handle('git:remoteVergeet', (_, dir) => {
@@ -2587,7 +2642,11 @@ ipcMain.handle('git:ghRepos', (_, opties = {}) => {
     }
   }
 
-  const velden = 'nameWithOwner,name,url,description,isPrivate,updatedAt'
+  // defaultBranchRef staat erbij om te weten of de repo main of master als
+  // hoofdtak heeft: koppel je een map met de andere naam, dan komt er anders
+  // een tweede hoofdtak naast te staan. Kent een oude gh het veld niet, dan
+  // faalt deze aanroep in zijn geheel en pakt de api-terugval hieronder het op.
+  const velden = 'nameWithOwner,name,url,description,isPrivate,updatedAt,defaultBranchRef'
   let repos = GitTools.parseGhRepos(roep(['repo', 'list', '--limit', '200', '--json', velden]))
 
   // Oudere gh kent `--json` niet. Dan via de API, die dezelfde gegevens onder

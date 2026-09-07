@@ -1122,7 +1122,12 @@
   const NEGEER_BLOKKEN = {
     algemeen: ['# rommel van het systeem en de editor',
                '.DS_Store', 'Thumbs.db', 'desktop.ini', '*.log',
-               '.idea/', '.vscode/', '*.iml', '*.swp', '*~'],
+               '.idea/', '.vscode/', '*.iml', '*.swp', '*~',
+               '# een geheugendump van de JVM (Android Studio zet hem in de',
+               '# projectmap): honderden MB, en boven de 100 MB weigert GitHub de',
+               '# hele push — ook als het bestand allang weg is, want het staat dan',
+               '# nog in je geschiedenis',
+               '*.hprof'],
     geheim:   ['# sleutels en wachtwoorden horen niet in de geschiedenis',
                '.env', '.env.*', '!.env.example', '*.pem', '*.key'],
     flutter:  ['# flutter/dart', '.dart_tool/', '.packages', '.flutter-plugins',
@@ -1365,6 +1370,112 @@
       return `git remote add origin ${url} && git push -u origin ${branch || 'main'}`
     }
     return null
+  }
+
+  // ── Een naam die al bezet is ────────────────────────────────────────────────
+  // `gh repo create` weigert een naam die al op je account staat, met een zin
+  // uit de GraphQL-api van GitHub: "Name already exists on this account". Dat
+  // leest als een fout, maar het is er meestal geen: er staat al een
+  // repository met die naam, en negen van de tien keer is dat precies degene
+  // waar deze map bij hoort — een eerdere poging, of een andere pc. Aanmaken
+  // kan dan niet meer. Koppelen wel, en dat is wat je wilde.
+  function repoNaamBezetFout(tekst) {
+    return /Name already exists on this account/i.test(String(tekst || ''))
+  }
+
+  // Dezelfde naam terugvinden in de lijst van `gh repo list`. Hoofdletters
+  // tellen niet mee: GitHub zet geen tweede "daykit" naast "DayKit", dus een
+  // verschil in schrijfwijze is nog steeds dezelfde botsing.
+  function zoekRepoOpNaam(lijst, naam) {
+    const q = veiligeRepoNaam(naam).toLowerCase()
+    if (!q || !Array.isArray(lijst)) return null
+    return lijst.find(r => String((r && r.naam) || '').toLowerCase() === q) || null
+  }
+
+  // Koppelen aan een repository die er al is. Het adres erbij en de huidige
+  // branch pushen met -u, zodat vooruit/achter daarna klopt.
+  //
+  // Heet die branch hier `master` terwijl de repo `main` als hoofdtak heeft
+  // (of andersom), dan gaat er een `git branch -m` aan vooraf. Zonder dat komt
+  // er een tweede hoofdtak naast de bestaande te staan en wijst de repo-pagina
+  // naar een tak zonder je werk. Alleen tussen main en master: elke andere
+  // naam is een echte eigen tak, en die hernoemen we niet.
+  //
+  // Een lege repo heeft nog geen hoofdtak; dan is er niets om je naar te
+  // richten en pusht hij gewoon de naam die je hier hebt.
+  function koppelBestaandeCommando(url, opties = {}) {
+    const schoon = normaliseerRepoUrl(url)
+    if (!schoon) return null
+    const remote = opties.remote || 'origin'
+    const hier = veiligeBranchNaam(opties.branch || '') || 'main'
+    const daar = veiligeBranchNaam(opties.standaardBranch || '')
+    const isHoofd = n => n === 'main' || n === 'master'
+    const hernoem = (daar && daar !== hier && isHoofd(hier) && isHoofd(daar)) ? daar : ''
+    const delen = []
+    if (hernoem) delen.push(`git branch -m ${hier} ${hernoem}`)
+    // `git remote add` weigert een naam die er al staat. Op dit punt hoort er
+    // geen remote te zijn, maar hoort-niet en is-niet zijn twee dingen.
+    delen.push(`git remote ${opties.heeftRemote ? 'set-url' : 'add'} ${remote} ${schoon}`)
+    delen.push(`git push -u ${remote} ${hernoem || hier}`)
+    return delen.join(' && ')
+  }
+
+  // De push liep stuk omdat er aan de andere kant iets staat wat hier niet in
+  // de geschiedenis zit: een README die bij het aanmaken meekwam, of het werk
+  // van een andere pc. Git zegt dat in het Engels, met vaste zinnen.
+  // Opnieuw beginnen, in één regel die je in de terminal ziet draaien. De
+  // volgorde is die waarin het fout kan gaan: eerst een verse repo mét
+  // core.longpaths (zonder dat valt de commit van een Android-project op
+  // Windows om), dan alles erin, en pas daarna het adres en de push.
+  function herbouwCommando(opties = {}) {
+    const branch = veiligeBranchNaam(opties.branch || '') || 'main'
+    const bericht = veiligCommitBericht(opties.bericht || '') || 'eerste versie'
+    const delen = [
+      `git init -b ${branch}`,
+      'git config core.longpaths true',
+      'git add -A',
+      `git commit -m "${bericht}"`,
+    ]
+    const url = normaliseerRepoUrl(opties.url)
+    if (url) {
+      delen.push(`git remote add origin ${url}`)
+      delen.push(`git push -u origin ${branch}`)
+    }
+    return delen.join(' && ')
+  }
+
+  // De regel die dit bestand voortaan buiten de deur houdt. Bij een soort dat
+  // vaker terugkomt wordt het een patroon: de volgende geheugendump heet
+  // java_pid41288.hprof en niet java_pid14760.hprof, dus alleen die ene naam
+  // negeren lost het maar één keer op. Al het andere krijgt zijn eigen pad
+  // vanaf de wortel, zodat een gelijknamig bestand elders gewoon meegaat.
+  const NEGEER_SOORTEN = ['.hprof', '.aab', '.apk', '.jks', '.keystore']
+  function negeerRegelVoor(pad) {
+    const p = String(pad || '').trim().replace(/\\/g, '/').replace(/^[./]+/, '')
+    if (!p) return ''
+    const ext = (p.match(/\.[A-Za-z0-9]+$/) || [''])[0].toLowerCase()
+    return NEGEER_SOORTEN.includes(ext) ? '*' + ext : '/' + p
+  }
+
+  // GitHub weigert elk bestand boven de 100 MB, en dat gaat via een hook aan
+  // hun kant: je commit is hier gelukt, je push loopt stuk. De melding noemt
+  // het bestand en de grootte, en dat is precies wat je moet weten — want het
+  // bestand nu weggooien helpt niet meer, het zit in de geschiedenis.
+  function grootBestandFout(tekst) {
+    const s = String(tekst || '')
+    const m = s.match(/File\s+(.+?)\s+is\s+([\d.]+\s*[KMG]B)\s*;\s*this exceeds GitHub's file size limit/i)
+    if (m) return { bestand: m[1].trim(), grootte: m[2].trim() }
+    // Zonder de regel met de naam erbij (afgekapte uitvoer) is de foutcode nog
+    // steeds genoeg om te weten waar het over gaat.
+    if (/GH001/.test(s) || /Large files detected/i.test(s)) return { bestand: '', grootte: '' }
+    return null
+  }
+
+  function pushGeweigerdFout(tekst) {
+    const s = String(tekst || '')
+    return /!\s*\[rejected\]/i.test(s)
+      || /Updates were rejected/i.test(s)
+      || /fetch first/i.test(s)
   }
 
   // Aanhalingstekens om een pad op de commandoregel. Dubbele quotes erin
@@ -2134,6 +2245,9 @@
         beschrijving: String(r.description || '').trim(),
         prive: !!(r.isPrivate || r.private),
         bijgewerkt: String(r.updatedAt || r.updated_at || r.pushedAt || r.pushed_at || '').trim(),
+        // De hoofdtak, als de repo er al een heeft. Een lege repository heeft
+        // die niet — dan blijft dit leeg en richt koppelen zich nergens naar.
+        standaardBranch: String((r.defaultBranchRef && r.defaultBranchRef.name) || r.default_branch || '').trim(),
       })
     }
 
@@ -2205,6 +2319,8 @@
     parseRemotes, parseBranch, parseStatusV2, maakStaat, zichtbareGitIds,
     zelfdeGitWeergave,
     koppelStap, koppelCommando, veiligeRepoNaam, normaliseerRepoUrl,
+    repoNaamBezetFout, zoekRepoOpNaam, koppelBestaandeCommando, pushGeweigerdFout,
+    grootBestandFout, herbouwCommando, negeerRegelVoor,
     bareInitCommando, bareCloneCommando, joinPad, cmdPad,
     repoNaamUitUrl, cloneDoelPad, cloneOuderPad, cloneCommando,
     parseGhRepos, filterRepos, repoSleutel, zonderGekoppelde, gitSlotFout,

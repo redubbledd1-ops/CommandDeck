@@ -1611,6 +1611,17 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   window.api.onOutput(({ projectId, type, text }) => {
     if (GitTools.gitSlotFout(text)) slotKlacht = true
+    if (GitTools.repoNaamBezetFout(text)) naamBezetKlacht = true
+    if (GitTools.pushGeweigerdFout(text)) pushGeweigerdKlacht = true
+    {
+      // Een tweede regel kan de eerste aanvullen: de foutcode en de naam van
+      // het bestand komen in aparte regels binnen. Nooit iets met een naam
+      // overschrijven door iets zonder.
+      const groot = GitTools.grootBestandFout(text)
+      if (groot && (!grootBestandKlacht || (groot.bestand && !grootBestandKlacht.bestand))) {
+        grootBestandKlacht = groot
+      }
+    }
     if (projectId === activeTermId) {
       if (STDIN_KLACHTEN.test(String(text || ''))) stdinKlacht = true
       appendLine(type, text)
@@ -16002,6 +16013,14 @@ let stdinKlacht = false
 
 // Git klaagde over een index.lock die er al staat. Zie regelGitSlot hieronder.
 let slotKlacht = false
+// `gh repo create` botste op een naam die al op het account staat. Geen fout
+// in deze map: er is al een repository met die naam, en die kun je koppelen.
+let naamBezetKlacht = false
+// De push kwam er niet in omdat er aan de andere kant al commits staan.
+let pushGeweigerdKlacht = false
+// Er zat een bestand in dat GitHub niet aanneemt. Bewaart de naam en de
+// grootte, want zonder die twee is de melding onbruikbaar.
+let grootBestandKlacht = null
 
 // `opties.eigenTerminal` dwingt de weg met een echt toetsenbord af, ook als het
 // commando er niet naar uitziet. Nodig zodra git zelf om inloggegevens vraagt:
@@ -16147,6 +16166,26 @@ async function executeCmd(project, cmd, cmdKey = null, opties = {}) {
       appendLine('warn', I18N.t('term.stdinExpectedWarn1'))
       appendLine('warn', I18N.t('term.stdinExpectedWarn2'))
       stdinKlacht = false
+    }
+
+    // GitHub weigerde de push om een bestand dat te groot is. Dat kan overal
+    // vandaan komen — de koppelknop, de pushknop, een commando dat je zelf
+    // typt — dus wordt het hier afgehandeld en niet per knop. Opnieuw proberen
+    // heeft geen zin: het bestand zit in de geschiedenis, en daar moet het uit.
+    if (grootBestandKlacht) {
+      const groot = grootBestandKlacht
+      grootBestandKlacht = null
+      const keus = await vraagKeuze({
+        titel: I18N.t('git.groot.titel'),
+        tekst: groot.bestand
+          ? I18N.t('git.groot.tekst', { bestand: groot.bestand, grootte: groot.grootte })
+          : I18N.t('git.groot.tekstKaal'),
+        knoppen: [
+          { label: I18N.t('common.cancel'), waarde: '' },
+          { label: I18N.t('git.groot.opnieuw'), waarde: 'opnieuw', soort: 'primair' },
+        ],
+      })
+      if (keus === 'opnieuw') await herbouwGeschiedenis(project, werkmap, groot)
     }
 
     // Struikelde git over een slot dat er nog stond? Dan is er niets mis met
@@ -17912,10 +17951,27 @@ async function koppelGithub(project) {
       okLabel: I18N.t('common.next'),
     })
     if (!naam) return
+    const repoNaam = GitTools.veiligeRepoNaam(naam)
+
+    // Eerst kijken of die naam al op het account staat. Zo ja, dan loopt
+    // `gh repo create` stuk op "Name already exists on this account" — een
+    // melding die zegt dat het niet kan, en niet wat je er dan wel mee moet.
+    // En het is bijna nooit een botsing met iets anders: het is de repo van
+    // een eerdere poging, of van een andere pc. Aanmaken kan niet meer,
+    // koppelen wel, dus dat vragen we hier — vóór het commando, niet achteraf
+    // in een foutmelding.
+    showToast(I18N.t('git.link.checkBezig'))
+    const albestaand = await zoekGhRepoOpNaam(repoNaam)
+    if (albestaand) {
+      const uitkomst = await koppelAanBestaandeRepo(project, pad, staat, albestaand)
+      if (uitkomst !== 'andere-naam') return
+      // Liever toch een nieuwe repo: terug naar de naamvraag.
+      return await koppelGithub(project)
+    }
 
     const zicht = await vraagKeuze({
       titel: I18N.t('git.link.visTitle'),
-      tekst: I18N.t('git.link.visText', { naam: GitTools.veiligeRepoNaam(naam) }),
+      tekst: I18N.t('git.link.visText', { naam: repoNaam }),
       knoppen: [
         { label: I18N.t('common.cancel'), waarde: '' },
         { label: I18N.t('git.link.public'), waarde: 'publiek' },
@@ -17925,10 +17981,21 @@ async function koppelGithub(project) {
     if (!zicht) return
 
     const cmd = GitTools.koppelCommando(GitTools.KOPPEL_GH, {
-      naam: GitTools.veiligeRepoNaam(naam), prive: zicht === 'prive',
+      naam: repoNaam, prive: zicht === 'prive',
     })
+    naamBezetKlacht = false
     const uit = await executeCmd(project, cmd, 'git-koppelen')
-    if (uit && uit.success) await beschermMainNaAanmaken(pad)
+    if (uit && uit.success) {
+      await beschermMainNaAanmaken(pad)
+    } else if (naamBezetKlacht) {
+      // De lijst hierboven kwam niet binnen (geen netwerk, niet ingelogd) of
+      // liep achter. gh weet het zeker: de naam is bezet. Zelfde aanbod, nu op
+      // gezag van het commando zelf.
+      naamBezetKlacht = false
+      const alsnog = await zoekGhRepoOpNaam(repoNaam)
+      if (alsnog) { await koppelAanBestaandeRepo(project, pad, staat, alsnog); return }
+      await meldKort(I18N.t('git.link.bezetTitle'), I18N.t('git.link.bezetText', { naam: repoNaam }))
+    }
     await controleerKoppeling(pad, true)
     return
   }
@@ -17965,6 +18032,133 @@ async function koppelGithub(project) {
   // hem ook. Bij andermans repo faalt dit stil (geen admin).
   if (urlUit && urlUit.success) await beschermMainNaAanmaken(pad)
   await controleerKoppeling(pad, true)
+}
+
+// ── Opnieuw beginnen met de geschiedenis ─────────────────────────────────────
+// De enige uitweg zonder extra gereedschap als er een te groot bestand in je
+// commits zit. Het bestand nu weggooien helpt niet — de commit waarin het staat
+// blijft bestaan, en een nieuwe branch sleept dezelfde voorouders mee.
+//
+// Drie dingen maken dit een knop die je durft in te drukken in plaats van een
+// commando dat je uit een forum plakt:
+//   - de oude .git gaat opzij, hij wordt niet weggegooid
+//   - de hoofdkant weigert zodra er stashes zijn of er al iets op de remote
+//     staat, en weigert ook als hij dat laatste niet kán nagaan
+//   - het bestand komt eerst in .gitignore, anders staat het na de verse commit
+//     meteen weer klaar om hetzelfde te doen
+async function herbouwGeschiedenis(project, werkmap, groot) {
+  if (!werkmap) return
+  const regel = GitTools.negeerRegelVoor((groot && groot.bestand) || '')
+
+  const ja = await vraagJaNee(
+    I18N.t('git.groot.bevestigTitel'),
+    I18N.t('git.groot.bevestigTekst', { regel: regel || I18N.t('git.groot.geenRegel') }),
+    I18N.t('git.groot.opnieuw'), 'gevaar')
+  if (!ja) return
+
+  // Eerst negeren, dan pas opnieuw beginnen. Andersom draait de verse `git
+  // add -A` het bestand er zo weer in en sta je precies waar je stond.
+  if (regel) {
+    try {
+      await window.api.gitIgnoreSchrijf({
+        dir: werkmap, erbij: true,
+        inhoud: I18N.t('git.groot.negeerKop') + '\n' + regel + '\n',
+      })
+    } catch {}
+  }
+
+  const uitslag = await window.api.gitHistOpzij({ dir: werkmap }).catch(() => null)
+  if (!uitslag || !uitslag.ok) {
+    const reden = (uitslag && uitslag.reden) || 'onbekend'
+    const sleutel = ['stashes', 'remote-niet-leeg', 'remote-onbekend'].includes(reden)
+      ? 'git.groot.weigert.' + reden
+      : 'git.groot.weigert.anders'
+    await meldKort(I18N.t('git.groot.weigertTitel'), I18N.t(sleutel, { reden }))
+    return
+  }
+
+  const cmd = GitTools.herbouwCommando({
+    url: uitslag.url || '',
+    bericht: I18N.t('git.groot.commitBericht', { naam: project.name || '' }),
+  })
+  const uit = await executeCmd(project, cmd, 'git-koppelen')
+  if (uit && uit.success) {
+    await beschermMainNaAanmaken(werkmap)
+    appendLine('ok', '✓ ' + I18N.t('git.groot.klaar', { map: uitslag.oud }))
+  }
+  await controleerKoppeling(werkmap, true)
+  await ververesGitStaat(project, true)
+  renderMain()
+}
+
+// Staat deze naam al op het GitHub-account? Elke koppelpoging vraagt het
+// opnieuw op: een antwoord van tien minuten geleden kan al niet meer kloppen —
+// je maakte net zelf een repo aan — en dan zou de app een botsing missen of er
+// juist een verzinnen. Lukt het ophalen niet (geen netwerk, niet ingelogd),
+// dan geeft dit null en gaat de gewone weg door; `gh repo create` botst dan
+// alsnog, en dat vangen we daar op.
+async function zoekGhRepoOpNaam(naam) {
+  let lijst = []
+  try {
+    // Meerdere GitHub-accounts op deze pc: vragen om de repos van het account
+    // dat bij dit CommandDeck-account hoort, niet om die van het actieve.
+    const acc = huidigAccount()
+    const uitslag = await window.api.gitGhRepos({ gebruiker: (acc && acc.ghGebruiker) || '' })
+    if (uitslag && uitslag.ok) lijst = uitslag.repos || []
+  } catch {}
+  return GitTools.zoekRepoOpNaam(lijst, naam)
+}
+
+// Een repository die er al staat aan deze map koppelen. Aanmaken hoeft niet
+// meer; wat er nog moet gebeuren is het adres erbij zetten en pushen — precies
+// wat `gh repo create --push` ook gedaan zou hebben.
+//
+// Geeft 'andere-naam' terug als de gebruiker toch een nieuwe repo wil onder een
+// andere naam; 'gestopt' bij annuleren; anders 'klaar'.
+async function koppelAanBestaandeRepo(project, pad, staat, repo) {
+  const keus = await vraagKeuze({
+    titel: I18N.t('git.link.bestaatTitle'),
+    tekst: I18N.t('git.link.bestaatText', {
+      naam: repo.volledig || repo.naam,
+      zicht: I18N.t(repo.prive ? 'git.link.private' : 'git.link.public'),
+    }),
+    knoppen: [
+      { label: I18N.t('common.cancel'), waarde: '' },
+      { label: I18N.t('git.link.bestaatAnder'), waarde: 'ander' },
+      { label: I18N.t('git.link.bestaatKoppel'), waarde: 'koppel', soort: 'primair' },
+    ],
+  })
+  if (!keus) return 'gestopt'
+  if (keus === 'ander') return 'andere-naam'
+
+  const cmd = GitTools.koppelBestaandeCommando(repo.url, {
+    branch: staat.branch || 'main',
+    standaardBranch: repo.standaardBranch || '',
+    heeftRemote: !!staat.heeftRemote,
+    remote: (staat.heeftRemote && staat.remote) || 'origin',
+  })
+  if (!cmd) {
+    await meldKort(I18N.t('git.link.urlBadTitle'), I18N.t('git.link.urlBadText'))
+    return 'gestopt'
+  }
+
+  pushGeweigerdKlacht = false
+  const uit = await executeCmd(project, cmd, 'git-koppelen')
+  if (uit && uit.success) {
+    await beschermMainNaAanmaken(pad)
+  } else if (pushGeweigerdKlacht) {
+    // Er staat aan de andere kant al iets — meestal een README die bij het
+    // aanmaken meekwam. Samenvoegen is werk in bestanden en een keuze die de
+    // gebruiker moet maken, dus dat doet de app niet zelf; wel vertellen wat
+    // er aan de hand is, want "rejected" alleen zegt dat niet.
+    pushGeweigerdKlacht = false
+    await meldKort(I18N.t('git.link.geweigerdTitle'),
+      I18N.t('git.link.geweigerdText', { naam: repo.volledig || repo.naam }))
+  }
+  await controleerKoppeling(pad, true)
+  await ververesGitStaat(project, true)
+  renderMain()
+  return 'klaar'
 }
 
 // Na een verse GitHub-repo: default branch beschermen (geen force-push, geen

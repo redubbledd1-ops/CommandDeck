@@ -78,6 +78,112 @@ t('url-commando valt terug op main',
   === 'git remote add origin https://github.com/a/b.git && git push -u origin main')
 t('url zonder adres geeft niets', G.koppelCommando(G.KOPPEL_URL, { url: '' }) === null)
 
+// ── de naam staat al op je account ───────────────────────────────────────────
+// Dit is waar het koppelen een week lang op vastliep: `gh repo create` weigert
+// een naam die al bestaat, ook als die repo leeg is en van jou. Aanmaken kan
+// dan niet meer, koppelen wel — dus moet de app die situatie herkennen in
+// plaats van de foutmelding door te geven.
+t('de melding van gh wordt herkend',
+  G.repoNaamBezetFout('GraphQL: Name already exists on this account (createRepository)'))
+t('een gewone foutmelding niet',
+  !G.repoNaamBezetFout('fatal: repository not found'))
+t('en lege uitvoer ook niet', !G.repoNaamBezetFout('') && !G.repoNaamBezetFout(undefined))
+
+const ghLijst = [
+  { naam: 'DayKit', volledig: 'ik/DayKit', url: 'https://github.com/ik/DayKit.git', standaardBranch: '' },
+  { naam: 'CommandDeck', volledig: 'ik/CommandDeck', url: 'https://github.com/ik/CommandDeck.git', standaardBranch: 'main' },
+]
+t('de naam wordt teruggevonden', G.zoekRepoOpNaam(ghLijst, 'DayKit').volledig === 'ik/DayKit')
+t('hoofdletters tellen niet mee', G.zoekRepoOpNaam(ghLijst, 'daykit').volledig === 'ik/DayKit')
+t('een naam die er niet is geeft null', G.zoekRepoOpNaam(ghLijst, 'Iets') === null)
+t('een lege naam ook', G.zoekRepoOpNaam(ghLijst, '') === null || G.zoekRepoOpNaam(ghLijst, '').naam === undefined)
+t('geen lijst geeft null', G.zoekRepoOpNaam(null, 'DayKit') === null)
+
+// Een lege repo heeft nog geen hoofdtak: dan valt er niets te hernoemen en
+// gaat de branch die je hier hebt er gewoon in. Dit is het geval van DayKit.
+t('koppelen aan een lege repo pusht de eigen branch',
+  G.koppelBestaandeCommando('https://github.com/ik/DayKit.git', { branch: 'master' })
+  === 'git remote add origin https://github.com/ik/DayKit.git && git push -u origin master')
+// Heeft de repo wél main als hoofdtak en heet die hier master, dan eerst
+// hernoemen: anders komt er een tweede hoofdtak naast te staan.
+t('master wordt main als de repo main heeft',
+  G.koppelBestaandeCommando('https://github.com/ik/b.git', { branch: 'master', standaardBranch: 'main' })
+  === 'git branch -m master main && git remote add origin https://github.com/ik/b.git && git push -u origin main')
+t('en andersom net zo goed',
+  G.koppelBestaandeCommando('https://github.com/ik/b.git', { branch: 'main', standaardBranch: 'master' })
+  === 'git branch -m main master && git remote add origin https://github.com/ik/b.git && git push -u origin master')
+t('een eigen tak wordt nooit hernoemd',
+  G.koppelBestaandeCommando('https://github.com/ik/b.git', { branch: 'fase2', standaardBranch: 'main' })
+  === 'git remote add origin https://github.com/ik/b.git && git push -u origin fase2')
+t('staat er al een remote, dan set-url in plaats van add',
+  G.koppelBestaandeCommando('https://github.com/ik/b.git', { branch: 'main', heeftRemote: true })
+  === 'git remote set-url origin https://github.com/ik/b.git && git push -u origin main')
+t('gebruiker/repo mag ook', G.koppelBestaandeCommando('ik/b', { branch: 'main' })
+  === 'git remote add origin https://github.com/ik/b.git && git push -u origin main')
+t('zonder adres geen commando', G.koppelBestaandeCommando('', { branch: 'main' }) === null)
+
+// Er stond al iets in die repo: de push komt er niet in. Dat is geen naam-
+// probleem meer en hoort een eigen uitleg te krijgen.
+t('een geweigerde push wordt herkend',
+  G.pushGeweigerdFout(' ! [rejected]        master -> master (fetch first)'))
+t('ook aan de samenvatting van git',
+  G.pushGeweigerdFout('error: failed to push some refs\nhint: Updates were rejected because'))
+t('een gelukte push niet', !G.pushGeweigerdFout('To github.com:ik/b.git\n * [new branch] main -> main'))
+
+// ── te groot voor GitHub ─────────────────────────────────────────────────────
+// Boven de 100 MB weigert GitHub de push met een hook aan hun kant: hier lukte
+// de commit, daar niet. Het bestand weggooien helpt dan niet meer, want het
+// staat in de geschiedenis — en dat is precies wat de melding niet zegt.
+{
+  const uitvoer = "remote: error: File java_pid14760.hprof is 743.42 MB; this exceeds GitHub's file size limit of 100.00 MB"
+  const groot = G.grootBestandFout(uitvoer)
+  t('het bestand komt uit de melding', groot && groot.bestand === 'java_pid14760.hprof')
+  t('en de grootte ook', groot && groot.grootte === '743.42 MB')
+  t('alleen de foutcode is ook genoeg',
+    G.grootBestandFout('remote: error: GH001: Large files detected.') !== null)
+  t('een gewone melding is het niet', G.grootBestandFout('Everything up-to-date') === null)
+  t('lege uitvoer ook niet', G.grootBestandFout('') === null)
+}
+t('een heap dump staat in de standaard-gitignore',
+  G.gitignoreVoor(['gradle']).includes('*.hprof'))
+t('en een aab ook', G.gitignoreVoor(['gradle']).includes('*.aab'))
+
+// ── opnieuw beginnen ─────────────────────────────────────────────────────────
+// De enige uitweg zonder extra gereedschap. core.longpaths hoort er meteen bij:
+// het is een verse repo, en dat is precies waar de eerste commit van een
+// Android-project op Windows anders omvalt.
+t('herbouwen doet init, longpaths, alles erin en pushen',
+  G.herbouwCommando({ url: 'https://github.com/ik/DayKit.git', bericht: 'DayKit eerste versie' })
+  === 'git init -b main && git config core.longpaths true && git add -A && git commit -m "DayKit eerste versie" '
+    + '&& git remote add origin https://github.com/ik/DayKit.git && git push -u origin main')
+t('zonder adres stopt het bij de commit',
+  G.herbouwCommando({}) === 'git init -b main && git config core.longpaths true && git add -A && git commit -m "eerste versie"')
+t('een eigen branchnaam mag',
+  G.herbouwCommando({ branch: 'hoofd' }).startsWith('git init -b hoofd'))
+t('een bericht met aanhalingstekens breekt de regel niet',
+  !G.herbouwCommando({ bericht: 'zeg "hoi"' }).includes('m "zeg "hoi""'))
+
+// Een volgende geheugendump heet anders (het pid zit in de naam), dus alleen
+// die ene naam negeren lost het maar één keer op.
+t('een hprof wordt een patroon', G.negeerRegelVoor('java_pid14760.hprof') === '*.hprof')
+t('een aab ook', G.negeerRegelVoor('app/release/app-release.aab') === '*.aab')
+t('al het andere krijgt zijn eigen pad', G.negeerRegelVoor('video/intro.mp4') === '/video/intro.mp4')
+t('backslashes worden schuine strepen', G.negeerRegelVoor('map\\ding.bin') === '/map/ding.bin')
+t('niets geeft niets', G.negeerRegelVoor('') === '' && G.negeerRegelVoor(null) === '')
+
+// De hoofdtak komt mee uit `gh repo list`, want daarmee weet de app of
+// hernoemen nodig is. Een lege repo heeft er geen, en dat mag geen fout zijn.
+{
+  const met = G.parseGhRepos(JSON.stringify([
+    { nameWithOwner: 'ik/DayKit', name: 'DayKit', url: 'https://github.com/ik/DayKit', defaultBranchRef: { name: 'main' } },
+    { nameWithOwner: 'ik/leeg', name: 'leeg', url: 'https://github.com/ik/leeg', defaultBranchRef: null },
+  ]))
+  t('hoofdtak uit gh repo list', met[0].standaardBranch === 'main')
+  t('een lege repo heeft er geen', met[1].standaardBranch === '')
+  const api = G.parseGhRepos(JSON.stringify([{ full_name: 'ik/b', default_branch: 'master' }]))
+  t('en uit de api-terugval ook', api[0].standaardBranch === 'master')
+}
+
 // ── de leescommando's ────────────────────────────────────────────────────────
 t('status', G.GIT_CMD_MAP['git-status'] === 'git status -sb')
 t('pull is ff-only', G.GIT_CMD_MAP['git-pull'] === 'git pull --ff-only')
@@ -2560,6 +2666,50 @@ t('een gewone regel niet', G.uncWaarschuwing('alles ging goed') === false)
   // Geen popd in dit traject — die les is al duur betaald in fase 2.
   t('geen popd in de bare-flow',
     !/popd/.test((ren4.match(/async function initBareOpNetwerk[\s\S]*?\n\}/) || [''])[0]))
+}
+
+{
+  const ren5 = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer.js'), 'utf8')
+  t('koppelen kijkt eerst of de naam al bestaat',
+    /zoekGhRepoOpNaam\(repoNaam\)/.test(ren5))
+  t('en biedt dan koppelen aan in plaats van aanmaken',
+    /koppelAanBestaandeRepo\(project, pad, staat, albestaand\)/.test(ren5))
+  t('de melding van gh wordt ook achteraf nog opgevangen',
+    /GitTools\.repoNaamBezetFout\(text\)/.test(ren5) && /naamBezetKlacht/.test(ren5))
+  t('een geweigerde push krijgt uitleg',
+    /GitTools\.pushGeweigerdFout\(text\)/.test(ren5) && /git\.link\.geweigerdText/.test(ren5))
+  t('een te groot bestand krijgt uitleg, waar het commando ook vandaan komt',
+    /GitTools\.grootBestandFout\(text\)/.test(ren5) && /git\.groot\.tekst/.test(ren5))
+  t('en een knop om opnieuw te beginnen',
+    /herbouwGeschiedenis\(project, werkmap, groot\)/.test(ren5)
+    && /GitTools\.herbouwCommando/.test(ren5))
+  t('het bestand gaat eerst in .gitignore, anders staat het zo weer klaar',
+    /GitTools\.negeerRegelVoor/.test(ren5)
+    && ren5.indexOf('GitTools.negeerRegelVoor') < ren5.indexOf('window.api.gitHistOpzij'))
+
+  const hoofd5 = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8')
+  const opzij = (hoofd5.match(/ipcMain\.handle\('git:histOpzij'[\s\S]*?\n\}\)/) || [''])[0]
+  t('de hoofdkant zet .git opzij en gooit hem niet weg',
+    /fs\.renameSync\(gitMap, doel\)/.test(opzij) && !/rmSync|rmdirSync|unlinkSync/.test(opzij))
+  t('en weigert bij stashes', /reden: 'stashes'/.test(opzij))
+  t('en als er al iets op de remote staat', /reden: 'remote-niet-leeg'/.test(opzij))
+  t('en als dat niet na te gaan is', /reden: 'remote-onbekend'/.test(opzij))
+  t('de map moet van dit account zijn', /padToegestaan\(dir\)/.test(opzij))
+  t('de renderer kan erbij via preload',
+    /git:histOpzij/.test(require('fs').readFileSync(require('path').join(__dirname, '..', 'preload.js'), 'utf8')))
+
+  const nl5 = JSON.parse(require('fs').readFileSync(require('path').join(__dirname, '..', 'locales', 'nl.json'), 'utf8'))
+  const en5 = JSON.parse(require('fs').readFileSync(require('path').join(__dirname, '..', 'locales', 'en.json'), 'utf8'))
+  for (const sleutel of ['git.groot.titel', 'git.groot.tekst', 'git.groot.tekstKaal',
+                         'git.groot.opnieuw', 'git.groot.bevestigTitel', 'git.groot.bevestigTekst',
+                         'git.groot.geenRegel', 'git.groot.negeerKop', 'git.groot.commitBericht',
+                         'git.groot.klaar', 'git.groot.weigertTitel', 'git.groot.weigert.stashes',
+                         'git.groot.weigert.remote-niet-leeg', 'git.groot.weigert.remote-onbekend',
+                         'git.groot.weigert.anders', 'git.link.checkBezig', 'git.link.bestaatTitle', 'git.link.bestaatText',
+                         'git.link.bestaatKoppel', 'git.link.bestaatAnder', 'git.link.bezetTitle',
+                         'git.link.bezetText', 'git.link.geweigerdTitle', 'git.link.geweigerdText']) {
+    t('koppel-tekst ' + sleutel + ' bestaat in nl en en', !!nl5[sleutel] && !!en5[sleutel])
+  }
 }
 
 console.log(ok ? '\nALLE GIT-TESTS OK' : '\nER ZIJN GIT-TESTS GEZAKT')
