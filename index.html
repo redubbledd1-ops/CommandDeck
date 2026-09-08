@@ -158,6 +158,26 @@
     <label class="field-label" data-i18n="modal.project.nameLabel">naam</label>
     <input class="field" id="f-name" placeholder="dd_crypto" />
     <label class="field-label" data-i18n="modal.project.iconLabel">icoon</label>
+    <!-- Heeft de projectmap een eigen app-icoon, dan is dat de standaardkeuze
+         en staat de emoji-rij eronder als overschrijving. Zonder eigen icoon
+         blijft alleen de emoji-rij over, precies zoals het was. -->
+    <div class="icoon-keuze" id="f-icoon-keuze" hidden>
+      <button type="button" class="icoon-optie" id="f-icoon-auto">
+        <img class="icoon-optie-img" id="f-icoon-auto-img" alt="" draggable="false" />
+        <span class="icoon-optie-tekst">
+          <span class="icoon-optie-titel" data-i18n="modal.project.iconAuto">eigen icoon van het project</span>
+          <span class="icoon-optie-sub" id="f-icoon-auto-sub"></span>
+        </span>
+      </button>
+      <button type="button" class="icoon-optie" id="f-icoon-emoji">
+        <span class="icoon-optie-emoji" id="f-icoon-emoji-vb">📱</span>
+        <span class="icoon-optie-tekst">
+          <span class="icoon-optie-titel" data-i18n="modal.project.iconEmoji">emoji gebruiken</span>
+          <span class="icoon-optie-sub" data-i18n="modal.project.iconEmojiSub">overschrijft het gevonden icoon</span>
+        </span>
+      </button>
+    </div>
+    <p class="icoon-hint" id="f-icoon-hint" hidden></p>
     <div class="emoji-row" id="emoji-row"></div>
     <label class="field-label"><span data-i18n="modal.project.deviceLabel">android device id</span> <span class="opt" data-i18n="common.optional">(optioneel)</span></label>
     <input class="field mono" id="f-device" placeholder="437d872e" />

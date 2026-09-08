@@ -15,6 +15,7 @@ const { EDITORS } = require('./editor-catalog')
 const GitTools = require('./git-tools')
 const WebTools = require('./web-tools')
 const NoteTools = require('./note-tools')
+const ProjectIcoon = require('./project-icoon')
 const Accounts = require('./accounts')
 const { maakAi } = require('./ai-runtime')
 const { SUPPORTED_LANGUAGES } = require('./locales/languages')
@@ -4200,6 +4201,60 @@ function checkFlutterOpPad() {
     })
   })
 }
+
+// ── Het eigen icoon van een project ──────────────────────────────────────────
+// De zijbalk wil het launcher-icoon van een project tonen in plaats van een
+// emoji, maar alleen als het project er echt één heeft. Om het sjabloonicoon
+// van Flutter eruit te kunnen filteren wil project-icoon.js weten waar de SDK
+// staat: daar liggen de sjabloonplaatjes van precies de Flutter-versie die
+// hier draait, en die zijn betrouwbaarder dan een vaste lijst.
+//
+// `where flutter` wijst naar bin/flutter.bat, dus de wortel ligt twee mappen
+// hoger. Staat Flutter niet op het pad, dan valt de herkenning terug op de
+// hashes in project-icoon.js zelf.
+let flutterWortelWaarde = null
+let flutterWortelGedaan = false
+function zoekFlutterWortel() {
+  return new Promise((resolve) => {
+    if (flutterWortelGedaan) { resolve(flutterWortelWaarde); return }
+    let klaar = false
+    const af = () => { if (!klaar) { klaar = true; flutterWortelGedaan = true; resolve(flutterWortelWaarde) } }
+    let proc
+    try { proc = spawn('where flutter', [], { windowsHide: true, shell: true }) }
+    catch { af(); return }
+    let out = ''
+    proc.stdout.on('data', d => { out += d.toString() })
+    proc.on('error', af)
+    proc.on('close', () => {
+      const regel = out.split(/\r?\n/).map(r => r.trim())
+        .find(r => /[\\/]flutter(\.bat|\.exe)?$/i.test(r))
+      if (regel) {
+        const wortel = path.dirname(path.dirname(regel))
+        try {
+          if (fs.existsSync(path.join(wortel, 'packages', 'flutter_tools'))) flutterWortelWaarde = wortel
+        } catch { /* niet leesbaar: dan maar zonder */ }
+      }
+      af()
+    })
+    // Niet eindeloos wachten op een shell die hangt; zonder wortel werkt het ook.
+    setTimeout(af, 5000)
+  })
+}
+
+ipcMain.handle('projicoon:zoek', async (_, pad) => {
+  try {
+    const flutterWortel = await zoekFlutterWortel()
+    return ProjectIcoon.zoekProjectIcoon(pad, { flutterWortel })
+  } catch (e) {
+    return { ok: false, reden: 'fout', fout: String(e && e.message || e) }
+  }
+})
+
+// Na een build of een nieuw icoon opnieuw willen kijken zonder te herstarten.
+ipcMain.handle('projicoon:vergeet', (_, pad) => {
+  ProjectIcoon.leegCache(pad || null)
+  return true
+})
 
 function runCommandOnce({ projectId, cmd, cwd, echoCmd = true, shell } = {}) {
   return new Promise(async (resolve) => {

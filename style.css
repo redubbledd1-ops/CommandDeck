@@ -1163,7 +1163,37 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
 .field.mono { font-family: var(--mono); }
 .field:focus { border-color: var(--accent); }
 
+/* Het eigen icoon van een project. Het staat in vakjes die hun maat uit
+   font-size halen (.proj-icon, .proj-header-icon, .settings-proj-icon), dus
+   meten we in em: dan blijft het plaatje even groot als de emoji die er
+   voorheen stond, ook als die font-size later verandert. */
+.proj-icoon-img {
+  display: inline-block; vertical-align: middle;
+  width: 1.15em; height: 1.15em; object-fit: contain;
+  border-radius: 22%; flex-shrink: 0;
+}
+
+/* De iconenkeuze in het projectvenster: gevonden icoon of toch een emoji. */
+.icoon-keuze { display: flex; gap: 8px; margin-top: 5px; }
+.icoon-optie {
+  flex: 1; display: flex; align-items: center; gap: 9px; min-width: 0;
+  padding: 8px 10px; border-radius: 8px; cursor: pointer; text-align: left;
+  border: 1px solid var(--border2); background: var(--s2); color: inherit;
+  font: inherit; transition: all 0.1s;
+}
+.icoon-optie:hover { border-color: var(--accent); }
+.icoon-optie.sel { border-color: var(--accent); background: var(--accent-d); }
+.icoon-optie-img { width: 28px; height: 28px; object-fit: contain; border-radius: 6px; flex-shrink: 0; }
+.icoon-optie-emoji { font-size: 22px; line-height: 1; width: 28px; text-align: center; flex-shrink: 0; }
+.icoon-optie-tekst { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.icoon-optie-titel { font-size: 12px; }
+.icoon-optie-sub { font-size: 11px; opacity: 0.6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.icoon-hint { font-size: 11px; opacity: 0.6; margin: 6px 0 0; }
+
 .emoji-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+/* Wordt het gevonden icoon gebruikt, dan is de emoji-rij er nog wel maar doet
+   hij even niets. Doffer tonen scheelt uitleg. */
+.emoji-row.gedimd { opacity: 0.45; }
 .emoji-opt { font-size: 18px; padding: 4px 8px; border-radius: 6px; cursor: pointer; border: 1px solid transparent; transition: all 0.1s; line-height: 1; }
 .emoji-opt:hover { border-color: var(--border2); background: var(--s2); }
 .emoji-opt.sel { border-color: var(--accent); background: var(--accent-d); }

@@ -162,6 +162,10 @@ contextBridge.exposeInMainWorld('api', {
   saveAs:        (o)     => ipcRenderer.invoke('dialog:saveAs', o),
   pickIcon:      (cwd)   => ipcRenderer.invoke('dialog:pickIcon', cwd),
 
+  // Het eigen icoon van een projectmap (launcher-icoon, favicon, app_icon).
+  zoekProjectIcoon:   (pad) => ipcRenderer.invoke('projicoon:zoek', pad),
+  vergeetProjectIcoon:(pad) => ipcRenderer.invoke('projicoon:vergeet', pad),
+
   noteDefaultDir: ()     => ipcRenderer.invoke('note:defaultDir'),
   listNotes:     (cwd)   => ipcRenderer.invoke('note:list', cwd),
   listNotePaths: (paden) => ipcRenderer.invoke('note:listPaths', paden),

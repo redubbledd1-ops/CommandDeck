@@ -35,6 +35,9 @@ const projects = [{ id: 'p1', name: 'dd_crypto', icon: '💰', device: 'abc',
 
 const executed = []
 let pickedFolder = 'C:\\gekozen'
+// Wat main over het eigen icoon van een projectmap teruggeeft. Standaard
+// niets, zodat de rest van de tests de emoji blijft zien.
+let projIcoonAntwoorden = {}
 let uitgepakt = []
 let metGeopend = []
 let getoond = []
@@ -303,6 +306,8 @@ const api = {
   pickRunFiles: async () => pickedRunFiles,
   saveAs: async ({ defaultPath }) => saveAsPath === undefined ? defaultPath : saveAsPath,
   pickIcon: async () => pickedIcon,
+  zoekProjectIcoon: async (pad) => projIcoonAntwoorden[pad] || { ok: false, reden: 'geen' },
+  vergeetProjectIcoon: async () => true,
   makeExe: async (o) => { madeExes.push(o); return exeFail ? { ok: false, reason: 'nooutput' } : { ok: true, path: o.exePath, iconCount: o.iconPath ? 4 : 0, cacheVervers: !!o.iconPath } },
   testBat: async ({ dir, name, content }) => { testRuns.push({ dir, name, content }); return { ok: true, path: (dir || 'C:\\tmp') + '\\~proef-x.bat' } },
   batExists: async (p) => batFiles[p] !== undefined,
@@ -445,6 +450,7 @@ window.eval(fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8')
   + '\n  verfLezer,'
   + '\n  gekoppeldeRepoAdressen, zetBewerkt: (id) => { editingId = id },'
   + '\n  editorsZelfde,'
+  + '\n  vergeetProjIcoon, projIcoonAuto,'
   + '\n  splitSlotIds: () => (werkSplit.slots || []).map(s => s.projectId) };')
 startVraagAutomaat()
 const W = window
@@ -651,6 +657,48 @@ function startVraagAutomaat() {
   $('#modal-proj-cancel')?.click(); await tick()
   $$('.proj-edit')[0].click(); await tick(); await tick()
   $('#modal-proj-cancel').click(); await tick()
+
+  // ── Het eigen icoon van een project ───────────────────────────────────────
+  // Heeft de projectmap een echt app-icoon, dan hoort dat in de zijbalk te
+  // staan in plaats van een emoji: het is hetzelfde plaatje dat op je telefoon
+  // staat. Of een icoon "echt eigen" is beslist main (die filtert het
+  // Flutter-sjabloon eruit); hier gaat het erom wat de renderer met dat
+  // antwoord doet, en dat je het kunt overschrijven.
+  projIcoonAntwoorden['C:\\a'] = {
+    ok: true, soort: 'android', bron: 'C:\\a\\ic_launcher.png',
+    dataUrl: 'data:image/png;base64,AAAA',
+  }
+  await W.__test.vergeetProjIcoon('C:\\a')
+  $$('.proj-item')[0].click(); await tick(); await tick()
+  check('een eigen projecticoon komt in de zijbalk te staan',
+    $('.proj-icon img.proj-icoon-img')?.getAttribute('src') === 'data:image/png;base64,AAAA')
+  check('en in de projectkop ook', !!$('.proj-header-icon img.proj-icoon-img'))
+
+  $$('.proj-edit')[0].click(); await tick(); await tick()
+  check('het projectvenster laat de keuze tussen icoon en emoji zien',
+    $('#f-icoon-keuze').hidden === false)
+  check('met het gevonden icoon voorgeselecteerd',
+    $('#f-icoon-auto').classList.contains('sel') && $('#emoji-row').classList.contains('gedimd'))
+  const emojiKeuze = $$('#emoji-row .emoji-opt')[3] || $$('#emoji-row .emoji-opt')[0]
+  emojiKeuze.click(); await tick()
+  check('een emoji aanklikken schakelt over naar overschrijven',
+    $('#f-icoon-emoji').classList.contains('sel') && !$('#emoji-row').classList.contains('gedimd'))
+  $('#modal-proj-save').click(); await tick(); await tick()
+  check('de overschrijving wordt bij het project bewaard', projects[0].iconMode === 'emoji')
+  check('en de zijbalk toont weer de emoji', !$('.proj-icon img.proj-icoon-img'))
+
+  $$('.proj-edit')[0].click(); await tick(); await tick()
+  check('bij opnieuw bewerken staat de emoji voorgeselecteerd',
+    $('#f-icoon-emoji').classList.contains('sel'))
+  $('#f-icoon-auto').click(); await tick()
+  $('#modal-proj-save').click(); await tick(); await tick()
+  check('en je kunt terug naar het gevonden icoon', projects[0].iconMode === 'auto')
+  check('dat dan ook weer in de zijbalk staat', !!$('.proj-icon img.proj-icoon-img'))
+
+  // Terug naar de emoji-wereld, zodat de tests hierna zien wat ze verwachten.
+  projIcoonAntwoorden = {}
+  await W.__test.vergeetProjIcoon(null)
+  $$('.proj-item')[0].click(); await tick(); await tick()
 
   // ── CMD-sectie ─────────────────────────────────────────────────────────────
   $('#btn-nav-cmd').click(); await tick()
