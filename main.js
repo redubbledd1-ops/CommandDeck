@@ -77,12 +77,25 @@ ipcMain.handle('i18n:load',      (_, lang) => loadLocaleFile(lang) || loadLocale
 let win
 let isQuittingForUpdate = false
 function createWindow() {
+  const win32 = process.platform === 'win32'
   win = new BrowserWindow({
     // Kleiner mag: de zijbalk klapt in zodra er te weinig werkvlak overblijft
     // en de balken worden iconen, dus ook op deze maat is alles bereikbaar.
     // Let op: dit geldt pas na een herstart van de app.
     width: 1050, height: 680, minWidth: 520, minHeight: 420,
-    frame: false, backgroundColor: '#0a0a0a',
+    // Op Windows: native sleepstrook en min/max/sluiten. Bij frame:false hangt
+    // slepen van de renderer af, en die staat stil zolang renderer.js parseert.
+    frame: !win32,
+    titleBarStyle: 'hidden',
+    ...(win32 ? {
+      titleBarOverlay: {
+        color: '#111111',
+        symbolColor: '#c8c8c8',
+        height: 36,
+      },
+      autoHideMenuBar: true,
+    } : {}),
+    backgroundColor: '#0a0a0a',
     icon: path.join(__dirname, 'assets', 'icon.ico'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -93,6 +106,10 @@ function createWindow() {
       webviewTag: true,
     },
   })
+  try {
+    const { Menu } = require('electron')
+    if (Menu && typeof Menu.setApplicationMenu === 'function') Menu.setApplicationMenu(null)
+  } catch {}
   win.loadFile('index.html')
 
   // Chromium LNA/permissions-policy mag loopback stil blokkeren. Deze app is

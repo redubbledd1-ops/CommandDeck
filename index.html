@@ -4,9 +4,8 @@
 <meta charset="UTF-8" />
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; frame-src 'self' http://127.0.0.1 http://localhost; child-src 'self' http://127.0.0.1 http://localhost; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:;" />
 <title>CommandDeck</title>
-<link rel="stylesheet" href="assets/tabler-icons/tabler-icons.min.css" />
-<link rel="stylesheet" href="node_modules/@xterm/xterm/css/xterm.css" />
 <link rel="stylesheet" href="style.css" />
+<link rel="stylesheet" href="assets/tabler-icons/tabler-icons.min.css" media="print" id="tabler-icons-css" />
 </head>
 <body>
 
@@ -23,6 +22,7 @@
     <button class="tbtn danger" id="btn-close"><i class="ti ti-x"></i></button>
   </div>
 </div>
+<script src="boot.js"></script>
 
 <div class="layout">
 
@@ -459,19 +459,17 @@
   <button id="cmd-status-sluit" data-i18n-title="common.close" title="sluiten"><i class="ti ti-x"></i></button>
 </div>
 
-<!-- De echte terminal. Lukt het laden niet, dan valt de app terug op een
-     eigen consolevenster; renderer.js controleert daarop. -->
-<script src="node_modules/@xterm/xterm/lib/xterm.js"></script>
-<script src="node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
-<script src="i18n.js"></script>
-<script src="git-tools.js"></script>
-<script src="web-tools.js"></script>
-<script src="note-tools.js"></script>
-<script src="web-knoppen.js"></script>
-<script src="lezer-aanvul.js"></script>
-<script src="code-kleuren.js"></script>
-<script src="knoppenrij.js"></script>
-<script src="accounts.js"></script>
-<script src="renderer.js"></script>
+<!-- App-scripts ná de eerste paint (defer). xterm komt pas bij de eerste
+     echte terminal, anders parseert Chromium ~500 kB voordat je kunt slepen. -->
+<script src="i18n.js" defer></script>
+<script src="git-tools.js" defer></script>
+<script src="web-tools.js" defer></script>
+<script src="note-tools.js" defer></script>
+<script src="web-knoppen.js" defer></script>
+<script src="lezer-aanvul.js" defer></script>
+<script src="code-kleuren.js" defer></script>
+<script src="knoppenrij.js" defer></script>
+<script src="accounts.js" defer></script>
+<script src="renderer.js" defer></script>
 </body>
 </html>

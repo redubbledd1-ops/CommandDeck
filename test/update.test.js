@@ -338,6 +338,22 @@ Module._load=orig
   check('de knop staat nog in de titelbalk', /id="btn-update"/.test(htmlBron))
   check('en wordt niet meer alleen in dev getoond',
     !/if \(info && info\.packaged === false\) updateBtn\.hidden = false/.test(renBron))
+  check('Windows-titelbalk sleep niet via de renderer',
+    /titleBarOverlay:/.test(mainBron)
+    && /titleBarStyle: 'hidden'/.test(mainBron)
+    && /frame: !win32/.test(mainBron))
+  check('min/max/sluiten staan al in boot.js',
+    /src="boot.js"/.test(htmlBron)
+    && /btn-min/.test(fs.readFileSync(path.join(REAL, 'boot.js'), 'utf8')))
+  check('xterm zit niet op het kritieke pad',
+    !/script src="node_modules\/@xterm/.test(htmlBron)
+    && /function laadXterm\(/.test(renBron)
+    && /async function ptyMogelijk\(/.test(renBron)
+    && /await laadXterm\(\)/.test(renBron))
+  check('iconen-css blokkeert de eerste paint niet',
+    /tabler-icons\.min\.css" media="print"/.test(htmlBron)
+    && htmlBron.indexOf('href="style.css"') < htmlBron.indexOf('tabler-icons.min.css')
+    && /tabler-icons-css/.test(fs.readFileSync(path.join(REAL, 'boot.js'), 'utf8')))
 
   console.log(ok?'\nALLE TESTS GESLAAGD':'\nER ZIJN TESTS GEFAALD')
   process.exit(ok?0:1)

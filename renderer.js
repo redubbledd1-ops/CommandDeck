@@ -14910,7 +14910,51 @@ const ptySessies = new Map()   // termId -> { term, fit, houder, naam, cmd, acti
 let ptyKan = null              // null = nog niet nagevraagd
 let ptyReden = ''
 
+function laadVensterScript(src) {
+  return new Promise((resolve) => {
+    if (document.querySelector(`script[src="${src}"]`)) { resolve(true); return }
+    const s = document.createElement('script')
+    s.src = src
+    let klaar = false
+    const eind = (ok) => { if (klaar) return; klaar = true; resolve(!!ok) }
+    s.onload = () => eind(true)
+    s.onerror = () => eind(false)
+    setTimeout(() => eind(false), 4000)
+    document.head.appendChild(s)
+  })
+}
+
+function kanScriptsBijladen() {
+  try {
+    const p = String((typeof location !== 'undefined' && location.protocol) || '')
+    return p === 'file:' || p === 'app:'
+  } catch { return false }
+}
+
+let xtermLaden = null
+function laadXterm() {
+  if (typeof window.Terminal === 'function') return Promise.resolve(true)
+  if (!kanScriptsBijladen()) return Promise.resolve(false)
+  if (xtermLaden) return xtermLaden
+  xtermLaden = (async () => {
+    const css = 'node_modules/@xterm/xterm/css/xterm.css'
+    if (!document.querySelector(`link[href="${css}"]`)) {
+      const l = document.createElement('link')
+      l.rel = 'stylesheet'
+      l.href = css
+      document.head.appendChild(l)
+    }
+    await laadVensterScript('node_modules/@xterm/xterm/lib/xterm.js')
+    await laadVensterScript('node_modules/@xterm/addon-fit/lib/addon-fit.js')
+    return typeof window.Terminal === 'function'
+  })()
+  return xtermLaden
+}
+
 async function ptyMogelijk() {
+  if (typeof window.Terminal !== 'function') {
+    try { await laadXterm() } catch {}
+  }
   if (typeof window.Terminal !== 'function') return false
   if (ptyKan === null) {
     try {

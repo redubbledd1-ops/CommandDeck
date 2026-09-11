@@ -4,6 +4,8 @@ contextBridge.exposeInMainWorld('api', {
   minimize:      ()      => ipcRenderer.send('win-minimize'),
   maximize:      ()      => ipcRenderer.send('win-maximize'),
   close:         ()      => ipcRenderer.send('win-close'),
+  // Windows: native sleepstrook + caption-knoppen, onafhankelijk van renderer.js
+  nativeTitelbalk: process.platform === 'win32',
 
   loadProjects:  ()      => ipcRenderer.invoke('projects:load'),
   saveProjects:  (p)     => ipcRenderer.invoke('projects:save', p),
