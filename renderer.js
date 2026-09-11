@@ -16,8 +16,9 @@ let pendingLocs = []
 let cloneNaamOvergenomen = false
 let cloneNaamBron = ''            // 'git' | 'map' | '' — git wint van de mapnaam
 let settingsSubPage      = null   // null | 'talen' — sub-pagina binnen Instellingen
-let LANGUAGES            = []     // opgehaald bij opstart, zie i18n.js/main.js locales/languages.js
+let LANGUAGES            = []     // pas als je Instellingen → talen opent
 let detectedLanguageCode = null   // Windows-taal, voor bovenaan pinnen in de Talen-lijst
+let talenLaden           = null   // in-flight Promise van zorgVoorTalen()
 let talenZoekterm        = ''
 let pendingCmdVisibility = {}
 let pendingSecties = {}      // hele secties aan/uit voor het project dat je bewerkt
@@ -803,9 +804,16 @@ async function openProjectStart(p) {
 // Bij het opstarten en na een update: projecten die nog nooit gekeken zijn,
 // alsnog nakijken. Zo hoef je het bij een verse installatie niet zelf te doen.
 async function keurProjectenNa() {
+  const open = projects.find(x => x.id === activeId)
+  const rest = projects.filter(p => !open || p.id !== open.id)
+  const volgorde = open ? [open, ...rest] : projects.slice()
   let veranderd = false
-  for (const p of projects) {
-    if (await bepaalToolsVoorProject(p)) veranderd = true
+  for (let i = 0; i < volgorde.length; i++) {
+    if (await bepaalToolsVoorProject(volgorde[i])) {
+      veranderd = true
+      if (i === 0) vraagProjectHertekenen()
+    }
+    if (i < volgorde.length - 1) await wanneerIdle()
   }
   if (veranderd) vraagProjectHertekenen()
 }
@@ -932,10 +940,18 @@ async function ververesGitStaat(p, forceer = false) {
 // ronde 5 alleen iets over het project dat je toevallig als laatste bekeek.
 // Eén voor één, niet allemaal tegelijk: bij tien projecten zou dat tien
 // git-processen naast elkaar zijn.
+function wanneerIdle(timeout = 80) {
+  if (typeof requestIdleCallback === 'function') {
+    return new Promise(r => requestIdleCallback(() => r(), { timeout }))
+  }
+  return new Promise(r => setTimeout(r, 0))
+}
+
 async function ververesAlleGitStaten(forceer = false) {
   meldGitPadenAanMain()
-  for (const p of projects) {
+  for (const p of [...projects]) {
     for (const loc of projectLocaties(p)) await ververesGitPad(loc.pad, forceer)
+    await wanneerIdle()
   }
   meldGitProjectenAanMain()
   // Teruggeven zodat een aanroeper die de netwerkcontrole nodig heeft (de
@@ -987,6 +1003,7 @@ async function controleerAlleKoppelingen() {
         if (!staat || !staat.isRepo || !staat.heeftRemote) continue
         if (gitRemoteGedaan.has(loc.pad)) continue
         await controleerKoppeling(loc.pad)
+        await wanneerIdle()
       }
     }
   } finally {
@@ -1564,9 +1581,10 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
   if (!history || !Array.isArray(history.recent)) history = { entries: [], recent: [] }
 
-  // Accounts ophalen vóór de rest: welk account actief is bepaalt welke
-  // projecten en git-instellingen je ziet.
-  await laadAccounts()
+  // Locale en accounts tegelijk: beide zijn IPC, geen van beide mag de ander
+  // tegenhouden. Event-hooks kunnen alvast, de eerste tekening wacht op beide.
+  const i18nP = I18N.init(settings.language)
+  const accP = laadAccounts()
 
   if (migreerStandaardEditors() || ontdubbelCustomEditors() || normaliseerEditorKleuren()
       || migreerSnelRijen()) window.api.saveSettings(settings)
@@ -1577,22 +1595,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   pasCodeKleurenToe()
 
-  await I18N.init(settings.language)
-  // Pas na I18N: de Flutter-map krijgt een naam uit de taalbestanden.
-  migreerAlleProjecten()
-
-  // Wat je de vorige keer aan had staan blijft aan. Het logboek zelf leeft in
-  // het hoofdproces, dus dat moet het weten voordat er iets te loggen valt.
-  if (settings.logboek) logKeuze = { ...logKeuze, ...settings.logboek }
-  try { window.api.logZet(logKeuze) } catch {}
-  try {
-    [LANGUAGES, detectedLanguageCode] = await Promise.all([
-      window.api.listLanguages(),
-      window.api.detectLanguage(),
-    ])
-  } catch { LANGUAGES = []; detectedLanguageCode = null }
-
-  await setupTitlebar()
+  setupTitlebar()
   setupModalEvents()
   setupGlobalTypeCapture()
   setupAiKlikbaar()
@@ -1608,6 +1611,16 @@ window.addEventListener('DOMContentLoaded', async () => {
   wireWerkSplit()
   volgKrappeVlakken()
   wisGemengdeProjectSplits()
+
+  await Promise.all([i18nP, accP])
+  // Pas na I18N: de Flutter-map krijgt een naam uit de taalbestanden.
+  migreerAlleProjecten()
+
+  // Wat je de vorige keer aan had staan blijft aan. Het logboek zelf leeft in
+  // het hoofdproces, dus dat moet het weten voordat er iets te loggen valt.
+  if (settings.logboek) logKeuze = { ...logKeuze, ...settings.logboek }
+  try { window.api.logZet(logKeuze) } catch {}
+
   restoreLastView()
   herstelWerkSplitNaStart()
   bedraadZijbalkBreedte()
@@ -1649,7 +1662,10 @@ window.addEventListener('DOMContentLoaded', async () => {
     // leeg" en de default-branch, en daar hangt de oude-kopie-herkenning van af.
     try { await ververesAlleGitStaten(true) } catch {}
     // Nog een ronde git:info zodat de zojuist opgehaalde uitslag in de staat zit.
-    for (const p of projects) { try { await ververesGitStaat(p, true) } catch {} }
+    for (const p of [...projects]) {
+      try { await ververesGitStaat(p, true) } catch {}
+      await wanneerIdle()
+    }
     meldOnafgemaakteKoppelingen()
     // Tweede kans op de pull-melding: de eerste fetch (t+800) faalt vaak omdat
     // WiFi/VPN nog niet klaar is, en kan hier nóg lopen (timeout 15s). Wacht
@@ -1750,24 +1766,13 @@ window.addEventListener('DOMContentLoaded', async () => {
 })
 
 // ── Titlebar ──────────────────────────────────────────────────────────────────
-async function setupTitlebar() {
+function setupTitlebar() {
   document.getElementById('btn-min').onclick   = () => window.api.minimize()
   document.getElementById('btn-max').onclick   = () => window.api.maximize()
   document.getElementById('btn-close').onclick = () => window.api.close()
 
-  // De knop staat er zodra er een bronmap is om vanaf te bouwen — of je nu
-  // vanuit de broncode draait of vanuit een gebouwde exe die naast zijn bron
-  // staat. Eerder stond hier `packaged === false`, en dat klopte niet: de
-  // update werkt juist óók vanuit een portable of uitgepakte build, en dat is
-  // waar hij gebruikt wordt. Dat het al die tijd goed ging kwam doordat het
-  // `hidden`-attribuut niets deed zolang `.tbtn` zelf een display zette; toen
-  // dat werd rechtgezet viel de knop weg. Dus staat de voorwaarde nu goed.
+  // Klikken mag niet wachten tot runtimeInfo (findSourceDir op schijf) klaar is.
   const updateBtn = document.getElementById('btn-update')
-  try {
-    const info = await window.api.runtimeInfo?.()
-    if (info && (info.packaged === false || info.bronMap)) updateBtn.hidden = false
-  } catch {}
-
   updateBtn.onclick = async () => {
     if (!await vraagJaNee(I18N.t('update.confirmTitle'),
       I18N.t('update.confirmText'),
@@ -1804,6 +1809,21 @@ async function setupTitlebar() {
     }
     showToast(I18N.t('update.startedToast'))
   }
+  void toonUpdateKnop(updateBtn)
+}
+
+// De knop staat er zodra er een bronmap is om vanaf te bouwen — of je nu
+// vanuit de broncode draait of vanuit een gebouwde exe die naast zijn bron
+// staat. Eerder stond hier `packaged === false`, en dat klopte niet: de
+// update werkt juist óók vanuit een portable of uitgepakte build, en dat is
+// waar hij gebruikt wordt. Dat het al die tijd goed ging kwam doordat het
+// `hidden`-attribuut niets deed zolang `.tbtn` zelf een display zette; toen
+// dat werd rechtgezet viel de knop weg. Dus staat de voorwaarde nu goed.
+async function toonUpdateKnop(updateBtn) {
+  try {
+    const info = await window.api.runtimeInfo?.()
+    if (info && (info.packaged === false || info.bronMap)) updateBtn.hidden = false
+  } catch {}
 }
 
 // ── Navigatiegeschiedenis ─────────────────────────────────────────────────────
@@ -12430,6 +12450,9 @@ function bedraadCodeKleuren() {
 function renderSettingsPanel() {
   const panel = document.getElementById('settings-panel')
   if (settingsSubPage === 'talen') { renderTalenSubPage(panel); return }
+  void zorgVoorTalen().then((vers) => {
+    if (vers && view === 'settings' && settingsSubPage !== 'talen') renderSettingsPanel()
+  })
   const hist  = settings.history || {}
   const openen = { ...WebTools.PROJECT_OPEN_STANDAARD, ...(settings.projectOpenen || {}) }
 
@@ -13085,31 +13108,56 @@ function bedraadAiSettings() {
 }
 
 function taalNaam(code) {
-  return LANGUAGES.find(l => l.code === code)?.nativeName || code || '—'
+  const l = LANGUAGES.find(x => x.code === code)
+  return (l && (l.nativeName || l.label)) || code || '—'
+}
+
+// De volledige talenlijst is alleen nodig in Instellingen. Bij opstarten
+// volstaan de Nederlandse teksten in de HTML tot I18N.init klaar is.
+function zorgVoorTalen() {
+  if (LANGUAGES.length) return Promise.resolve(false)
+  if (talenLaden) return talenLaden
+  talenLaden = (async () => {
+    try {
+      const [lijst, code] = await Promise.all([
+        window.api.listLanguages(),
+        window.api.detectLanguage(),
+      ])
+      if (Array.isArray(lijst) && lijst.length) LANGUAGES = lijst
+      if (code) detectedLanguageCode = code
+    } catch {}
+    return true
+  })()
+  return talenLaden
 }
 
 // Talen-subpagina: zoekbalk boven, Windows-taal als eerste gepinde item,
 // daarna de rest van de lijst (gefilterd op eigen naam, Engelse naam of code).
 function renderTalenSubPage(panel) {
+  void zorgVoorTalen().then((vers) => {
+    if (vers && view === 'settings' && settingsSubPage === 'talen') renderSettingsPanel()
+  })
   const huidige  = settings.language
   const term     = talenZoekterm.trim().toLowerCase()
+  const naam = (l) => l.nativeName || l.label || l.code || ''
+  const eng  = (l) => l.englishName || l.label || ''
   const matcht   = (l) => !term
-    || l.nativeName.toLowerCase().includes(term)
-    || l.englishName.toLowerCase().includes(term)
-    || l.code.toLowerCase().includes(term)
+    || naam(l).toLowerCase().includes(term)
+    || eng(l).toLowerCase().includes(term)
+    || String(l.code || '').toLowerCase().includes(term)
 
   const gepind   = LANGUAGES.find(l => l.code === detectedLanguageCode)
   const overige  = LANGUAGES
     .filter(l => l.code !== detectedLanguageCode)
     .filter(matcht)
-    .sort((a, b) => a.nativeName.localeCompare(b.nativeName))
+    .sort((a, b) => naam(a).localeCompare(naam(b)))
 
   const rij = (l, isGepind) => `
     <div class="settings-proj-item" data-lang-code="${esc(l.code)}">
       <i class="ti ${l.code === huidige ? 'ti-circle-check-filled' : 'ti-circle'}" style="font-size:20px;color:${l.code === huidige ? 'var(--accent)' : 'var(--muted2)'}"></i>
       <div class="settings-proj-info">
-        <div class="settings-proj-name">${esc(l.nativeName)}${isGepind ? ` <span style="color:var(--muted2);font-weight:400">· ${I18N.t('talen.windowsTag')}</span>` : ''}</div>
-        <div class="settings-proj-locs">${esc(l.englishName)}</div>
+        <div class="settings-proj-name">${esc(naam(l))}${isGepind ? ` <span style="color:var(--muted2);font-weight:400">· ${I18N.t('talen.windowsTag')}</span>` : ''}</div>
+        <div class="settings-proj-locs">${esc(eng(l))}</div>
       </div>
     </div>
   `
@@ -13344,7 +13392,7 @@ function alGeconfigureerd() {
 
 async function zoekEditors({ stil = false, automatisch = false } = {}) {
   let gevonden = []
-  try { gevonden = await window.api.scanEditors() } catch {}
+  try { gevonden = await window.api.scanEditors({ storeApps: !automatisch }) } catch {}
 
   const bestaand  = alGeconfigureerd()
   const geweigerd = new Set(settings.editorsGeweigerd || [])

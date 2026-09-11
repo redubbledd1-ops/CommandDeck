@@ -204,6 +204,11 @@ const html = fs.readFileSync(path.join(APP, 'index.html'), 'utf8')
 t('index.html laadt accounts.js vóór renderer.js',
   html.indexOf('src="accounts.js"') > 0
   && html.indexOf('src="accounts.js"') < html.indexOf('src="renderer.js"'))
+t('iconen komen van de app zelf, niet van een CDN',
+  !/cdn\.jsdelivr\.net/.test(html)
+  && /assets\/tabler-icons\/tabler-icons\.min\.css/.test(html)
+  && /font-src 'self'/.test(html)
+  && fs.existsSync(path.join(APP, 'assets', 'tabler-icons', 'fonts', 'tabler-icons.woff2')))
 const nl = JSON.parse(fs.readFileSync(path.join(APP, 'locales', 'nl.json'), 'utf8'))
 const en = JSON.parse(fs.readFileSync(path.join(APP, 'locales', 'en.json'), 'utf8'))
 for (const k of ['settings.section.accountsTitle', 'accounts.toevoegen', 'accounts.wisselen',
@@ -327,9 +332,13 @@ t('het pad wordt in de achtergrond ververst, niet op de hoofdthread',
   && /readRegPathAsync/.test(mainJs))
 t('windowsMergedPath blokkeert niet meer',
   !/function windowsMergedPath\(\)[\s\S]{0,400}readRegPath\(/.test(mainJs))
-t('alleen bij het opstarten en na een installatie mag het blokkeren',
+t('het venster wacht niet op het register',
+  /app\.whenReady\(\)\.then\(\(\) => \{[\s\S]{0,700}ververWindowsPath\(\)/.test(mainJs)
+  && !/windowsPathNu\(\)[\s\S]{0,200}createWindow\(/.test(mainJs)
+  && /createWindow\(\)/.test(mainJs))
+t('alleen na een installatie mag het pad even blokkeren',
   /function windowsPathNu\(\)/.test(mainJs)
-  && /try \{ windowsPathNu\(\) \} catch/.test(mainJs))
+  && /ipcMain\.handle\('git:ghVergeet'[\s\S]{0,200}try \{ windowsPathNu\(\) \} catch/.test(mainJs))
 
 t('de waarschuwing dat dit niets beveiligt staat er, in beide talen',
   /Windows/.test(nl['accounts.eerlijk'] || '') && /Windows/.test(en['accounts.eerlijk'] || ''))

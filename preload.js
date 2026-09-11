@@ -27,7 +27,7 @@ contextBridge.exposeInMainWorld('api', {
   pickFolder:    ()      => ipcRenderer.invoke('dialog:pickFolder'),
   pickExe:       ()      => ipcRenderer.invoke('dialog:pickExe'),
   listPrograms:  ()      => ipcRenderer.invoke('app:listPrograms'),
-  scanEditors:   ()      => ipcRenderer.invoke('app:scanEditors'),
+  scanEditors:   (o)     => ipcRenderer.invoke('app:scanEditors', o || {}),
   resolveDir:    (o)     => ipcRenderer.invoke('fs:resolveDir', o),
   listDir:       (p)     => ipcRenderer.invoke('fs:listDir', p),
   listDrives:    ()      => ipcRenderer.invoke('fs:listDrives'),

@@ -1607,6 +1607,10 @@ t('na het wisselen van account wordt er opnieuw gekeken',
   /await ververesAlleGitStaten\(true\)[\s\S]{0,220}controleerAchterstand\(\)/.test(rendererAchter))
 t('bij opstarten komt er een tweede kans na de netwerkronden',
   /meldOnafgemaakteKoppelingen\(\)[\s\S]{0,900}ok === false[\s\S]{0,200}controleerAchterstand\(\)/.test(rendererAchter))
+t('git van overige projecten komt in idle-plakken',
+  /function wanneerIdle\(/.test(rendererAchter)
+  && /async function ververesAlleGitStaten[\s\S]{0,500}await wanneerIdle\(\)/.test(rendererAchter)
+  && /for \(const p of \[\.\.\.projects\]\) \{[\s\S]{0,180}await wanneerIdle\(\)/.test(rendererAchter))
 t('een mislukte fetch houdt geen tien minuten stil',
   /gitLaatsteFetch\[pad\] = \{ t: Date\.now\(\), ok: !!\(r && r\.ok\) \}/.test(rendererAchter))
 t('weggezet werk komt na het ophalen weer terug',

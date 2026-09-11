@@ -115,6 +115,24 @@ t('elk resultaat wijst naar een bestand dat bestaat',
   gevonden.every(g => { const n = naarNep(g.path); return echteExists(n === null ? g.path : n) }))
 t('niet-geïnstalleerde editors komen niet in de lijst', !vind('emacs') && !vind('phpstorm'))
 
+const mainBron = fs.readFileSync(path.join(REAL, 'main.js'), 'utf8')
+const rendererBron = fs.readFileSync(path.join(REAL, 'renderer.js'), 'utf8')
+t('Get-StartApps draait async, nooit synchroon',
+  /function lijstStartAppsAsync\(/.test(mainBron)
+  && /execFile\('powershell\.exe'[\s\S]{0,220}Get-StartApps/.test(mainBron)
+  && !/execFileSync\([^)]*Get-StartApps/.test(mainBron)
+  && !/function lijstStartApps\(/.test(mainBron))
+t('de automatische scan is schijf plus startmenu, zonder PowerShell',
+  /function scanEditorsOpSchijf\(/.test(mainBron)
+  && /ipcMain\.handle\('app:scanEditors'[\s\S]{0,280}if \(!\(opties && opties\.storeApps\)\) return gevonden/.test(mainBron)
+  && !mainBron.slice(
+    mainBron.indexOf('function scanEditorsOpSchijf'),
+    mainBron.indexOf('async function voegStoreAppsAanScan')
+  ).includes('lijstStartApps'))
+t('handmatig zoeken vraagt Store-apps, automatisch niet',
+  /scanEditors\(\{ storeApps: !automatisch \}\)/.test(rendererBron)
+  && /zoekEditors\(\{ stil: true, automatisch: true \}\)/.test(rendererBron))
+
 console.log('\n  gevonden: ' + gevonden.map(g => `${g.label} (${g.bron})`).join(', '))
 console.log(ok ? '\nALLE TESTS GESLAAGD' : '\nER ZIJN TESTS GEFAALD')
 process.exit(ok ? 0 : 1)

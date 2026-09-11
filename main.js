@@ -231,10 +231,18 @@ process.on('uncaughtException', (err) => {
 })
 
 app.whenReady().then(() => {
-  // Eén keer blokkerend, vóór het venster er is: daarna heeft elke git- of
-  // gh-aanroep meteen een pad en hoeft er nooit meer gewacht te worden.
-  try { windowsPathNu() } catch {}
+  // Niet blokkeren: twee synchrone reg.exe-calls houden het venster tegen.
+  // Eerst wat Electron al in PATH had, daarna in de achtergrond verversen.
+  if (process.platform === 'win32') {
+    windowsPathCache = {
+      at: Date.now(),
+      value: process.env.PATH || process.env.Path || '',
+    }
+  }
   createWindow()
+  if (process.platform === 'win32') {
+    try { ververWindowsPath() } catch {}
+  }
 })
 
 // De AI-kant registreert zijn eigen ipc-handlers. Alles wat dienst-specifiek is
@@ -1089,21 +1097,10 @@ function resolveStartAppPad(appId) {
 
 let startAppsCache = null  // { t, lijst }
 
-function lijstStartApps() {
-  if (process.platform !== 'win32') return []
-  if (startAppsCache && Date.now() - startAppsCache.t < 5 * 60 * 1000) return startAppsCache.lijst
-  let uit = ''
-  try {
-    uit = execFileSync('powershell.exe', [
-      '-NoProfile', '-NonInteractive', '-Command',
-      'Get-StartApps | ForEach-Object { $_.Name + [char]9 + $_.AppID }',
-    ], { encoding: 'utf8', timeout: 20000, windowsHide: true, maxBuffer: 4 * 1024 * 1024, env: childEnv() })
-  } catch {
-    return startAppsCache ? startAppsCache.lijst : []
-  }
+function parseStartAppsTekst(uit) {
   const lijst = []
   const gezien = new Set()
-  for (const regel of String(uit).split(/\r?\n/)) {
+  for (const regel of String(uit || '').split(/\r?\n/)) {
     const i = regel.indexOf('\t')
     if (i < 0) continue
     const naam = regel.slice(0, i).trim()
@@ -1116,11 +1113,36 @@ function lijstStartApps() {
     gezien.add(k)
     lijst.push({ naam, pad })
   }
-  startAppsCache = { t: Date.now(), lijst }
   return lijst
 }
 
-ipcMain.handle('app:listPrograms', () => {
+// Get-StartApps via PowerShell kan op een verse pc 20s hangen. Nooit synchroon
+// op de hoofdthread: anders staat het venster stil bij het opstarten.
+function lijstStartAppsAsync() {
+  if (process.platform !== 'win32') return Promise.resolve([])
+  if (startAppsCache && Date.now() - startAppsCache.t < 5 * 60 * 1000) {
+    return Promise.resolve(startAppsCache.lijst)
+  }
+  return new Promise((resolve) => {
+    execFile('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-Command',
+      'Get-StartApps | ForEach-Object { $_.Name + [char]9 + $_.AppID }',
+    ], {
+      encoding: 'utf8', timeout: 20000, windowsHide: true,
+      maxBuffer: 4 * 1024 * 1024, env: childEnv(),
+    }, (err, stdout) => {
+      if (err) {
+        resolve(startAppsCache ? startAppsCache.lijst : [])
+        return
+      }
+      const lijst = parseStartAppsTekst(stdout)
+      startAppsCache = { t: Date.now(), lijst }
+      resolve(lijst)
+    })
+  })
+}
+
+ipcMain.handle('app:listPrograms', async () => {
   const mappen = [
     path.join(process.env.ProgramData || 'C:\\ProgramData', 'Microsoft', 'Windows', 'Start Menu', 'Programs'),
     path.join(process.env.APPDATA || '', 'Microsoft', 'Windows', 'Start Menu', 'Programs'),
@@ -1129,7 +1151,7 @@ ipcMain.handle('app:listPrograms', () => {
   const gevonden = []
   mappen.forEach(d => scanStartMenu(d, gevonden))
   // Store-apps zonder .lnk (Claude Desktop e.d.)
-  for (const p of lijstStartApps()) gevonden.push(p)
+  for (const p of await lijstStartAppsAsync()) gevonden.push(p)
 
   // Hetzelfde programma staat vaak in beide startmenu's én in Get-StartApps
   const gezien = new Set()
@@ -1231,7 +1253,7 @@ function herstelClaudeCodePad(pad) {
   return pad
 }
 
-ipcMain.handle('app:scanEditors', () => {
+function scanEditorsOpSchijf() {
   const wortels = programmaWortels()
 
   // Schijf eerst: Get-StartApps (powershell) kan op een verse pc 20s hangen.
@@ -1255,14 +1277,6 @@ ipcMain.handle('app:scanEditors', () => {
       path.join(process.env.APPDATA || '', 'Microsoft', 'Windows', 'Start Menu', 'Programs'),
     ].filter(d => d && fs.existsSync(d))
     mappen.forEach(d => scanStartMenu(d, startMenu))
-  } catch {}
-  for (const ed of EDITORS) {
-    if (gezien.has(ed.id) || !ed.startMenu) continue
-    const hit = startMenu.find(p => ed.startMenu.test(p.naam))
-    if (hit) zet(ed, hit.pad, 'startmenu')
-  }
-  try {
-    for (const p of lijstStartApps()) startMenu.push(p)
   } catch {}
   for (const ed of EDITORS) {
     if (gezien.has(ed.id) || !ed.startMenu) continue
@@ -1298,6 +1312,31 @@ ipcMain.handle('app:scanEditors', () => {
     }
   }
   return gevonden
+}
+
+async function voegStoreAppsAanScan(gevonden) {
+  const gezien = new Set(gevonden.map(g => g.id))
+  const zet = (ed, pad, bron) => {
+    if (!pad || gezien.has(ed.id)) return
+    gezien.add(ed.id)
+    gevonden.push({ id: ed.id, label: ed.label, path: pad, bron })
+  }
+  let startMenu = []
+  try {
+    for (const p of await lijstStartAppsAsync()) startMenu.push(p)
+  } catch {}
+  for (const ed of EDITORS) {
+    if (gezien.has(ed.id) || !ed.startMenu) continue
+    const hit = startMenu.find(p => ed.startMenu.test(p.naam))
+    if (hit) zet(ed, hit.pad, 'startmenu')
+  }
+  return gevonden
+}
+
+ipcMain.handle('app:scanEditors', (e, opties = {}) => {
+  const gevonden = scanEditorsOpSchijf()
+  if (!(opties && opties.storeApps)) return gevonden
+  return voegStoreAppsAanScan(gevonden)
 })
 
 ipcMain.handle('dialog:pickExe', async () => {

@@ -319,6 +319,22 @@ Module._load=orig
     /ipcMain\.handle\('app:runtimeInfo'[\s\S]{0,600}bronMap:/.test(mainBron))
   check('en de knop komt tevoorschijn zodra die er is',
     /info\.packaged === false \|\| info\.bronMap/.test(renBron))
+  check('de update-klik hangt niet op runtimeInfo',
+    /updateBtn\.onclick = async/.test(renBron)
+    && /async function toonUpdateKnop\(/.test(renBron)
+    && renBron.indexOf('updateBtn.onclick') < renBron.indexOf('async function toonUpdateKnop'))
+  {
+    const start = renBron.indexOf("window.addEventListener('DOMContentLoaded'")
+    const einde = renBron.indexOf('\n// ── Titlebar')
+    const blok = start >= 0 && einde > start ? renBron.slice(start, einde) : ''
+    check('opstarten laadt de talenlijst niet',
+      /function zorgVoorTalen\(/.test(renBron)
+      && blok.includes('restoreLastView()')
+      && !blok.includes('listLanguages')
+      && !blok.includes('detectLanguage')
+      && !/await setupTitlebar/.test(blok)
+      && !blok.includes('runtimeInfo'))
+  }
   check('de knop staat nog in de titelbalk', /id="btn-update"/.test(htmlBron))
   check('en wordt niet meer alleen in dev getoond',
     !/if \(info && info\.packaged === false\) updateBtn\.hidden = false/.test(renBron))
