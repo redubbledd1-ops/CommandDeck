@@ -88,6 +88,8 @@ t('een onbekend thema valt terug op het standaardthema',
   K.kleuren({ thema: 'bestaatniet' }).tag === K.THEMAS[K.STANDAARD_THEMA].tag)
 t('zonder afwijking volgt het het thema', K.volgtThema({ thema: 'dracula' }) === true)
 t('met afwijking niet meer', K.volgtThema({ thema: 'dracula', kleuren: { tag: '#123456' } }) === false)
+t('zachte getallen zijn een trede harder dan pastel-geel',
+  K.THEMAS.zacht.nummer === '#fbbf24')
 
 // ── Uitvoer ──────────────────────────────────────────────────────────────────
 t('html in de bron wordt ontsmet', !K.verf('<a>', 'html').includes('<a>'))

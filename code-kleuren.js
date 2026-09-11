@@ -58,7 +58,10 @@
     },
     zacht: {
       comment: '#6b7280', tag: '#93c5fd', attr: '#c4b5fd', string: '#86efac',
-      nummer: '#fcd34d', keyword: '#f9a8d4', functie: '#a5b4fc',
+      // Getallen één trede harder dan de rest van dit thema: pastel-geel
+      // (#fcd34d) viel weg tegen de donkere achtergrond; #fbbf24 blijft zacht
+      // genoeg bij de andere pastels, maar leest zoals op de Windows-build.
+      nummer: '#fbbf24', keyword: '#f9a8d4', functie: '#a5b4fc',
       selector: '#93c5fd', prop: '#c4b5fd', waarde: '#fdba74', leesteken: '#9ca3af',
     },
   }
