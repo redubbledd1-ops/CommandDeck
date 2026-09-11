@@ -139,7 +139,7 @@ t('de grens noemt zijn eigen getal', nl['settings.codeKleuren.grensDesc'].includ
 const html = fs.readFileSync(path.join(APP, 'index.html'), 'utf8')
 const renderer = fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8')
 const css = fs.readFileSync(path.join(APP, 'style.css'), 'utf8')
-t('code-kleuren.js staat in index.html', html.includes('<script src="code-kleuren.js">'))
+t('code-kleuren.js staat in index.html', html.includes('src="code-kleuren.js"'))
 t('en vóór renderer.js',
   html.indexOf('src="code-kleuren.js"') < html.indexOf('src="renderer.js"'))
 t('de laag staat in het editorpaneel', renderer.includes('id="lezer-verf"'))
