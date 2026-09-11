@@ -708,7 +708,36 @@ function startVraagAutomaat() {
   check('en je kunt terug naar het gevonden icoon', projects[0].iconMode === 'auto')
   check('dat dan ook weer in de zijbalk staat', !!$('.proj-icon img.proj-icoon-img'))
 
+  // ── Icoon in een andere locatie dan de actieve ────────────────────────────
+  // Resume had main (met icoon) + test (actief, zonder). Het bewerkvenster
+  // keek naar de eerste map en toonde het plaatje; de zijbalk keek alleen naar
+  // de actieve en bleef op de emoji hangen.
+  projIcoonAntwoorden = {
+    'C:\\resume': {
+      ok: true, soort: 'app', bron: 'C:\\resume\\icoon\\icon.png',
+      dataUrl: 'data:image/png;base64,RESUME',
+    },
+    'C:\\resume\\test': { ok: false, reden: 'geen' },
+  }
+  projects[0].locations = [
+    { label: 'main', path: 'C:\\resume' },
+    { label: 'test', path: 'C:\\resume\\test' },
+  ]
+  projects[0].activeLocation = 1
+  projects[0].iconMode = 'auto'
+  projects[0].icon = '🔥'
+  await W.__test.vergeetProjIcoon(null)
+  $$('.proj-edit')[0].click(); await tick(); await tick(); await tick()
+  check('bij twee locaties vindt bewerken het icoon in de andere map',
+    $('#f-icoon-keuze').hidden === false
+    && ($('#f-icoon-auto-img')?.getAttribute('src') || '').includes('RESUME'))
+  $('#modal-proj-cancel').click(); await tick(); await tick()
+  check('en de zijbalk toont dat icoon ook als "test" actief is',
+    $('.proj-icon img.proj-icoon-img')?.getAttribute('src') === 'data:image/png;base64,RESUME')
+
   // Terug naar de emoji-wereld, zodat de tests hierna zien wat ze verwachten.
+  projects[0].locations = [{ label: 'main', path: 'C:\\a' }]
+  projects[0].activeLocation = 0
   projIcoonAntwoorden = {}
   await W.__test.vergeetProjIcoon(null)
   $$('.proj-item')[0].click(); await tick(); await tick()

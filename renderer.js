@@ -856,9 +856,34 @@ function projIcoonVanPad(pad) {
   return (uit && uit.ok) ? uit : null
 }
 
-async function ververesProjIcoonPad(pad) {
+// Welke mappen we afgaan op zoek naar het app-icoon. Een project heeft vaak
+// meer dan één locatie (main + test, of main + extensie). Het icoon zit in de
+// app-map, niet per se in de locatie die je toevallig open hebt. Alleen de
+// actieve locatie bekijken gaf precies de bug van Resume: in "project
+// bewerken" stond het plaatje (eerste locatie), in de zijbalk de emoji
+// (actieve locatie "test" zonder icoonbestanden).
+function projIcoonPaden(p, locs) {
+  const lijst = locs || (p && p.locations) || []
+  const paden = []
+  const gezien = new Set()
+  const voeg = (pad) => {
+    const schoon = String(pad || '').trim()
+    if (!schoon) return
+    const sleutel = schoon.toLowerCase()
+    if (gezien.has(sleutel)) return
+    gezien.add(sleutel)
+    paden.push(schoon)
+  }
+  // Actieve locatie eerst: als díe het icoon heeft, zijn we meteen klaar en
+  // hoeven we de andere mappen niet eens te bevragen.
+  if (p && !locs) voeg(actieveLocPad(p))
+  for (const loc of lijst) voeg(loc && loc.path)
+  return paden
+}
+
+async function ververesProjIcoonPad(pad, forceer = false) {
   if (!pad || !window.api || !window.api.zoekProjectIcoon) return null
-  if (projIcoonPerPad.has(pad)) return projIcoonPerPad.get(pad)
+  if (!forceer && projIcoonPerPad.has(pad)) return projIcoonPerPad.get(pad)
   if (projIcoonBezig.has(pad)) return null
 
   projIcoonBezig.add(pad)
@@ -887,10 +912,13 @@ async function ververesProjIcoonPad(pad) {
 // (font-size per plek) de maat blijven bepalen.
 function projIcoonInhoud(p) {
   if (!projIcoonAuto(p)) return p.icon
-  const pad = actieveLocPad(p)
-  ververesProjIcoonPad(pad)
-  const ico = projIcoonVanPad(pad)
-  return ico ? `<img class="proj-icoon-img" src="${ico.dataUrl}" alt="" draggable="false" />` : p.icon
+  const paden = projIcoonPaden(p)
+  for (const pad of paden) {
+    ververesProjIcoonPad(pad)
+    const ico = projIcoonVanPad(pad)
+    if (ico) return `<img class="proj-icoon-img" src="${ico.dataUrl}" alt="" draggable="false" />`
+  }
+  return p.icon
 }
 
 // Na een build of het vervangen van een icoon opnieuw kijken: main vergeet
@@ -19079,18 +19107,27 @@ async function ververesIcoonKeuze() {
   if (!blok || !hint) return
   bouwIcoonKeuze()
 
-  // De eerste locatie met een pad. Een project met twee mappen heeft één
-  // icoon; welke van de twee je pakt maakt in de praktijk niet uit.
-  const pad = (pendingLocs.find(l => l && l.path && l.path.trim()) || {}).path || ''
-  icoonKeuzePad = pad
+  // Zelfde volgorde als de zijbalk: alle locaties af, niet alleen de eerste.
+  // Anders zie je hier een icoon dat later in de lijst weer een emoji wordt
+  // zodra je op een locatie zonder icoonbestanden staat.
+  const paden = projIcoonPaden(null, pendingLocs)
+  const zoekSleutel = paden.join('\0')
+  icoonKeuzePad = zoekSleutel
 
   let uit = null
-  if (pad && window.api && window.api.zoekProjectIcoon) {
-    try { uit = await window.api.zoekProjectIcoon(pad) } catch { uit = null }
+  let gebruiktPad = ''
+  let standaardGezien = false
+  if (window.api && window.api.zoekProjectIcoon) {
+    for (const pad of paden) {
+      let antwoord = null
+      try { antwoord = await window.api.zoekProjectIcoon(pad) } catch { antwoord = null }
+      // Ondertussen een ander pad ingetypt? Dan is dit antwoord verouderd.
+      if (icoonKeuzePad !== zoekSleutel) return
+      projIcoonPerPad.set(pad, antwoord || { ok: false, reden: 'geen' })
+      if (antwoord && antwoord.ok) { uit = antwoord; gebruiktPad = pad; break }
+      if (antwoord && antwoord.reden === 'standaard') standaardGezien = true
+    }
   }
-  // Ondertussen een ander pad ingetypt? Dan is dit antwoord verouderd.
-  if (icoonKeuzePad !== pad) return
-  if (pad) projIcoonPerPad.set(pad, uit || { ok: false, reden: 'geen' })
 
   const gevonden = !!(uit && uit.ok)
   blok.hidden = !gevonden
@@ -19099,13 +19136,19 @@ async function ververesIcoonKeuze() {
     const sub = document.getElementById('f-icoon-auto-sub')
     if (img) img.src = uit.dataUrl
     if (sub) sub.textContent = I18N.t('modal.project.iconBron.' + (uit.soort || 'app'))
+    // De zijbalk houdt anders de oude emoji vast tot je opslaat of herstart —
+    // precies het "hij staat wel ingesteld maar ik zie hem niet"-gevoel.
+    if (gebruiktPad && projIcoonVanPad(gebruiktPad)) {
+      sidebarGetekend = false
+      renderSidebar()
+    }
   }
 
   // Alleen iets zeggen als er een map ingevuld is. Bij een leeg formulier is
   // "geen icoon gevonden" geen informatie maar ruis.
-  hint.hidden = gevonden || !pad
+  hint.hidden = gevonden || !paden.length
   if (!hint.hidden) {
-    hint.textContent = I18N.t(uit && uit.reden === 'standaard'
+    hint.textContent = I18N.t(standaardGezien
       ? 'modal.project.iconStandaard'
       : 'modal.project.iconGeen')
   }
@@ -19826,6 +19869,9 @@ async function saveProjectModal() {
     if (p.activeLocation >= locs.length) p.activeLocation = 0
     p.website = !!document.getElementById('f-website').checked
     p.websiteHandmatig = true
+    // Een oude "niets gevonden" in de cache mag een net geplaatst icoon of
+    // een andere locatie niet blijven verbergen tot de volgende herstart.
+    for (const pad of projIcoonPaden(p)) projIcoonPerPad.delete(pad)
   } else {
     const vers = { id: 'proj_' + Date.now(), name, icon: selEmoji, iconMode: selIcoonModus === 'emoji' ? 'emoji' : 'auto', device, gitProfiel: profielId, locations: locs, activeLocation: 0, release: false, website: !!document.getElementById('f-website').checked, websiteHandmatig: true, cmdVisibility: { ...pendingCmdVisibility }, secties: { ...pendingSecties }, customCmds: pendingCustomCmds.map(c => ({ ...c })), cmdVolgorde: { run: [...(pendingCmdVolgorde.run || [])], tools: [...(pendingCmdVolgorde.tools || [])] } }
     // Ook een vers project krijgt zijn mappen: dan staat elk project er
