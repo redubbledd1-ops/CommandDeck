@@ -464,6 +464,12 @@ window.eval(fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8')
   + '\n  gekoppeldeRepoAdressen, zetBewerkt: (id) => { editingId = id },'
   + '\n  editorsZelfde,'
   + '\n  vergeetProjIcoon, projIcoonAuto,'
+  + '\n  zetProjectLocaties: (i, locs, actief, icon, iconMode) => {'
+  + '\n    projects[i].locations = locs;'
+  + '\n    if (actief != null) projects[i].activeLocation = actief;'
+  + '\n    if (icon != null) projects[i].icon = icon;'
+  + '\n    if (iconMode != null) projects[i].iconMode = iconMode;'
+  + '\n  },'
   + '\n  splitSlotIds: () => (werkSplit.slots || []).map(s => s.projectId) };')
 startVraagAutomaat()
 const W = window
@@ -719,13 +725,10 @@ function startVraagAutomaat() {
     },
     'C:\\resume\\test': { ok: false, reden: 'geen' },
   }
-  projects[0].locations = [
+  W.__test.zetProjectLocaties(0, [
     { label: 'main', path: 'C:\\resume' },
     { label: 'test', path: 'C:\\resume\\test' },
-  ]
-  projects[0].activeLocation = 1
-  projects[0].iconMode = 'auto'
-  projects[0].icon = '🔥'
+  ], 1, '🔥', 'auto')
   await W.__test.vergeetProjIcoon(null)
   $$('.proj-edit')[0].click(); await tick(); await tick(); await tick()
   check('bij twee locaties vindt bewerken het icoon in de andere map',
@@ -736,8 +739,7 @@ function startVraagAutomaat() {
     $('.proj-icon img.proj-icoon-img')?.getAttribute('src') === 'data:image/png;base64,RESUME')
 
   // Terug naar de emoji-wereld, zodat de tests hierna zien wat ze verwachten.
-  projects[0].locations = [{ label: 'main', path: 'C:\\a' }]
-  projects[0].activeLocation = 0
+  W.__test.zetProjectLocaties(0, [{ label: 'main', path: 'C:\\a' }], 0)
   projIcoonAntwoorden = {}
   await W.__test.vergeetProjIcoon(null)
   $$('.proj-item')[0].click(); await tick(); await tick()
