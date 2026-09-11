@@ -708,6 +708,29 @@ function startVraagAutomaat() {
   check('en je kunt terug naar het gevonden icoon', projects[0].iconMode === 'auto')
   check('dat dan ook weer in de zijbalk staat', !!$('.proj-icon img.proj-icoon-img'))
 
+  // Resume-achtig: icoon zit in de hoofmap, actieve locatie is een tweede
+  // map zonder launcher-icoon. De zijbalk moet dan alsnog het icoon tonen.
+  projects[0].locations = [
+    { label: 'main', path: 'C:\\a' },
+    { label: 'test', path: 'C:\\zonder-icoon' },
+  ]
+  projects[0].activeLocation = 1
+  projects[0].icon = '🔥'
+  projects[0].iconMode = 'auto'
+  projIcoonAntwoorden['C:\\a'] = {
+    ok: true, soort: 'app', bron: 'C:\\a\\icoon.png',
+    dataUrl: 'data:image/png;base64,BBBB',
+  }
+  delete projIcoonAntwoorden['C:\\zonder-icoon']
+  await W.__test.vergeetProjIcoon(null)
+  $$('.proj-item')[0].click(); await tick(); await tick()
+  check('icoon van een andere locatie dan de actieve komt toch in de zijbalk',
+    $('.proj-icon img.proj-icoon-img')?.getAttribute('src') === 'data:image/png;base64,BBBB')
+  check('dat icoon staat ook in de projectkop ondanks andere actieve locatie',
+    $('.proj-header-icon img.proj-icoon-img')?.getAttribute('src') === 'data:image/png;base64,BBBB')
+  projects[0].locations = [{ label: 'main', path: 'C:\\a' }]
+  projects[0].activeLocation = 0
+
   // Terug naar de emoji-wereld, zodat de tests hierna zien wat ze verwachten.
   projIcoonAntwoorden = {}
   await W.__test.vergeetProjIcoon(null)

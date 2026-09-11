@@ -882,15 +882,33 @@ async function ververesProjIcoonPad(pad) {
   }
 }
 
+// Alle mappen van een project, actieve eerst. Het icoon zit vaak in de
+// hoofmap (Resume), terwijl je ondertussen op een tweede locatie werkt
+// (DD-Music\test) — die tweede map heeft dan geen launcher-icoon.
+function projIcoonPaden(p) {
+  const locs = projectLocaties(p)
+  const actief = actieveLocPad(p)
+  const paden = locs.map(l => l.pad).filter(Boolean)
+  if (actief) {
+    const i = paden.indexOf(actief)
+    if (i > 0) { paden.splice(i, 1); paden.unshift(actief) }
+    else if (i < 0) paden.unshift(actief)
+  }
+  return paden
+}
+
 // De inhoud van een icoonvakje: het gevonden plaatje, of anders de emoji. Het
 // omhullende element blijft van de aanroeper, zodat de bestaande css-regels
 // (font-size per plek) de maat blijven bepalen.
 function projIcoonInhoud(p) {
   if (!projIcoonAuto(p)) return p.icon
-  const pad = actieveLocPad(p)
-  ververesProjIcoonPad(pad)
-  const ico = projIcoonVanPad(pad)
-  return ico ? `<img class="proj-icoon-img" src="${ico.dataUrl}" alt="" draggable="false" />` : p.icon
+  const paden = projIcoonPaden(p)
+  for (const pad of paden) ververesProjIcoonPad(pad)
+  for (const pad of paden) {
+    const ico = projIcoonVanPad(pad)
+    if (ico) return `<img class="proj-icoon-img" src="${ico.dataUrl}" alt="" draggable="false" />`
+  }
+  return p.icon
 }
 
 // Na een build of het vervangen van een icoon opnieuw kijken: main vergeet
@@ -19079,18 +19097,26 @@ async function ververesIcoonKeuze() {
   if (!blok || !hint) return
   bouwIcoonKeuze()
 
-  // De eerste locatie met een pad. Een project met twee mappen heeft één
-  // icoon; welke van de twee je pakt maakt in de praktijk niet uit.
-  const pad = (pendingLocs.find(l => l && l.path && l.path.trim()) || {}).path || ''
-  icoonKeuzePad = pad
+  // Alle locaties met een pad, uniek. Het icoon kan in de hoofmap zitten
+  // terwijl een tweede locatie leeg is — dan moeten we doorzoeken.
+  const paden = []
+  for (const l of pendingLocs) {
+    const pad = l && l.path && l.path.trim()
+    if (pad && !paden.includes(pad)) paden.push(pad)
+  }
+  const sleutel = paden.join('\0')
+  icoonKeuzePad = sleutel
 
   let uit = null
-  if (pad && window.api && window.api.zoekProjectIcoon) {
-    try { uit = await window.api.zoekProjectIcoon(pad) } catch { uit = null }
+  if (window.api && window.api.zoekProjectIcoon) {
+    for (const pad of paden) {
+      try { uit = await window.api.zoekProjectIcoon(pad) } catch { uit = null }
+      // Ondertussen een ander pad ingetypt? Dan is dit antwoord verouderd.
+      if (icoonKeuzePad !== sleutel) return
+      projIcoonPerPad.set(pad, uit || { ok: false, reden: 'geen' })
+      if (uit && uit.ok) break
+    }
   }
-  // Ondertussen een ander pad ingetypt? Dan is dit antwoord verouderd.
-  if (icoonKeuzePad !== pad) return
-  if (pad) projIcoonPerPad.set(pad, uit || { ok: false, reden: 'geen' })
 
   const gevonden = !!(uit && uit.ok)
   blok.hidden = !gevonden
@@ -19103,7 +19129,7 @@ async function ververesIcoonKeuze() {
 
   // Alleen iets zeggen als er een map ingevuld is. Bij een leeg formulier is
   // "geen icoon gevonden" geen informatie maar ruis.
-  hint.hidden = gevonden || !pad
+  hint.hidden = gevonden || !paden.length
   if (!hint.hidden) {
     hint.textContent = I18N.t(uit && uit.reden === 'standaard'
       ? 'modal.project.iconStandaard'
