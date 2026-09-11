@@ -423,6 +423,13 @@ t('een profiel met naam en adres is geldig', G.profielGeldig(werk))
 t('zonder adres is het niet af', !G.profielGeldig(onaf))
 t('zonder naam ook niet', !G.profielGeldig(G.maakProfiel({ email: 'a@b.nl' })))
 t('niets is niet geldig', !G.profielGeldig(null))
+t('een lege schil heeft geen inhoud', !G.profielHeeftInhoud(G.maakProfiel({ id: 'gp_leeg' })))
+t('alleen een label telt als inhoud', G.profielHeeftInhoud(G.maakProfiel({ id: 'gp_x', label: 'klant' })))
+t('ruimLegeProfielen gooit lege gp_ weg', G.ruimLegeProfielen([
+  G.maakProfiel({ id: 'gp_leeg' }),
+  G.maakProfiel({ id: 'gp_ok', naam: 'Jan', email: 'a@b.nl' }),
+  G.maakProfiel({ id: 'acc_ik', naam: '', email: '' }),
+]).map(p => p.id).join(',') === 'gp_ok,acc_ik')
 t('inloggen valt terug op onthouden', G.maakProfiel({}).inloggen === G.INLOG_ONTHOUDEN)
 t('een onzinwaarde voor inloggen ook', G.maakProfiel({ inloggen: 'zomaar' }).inloggen === G.INLOG_ONTHOUDEN)
 t('vragen blijft vragen', prive.inloggen === G.INLOG_VRAGEN)

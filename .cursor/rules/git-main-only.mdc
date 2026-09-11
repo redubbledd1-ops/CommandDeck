@@ -1,0 +1,14 @@
+---
+description: Solo developer — always work on main, never create feature branches
+alwaysApply: true
+---
+
+# Git: alleen main
+
+Dit project heeft één developer. Extra branches maken het onnodig ingewikkeld.
+
+- Werk altijd op `main`. Commit en push direct op `main`.
+- Maak **geen** feature branches (`cursor/...` of anders), ook niet via "create branch and commit".
+- Als een UI-actie om een nieuwe branch vraagt: weigeren en op `main` blijven.
+- Alleen een branch maken als de gebruiker dat **expliciet** vraagt (bijv. voor een PR).
+- Per ongeluk aangemaakte branches: wijzigingen naar `main` brengen en de branch verwijderen.

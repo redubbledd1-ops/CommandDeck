@@ -1760,6 +1760,26 @@
     return !!(p && String(p.naam || '').trim() && geldigEmail(p.email))
   }
 
+  // Iets ingevuld? Een lege schil (alleen een id) hoort niet in de lijst te
+  // blijven hangen — dat was precies hoe oude namen terugkwamen.
+  function profielHeeftInhoud(p) {
+    if (!p) return false
+    return !!(String(p.naam || '').trim()
+      || String(p.email || '').trim()
+      || String(p.label || '').trim()
+      || String(p.ghGebruiker || '').trim())
+  }
+
+  // Lege uitzonderingsprofielen weg; account-spiegels (acc_*) blijven staan.
+  function ruimLegeProfielen(lijst) {
+    if (!Array.isArray(lijst)) return []
+    return lijst.filter(p => {
+      if (!p || !String(p.id || '').trim()) return false
+      if (String(p.id).startsWith('acc_')) return true
+      return profielHeeftInhoud(p)
+    })
+  }
+
   // Waar de gebruiker het profiel aan herkent. Het label is optioneel — heb je
   // er geen bedacht, dan is je eigen naam een prima aanduiding.
   function profielLabel(p) {
@@ -2422,7 +2442,8 @@
     veiligCommitBericht, automatischCommitBericht, commitCommando, pushCommando, stashCommando, blokkade,
     parseStashAantal, parseStashLijst, parseStashOnderwerp, stashRefGeldig,
     stashPopCommando, stashDropCommando, botsendeBestanden,
-    parseIdentiteit, geldigEmail, maakProfiel, profielGeldig, profielLabel,
+    parseIdentiteit, geldigEmail, maakProfiel, profielGeldig, profielHeeftInhoud,
+    ruimLegeProfielen, profielLabel,
     zoekProfiel, profielVoorProject, zelfdeIdentiteit, identiteitStatus,
     identiteitBlokkeert, veiligConfigWaarde, geldigeGhGebruiker,
     identiteitCommando, profielCommando, ghSwitchCommando, vraagtOmInloggen,

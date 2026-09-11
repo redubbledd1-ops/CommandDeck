@@ -570,10 +570,35 @@ function accountStand() {
     const std = lijst.find(p => p && p.id === eigen.standaardProfiel) || lijst[0] || null
     return Accounts.neemProfielOver(a, std)
   })
-  const veranderd = st.gemigreerd || metGit.some((a, i) => a !== st.accounts[i])
-  if (veranderd) {
-    saveSettings({ ...s, accounts: metGit, actiefAccount: st.actiefAccount })
+
+  // Lege gp_*-schillen opruimen (aangemaakt via "+" en nooit ingevuld). Die
+  // bleven anders in de keuzelijst hangen alsof er nog een oude naam was.
+  let schoon = { ...s, accounts: metGit, actiefAccount: st.actiefAccount }
+  let geleegd = false
+  if (Array.isArray(schoon.git && schoon.git.profielen)) {
+    const was = schoon.git.profielen
+    const nu = GitTools.ruimLegeProfielen(was)
+    if (nu.length !== was.length) {
+      schoon = { ...schoon, git: { ...schoon.git, profielen: nu } }
+      geleegd = true
+    }
   }
+  if (schoon.perAccount) {
+    const per = { ...schoon.perAccount }
+    for (const id of Object.keys(per)) {
+      const a = per[id]
+      const was = a && a.git && a.git.profielen
+      if (!Array.isArray(was)) continue
+      const nu = GitTools.ruimLegeProfielen(was)
+      if (nu.length === was.length) continue
+      per[id] = { ...a, git: { ...a.git, profielen: nu } }
+      geleegd = true
+    }
+    if (geleegd) schoon = { ...schoon, perAccount: per }
+  }
+
+  const veranderd = st.gemigreerd || metGit.some((a, i) => a !== st.accounts[i]) || geleegd
+  if (veranderd) saveSettings(schoon)
   return { ...st, accounts: metGit }
 }
 
