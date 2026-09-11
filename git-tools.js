@@ -607,6 +607,13 @@
     return 'git pull --ff-only'
   }
 
+  // `git pull --ff-only` stopt met exit 128 als de takken uit elkaar lopen.
+  // Dat is geen netwerkfout: het is het signaal dat deze map mogelijk aan
+  // de verkeerde repo hangt, of dat er op twee pc's apart is gewerkt.
+  function pullFfGeweigerd(tekst) {
+    return /Not possible to fast-forward|can't be fast-forwarded/i.test(String(tekst || ''))
+  }
+
   // ── Zien wat er verandert ───────────────────────────────────────────────────
   // `git diff` alleen laat de bestanden zien die al onder versiebeheer staan,
   // en dan nog alleen wat niet klaargezet is. Met HEAD erbij zie je alles wat
@@ -1297,7 +1304,7 @@
   //   ernst 'info'   niets kapots, alleen nog niet gedaan
   //
   // `actie` zegt welke knop erbij hoort; null betekent: alleen uitleg.
-  function gitProblemen(staat) {
+  function gitProblemen(staat, extra = {}) {
     const uit = []
     if (!staat) return uit
     if (!staat.beschikbaar) return [{ id: 'geen-git', ernst: 'fout', actie: null }]
@@ -1359,6 +1366,16 @@
     // verkeerde repo belandt.
     if (staat.remotes.length > 1) {
       uit.push({ id: 'meerdere-remotes', ernst: 'let-op', actie: 'remotes', aantal: staat.remotes.length })
+    }
+
+    // Map/project heet anders dan de repo in de url. Typisch: DayKit-map die
+    // nog aan AgendaAlarm.git hangt van een eerdere koppelpoging op deze pc.
+    const mismatch = verkeerdeKoppeling(staat, extra.projectNaam, extra.mapPad)
+    if (mismatch) {
+      uit.push({
+        id: 'naam-mismatch', ernst: 'fout', actie: 'verkeerde-koppeling',
+        lokaal: mismatch.lokaal, repo: mismatch.repo, url: mismatch.url,
+      })
     }
     return uit
   }
@@ -2209,6 +2226,54 @@
     return veiligeRepoNaam(stuk)
   }
 
+  function mapNaamUitPad(mapPad) {
+    return String(mapPad || '').replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean).pop() || ''
+  }
+
+  // DayKit en day-kit horen bij elkaar; DayKit en AgendaAlarm niet. Streepjes
+  // en hoofdletters tellen niet, "project" (de fallback-naam) ook niet.
+  function naamSleutel(s) {
+    return veiligeRepoNaam(s).toLowerCase().replace(/[-_.]+/g, '')
+  }
+
+  function zelfdeRepoNaam(a, b) {
+    const x = naamSleutel(a), y = naamSleutel(b)
+    if (!x || !y || x === 'project' || y === 'project') return false
+    return x === y
+  }
+
+  // Hangt deze map aan een repo die níet zo heet als de map of het project?
+  // Dat is hoe AgendaAlarm.git op een DayKit-map belandt: een eerdere koppeling
+  // op deze pc, geen typefout van git zelf.
+  function verkeerdeKoppeling(staat, projectNaam, mapPad) {
+    if (!staat || !staat.isRepo || !staat.heeftRemote) return null
+    const repo = repoNaamUitUrl(staat.remoteUrl || '')
+    if (!repo) return null
+    const map = veiligeRepoNaam(mapNaamUitPad(mapPad))
+    const project = veiligeRepoNaam(projectNaam || '')
+    if (zelfdeRepoNaam(repo, map) || zelfdeRepoNaam(repo, project)) return null
+    const lokaal = (map && naamSleutel(map) !== 'project') ? map
+      : (project && naamSleutel(project) !== 'project') ? project
+      : ''
+    if (!lokaal) return null
+    return { repo, map, project, lokaal, url: staat.remoteUrl || '' }
+  }
+
+  // Mag de weergavenaam van het project de git-naam overnemen? Alleen als er
+  // nog niets zinnigs staat, of als de huidige naam gewoon de mapnaam is —
+  // die vulde de app zelf in. Wat de gebruiker typte blijft staan.
+  function magNaamUitGitOvernemen(huidig, gitNaam, mapPad) {
+    const git = veiligeRepoNaam(gitNaam)
+    if (!git || naamSleutel(git) === 'project') return false
+    const nu = String(huidig || '').trim()
+    if (!nu) return true
+    if (zelfdeRepoNaam(nu, git)) return false
+    const map = mapNaamUitPad(mapPad)
+    if (map && zelfdeRepoNaam(nu, map)) return true
+    if (naamSleutel(nu) === 'project') return true
+    return false
+  }
+
   // Welke repo-naam vul je voor bij "opnieuw koppelen"? Niet blind de
   // projectnaam uit CommandDeck: die is hernoembaar en klopt na een rename niet
   // meer met de repo. De bestaande remote-URL is de betrouwbaarste bron (ook een
@@ -2344,6 +2409,7 @@
     grootBestandFout, herbouwCommando, negeerRegelVoor,
     bareInitCommando, bareCloneCommando, joinPad, cmdPad,
     repoNaamUitUrl, cloneDoelPad, cloneOuderPad, cloneCommando,
+    verkeerdeKoppeling, zelfdeRepoNaam, magNaamUitGitOvernemen,
     parseGhRepos, filterRepos, repoSleutel, zonderGekoppelde, gitSlotFout,
     KOPPELING_GEEN, KOPPELING_ONBEKEND, KOPPELING_OK, KOPPELING_STUK,
     remoteFoutReden, remoteUitslag, lsRemoteArgs, koppelingProbleem,
@@ -2362,7 +2428,7 @@
     identiteitCommando, profielCommando, ghSwitchCommando, vraagtOmInloggen,
     INLOG_ONTHOUDEN, INLOG_VRAGEN, INLOG_KEUZES,
     indicator, onveiligeRedenen, magFetchen, achterstandMelding, FETCH_INTERVAL_MS, FETCH_FAIL_INTERVAL_MS,
-    achterstandKeuzes, pullCommando,
+    achterstandKeuzes, pullCommando, pullFfGeweigerd,
     globaalIdentiteitCommando, globaalGhGebruikerCommando, accountActiveerStappen,
     koppelingProblemen, ghRepoUitUrl,
     BESCHERM_RULESET_NAAM, mainBeschermingBody, heeftMainBescherming, branchHeeftBasisBescherming,

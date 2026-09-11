@@ -1962,6 +1962,46 @@ t('pushen kan niet zonder werkende koppeling',
     G.repoNaamVoorstel(zonderUrl, 'Project X', '') === 'Project-X')
 }
 
+// ── Verkeerde projectkoppeling (DayKit hangt aan AgendaAlarm.git) ────────────
+{
+  const agenda = G.maakStaat({
+    beschikbaar: true, isRepo: true, remotes: ['origin'], branch: 'master',
+    commits: true, upstream: 'origin/master', remoteOk: true, naam: 'a', email: 'b@c',
+    remoteLijst: [{ naam: 'origin', url: 'https://github.com/redubbledD/AgendaAlarm.git' }],
+  })
+  t('DayKit-map aan AgendaAlarm is een mismatch',
+    (G.verkeerdeKoppeling(agenda, 'DayKit', 'C:\\Users\\a\\Desktop\\DayKit') || {}).repo === 'AgendaAlarm')
+  t('en noemt de lokale naam',
+    G.verkeerdeKoppeling(agenda, 'DayKit', 'C:\\Users\\a\\Desktop\\DayKit').lokaal === 'DayKit')
+  t('gitProblemen zwijgt zonder map/projectnaam',
+    !G.gitProblemen(agenda).some(p => p.id === 'naam-mismatch'))
+  t('gitProblemen meldt het wél mét namen',
+    G.gitProblemen(agenda, { projectNaam: 'DayKit', mapPad: 'C:\\DayKit' })
+      .some(p => p.id === 'naam-mismatch' && p.actie === 'verkeerde-koppeling'))
+  t('dezelfde naam is in orde',
+    G.verkeerdeKoppeling(agenda, 'AgendaAlarm', 'C:\\AgendaAlarm') === null)
+  t('streepjes en spaties tellen niet als verschil',
+    G.verkeerdeKoppeling(G.maakStaat({
+      beschikbaar: true, isRepo: true, remotes: ['origin'], remoteOk: true,
+      remoteLijst: [{ naam: 'origin', url: 'https://github.com/a/DD-Music.git' }],
+    }), 'DD Music', 'C:\\DDMusic') === null)
+  t('zonder remote geen mismatch',
+    G.verkeerdeKoppeling(G.maakStaat({ isRepo: true, remotes: [] }), 'DayKit', 'C:\\DayKit') === null)
+}
+
+// ── Projectnaam uit git overnemen ────────────────────────────────────────────
+t('lege naam mag van git', G.magNaamUitGitOvernemen('', 'DayKit', 'C:\\site') === true)
+t('mapnaam mag van git', G.magNaamUitGitOvernemen('site', 'DayKit', 'C:\\site') === true)
+t('zelf getypte naam blijft staan', G.magNaamUitGitOvernemen('Mijn App', 'DayKit', 'C:\\site') === false)
+t('dezelfde naam hoeft niet opnieuw', G.magNaamUitGitOvernemen('DayKit', 'DayKit', 'C:\\DayKit') === false)
+t('fallback "project" mag van git', G.magNaamUitGitOvernemen('project', 'DayKit', 'C:\\x') === true)
+
+t('ff-only weigering wordt herkend',
+  G.pullFfGeweigerd('fatal: Not possible to fast-forward, aborting.') === true)
+t('en de diverging-hint ook',
+  G.pullFfGeweigerd("hint: Diverging branches can't be fast-forwarded") === true)
+t('een gewone pull-fout niet', G.pullFfGeweigerd('Could not resolve host: github.com') === false)
+
 // ── De teksten bestaan ───────────────────────────────────────────────────────
 for (const sleutel of ['git.ind.broken', 'git.ind.brokenTitle', 'git.repair.title',
                        'git.repair.new', 'git.repair.url', 'git.repair.drop',
@@ -1980,8 +2020,14 @@ for (const sleutel of ['git.ind.broken', 'git.ind.brokenTitle', 'git.repair.titl
                        'git.opstart.titel', 'git.opstart.tekst', 'git.opstart.regel',
                        'git.opstart.detail.geschiedenis-los', 'git.opstart.detail.remote-leeg',
                        'git.opstart.detail.branch-af', 'git.opstart.detail.achter-zonder-upstream',
-                       'git.opstart.detail.half', 'git.opstart.bekijken', 'git.opstart.later',
-                       'gitset.prob.oude-kopie', 'gitset.actie.koppeling-afmaken']) {
+                       'git.opstart.detail.half', 'git.opstart.detail.naam-mismatch',
+                       'git.opstart.bekijken', 'git.opstart.later',
+                       'gitset.prob.oude-kopie', 'gitset.actie.koppeling-afmaken',
+                       'gitset.prob.naam-mismatch', 'gitset.actie.verkeerde-koppeling',
+                       'git.koppel.mismatch.titel', 'git.koppel.mismatch.tekst',
+                       'git.koppel.mismatch.tekstKoppel', 'git.koppel.mismatch.houden',
+                       'git.koppel.mismatch.ander', 'git.koppel.mismatch.los',
+                       'git.koppel.mismatch.later', 'git.koppel.mismatch.toch']) {
   t('tekst ' + sleutel + ' staat in nl en en', !!nl[sleutel] && !!en[sleutel])
 }
 t('de kapotte-koppeling-indicator heeft opmaak in style.css',
@@ -2058,6 +2104,13 @@ t('de aandacht-indicator (oude kopie / afmaken) heeft opmaak in style.css',
     ren.includes('GitTools.repoNaamVoorstel('))
   t('de git-sectie heeft een knop voor "koppeling afmaken"',
     ren.includes("actie === 'koppeling-afmaken'"))
+  t('een naam-mismatch krijgt een eigen melding met keuzes',
+    ren.includes('async function biedVerkeerdeKoppelingAan')
+    && ren.includes('GitTools.verkeerdeKoppeling('))
+  t('bij opstart hoort een andere reponaam bij de verdachte lijst',
+    /meldOnafgemaakteKoppelingen[\s\S]*?naam-mismatch/.test(ren))
+  t('een geweigerde ff-only pull opent die melding',
+    /pullFfGeweigerd[\s\S]{0,400}biedVerkeerdeKoppelingAan/.test(ren))
 
   const main2 = fs.readFileSync(path.join(APP, 'main.js'), 'utf8')
   const infoBody2 = main2.slice(main2.indexOf("ipcMain.handle('git:info'"))
@@ -2203,6 +2256,12 @@ for (const sleutel of ['modal.project.gitLabel', 'modal.project.gitCloneLabel',
   t('bewerken verbergt het', /openEditModal[\s\S]{0,1600}toonCloneVeld\(false\)/.test(ren))
   t('na clonen wordt de git-staat nagekeken',
     /async function haalRepoBinnen/.test(ren) && /controleerKoppeling\(doel, true\)/.test(ren))
+  t('en de projectnaam komt uit git als die nog de mapnaam was',
+    /neemNaamNaGitKoppelen\(project, GitTools\.repoNaamUitUrl\(adres\)\)/.test(ren))
+  t('bij een nieuw project wint git van de mapnaam',
+    /zetAutomatischeProjectNaam\(naam, 'git'\)/.test(ren)
+    && /zetAutomatischeProjectNaam\(naam, 'map'\)/.test(ren)
+    && /cloneNaamBron === 'git' && bron === 'map'/.test(ren))
   t('clone draait in de map erboven, want de doelmap bestaat nog niet',
     /git-clone['"], \{ cwd: ouder \}/.test(ren))
   t('je kunt een los adres weghalen', ren.includes('data-remote-weg'))

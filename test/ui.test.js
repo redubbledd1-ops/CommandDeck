@@ -136,6 +136,7 @@ let exeFail = false
 // `gitStaatNu` is wat git:info teruggeeft; `gitCheckNu` wat de netwerkcontrole
 // zegt. De tests zetten die om en kijken wat de sectie ervan maakt.
 let gitStaatNu = null
+let gitStaatPerPad = {}
 let gitChecks = []
 let gitVergeten = []
 let gitignoreGeschreven = []
@@ -152,7 +153,19 @@ let geopendeUrls = []
 let ghRepoAntwoord = { ok: true, repos: [] }
 
 const api = {
-  gitInfo: async () => gitStaatNu ? JSON.parse(JSON.stringify(gitStaatNu)) : null,
+  gitInfo: async (pad) => {
+    const sleutel = String(pad || '').replace(/[\\/]+$/, '').replace(/\//g, '\\')
+    if (Object.prototype.hasOwnProperty.call(gitStaatPerPad, sleutel)) {
+      const s = gitStaatPerPad[sleutel]
+      return s ? JSON.parse(JSON.stringify(s)) : null
+    }
+    // De nagebootste staat hoort bij het tesproject op C:\a, niet bij een
+    // map die je in het projectvenster kiest.
+    if (pad && sleutel.toLowerCase() !== 'c:\\a') {
+      return { beschikbaar: true, isRepo: false }
+    }
+    return gitStaatNu ? JSON.parse(JSON.stringify(gitStaatNu)) : null
+  },
   gitRemoteCheck: async (p) => { gitChecks.push(p); return { ok: null, reden: '' } },
   gitRemoteVergeet: async (p) => { gitVergeten.push(p); return true },
   gitIgnoreVoorstel: async () => ({ ok: true, bestaat: false, soorten: ['gradle'],
@@ -3821,7 +3834,10 @@ function startVraagAutomaat() {
   check('cmd-sectie toont zijn eigen werkmap', $('#term-input').placeholder === settings.cmd.cwd)
 
   // heel lang pad wordt in het midden ingekort
+  // De grens hangt van de vensterbreedte af; jsdom 29/30 geven die anders.
   const langPad = 'C:\\Users\\redub\\Desktop\\Projects\\werk\\klanten\\2026\\commanddeck'
+  const vorigeBreedte = window.innerWidth
+  Object.defineProperty(window, 'innerWidth', { value: 600, configurable: true })
   pickedFolder = langPad
   $('#cmd-pick-folder').click(); await tick(); await tick()
   const ph = $('#term-input').placeholder
@@ -3829,6 +3845,7 @@ function startVraagAutomaat() {
   check('begin van het pad blijft staan', ph.startsWith('C:\\Users\\'))
   check('eind van het pad blijft staan', ph.endsWith('commanddeck'))
   check('tooltip houdt het volledige pad', $('#term-input').title === langPad)
+  Object.defineProperty(window, 'innerWidth', { value: vorigeBreedte, configurable: true })
 
   // ── gevonden editors aanbieden ─────────────────────────────────────────────
   gevondenEditorsMock = [
@@ -4134,7 +4151,7 @@ function startVraagAutomaat() {
     const maakStaat = window.GitTools.maakStaat
     const gezond = { beschikbaar: true, isRepo: true, branch: 'main', commits: true,
                      upstream: 'origin/main', naam: 'a', email: 'b@c', remoteOk: true,
-                     remoteLijst: [{ naam: 'origin', url: 'https://github.com/a/b.git' }] }
+                     remoteLijst: [{ naam: 'origin', url: 'https://github.com/a/dd_crypto.git' }] }
 
     gitStaatNu = maakStaat(gezond)
     $$('.proj-edit')[0].click(); await tick(); await tick()
@@ -4142,7 +4159,7 @@ function startVraagAutomaat() {
     check('en meldt dat de koppeling werkt', !!$('.git-set-status.s-ok'))
     check('bij een gezonde repo staat er niets in de weg', !!$('.git-set-ok'))
     check('het adres staat erbij',
-      $('.git-set-remote-url').textContent === 'https://github.com/a/b.git')
+      $('.git-set-remote-url').textContent === 'https://github.com/a/dd_crypto.git')
     check('controleren kan altijd', !!$('#git-set-check'))
     $('#modal-proj-save').click(); await tick(); await tick()
 
@@ -4283,6 +4300,22 @@ function startVraagAutomaat() {
     check('de lijst blijft staan, met de keuze aangewezen',
       !$('#f-git-repos').hidden && !!$('#f-git-repo-lijst .git-repo-rij.gekozen'))
 
+    pickedFolder = 'C:\\site'
+    $$('#loc-list .loc-browse')[0].click(); await tick(); await tick()
+    check('een map na git laat de reponaam staan', $('#f-name').value === 'DD-Music')
+
+    $('#modal-proj-cancel').click(); await tick()
+    $('#btn-add-proj').click(); await tick(); await tick()
+    pickedFolder = 'C:\\site'
+    $$('#loc-list .loc-browse')[0].click(); await tick(); await tick()
+    check('een gekozen map vult de naam', $('#f-name').value === 'site')
+    $$('#f-git-repo-lijst .git-repo-rij')[0].click(); await tick()
+    check('git overschrijft die mapnaam', $('#f-name').value === 'DD-Music')
+    $('#f-name').value = 'Mijn App'
+    $('#f-name').dispatchEvent(new window.Event('input'))
+    $$('#f-git-repo-lijst .git-repo-rij')[1].click(); await tick()
+    check('wat je zelf typt blijft staan', $('#f-name').value === 'Mijn App')
+
     // Wat al aan een project hangt hoort er niet meer bij te staan. Het project
     // uit deze tests wijst naar DD-Music, dus die valt weg.
     $('#modal-proj-cancel').click(); await tick()
@@ -4306,6 +4339,15 @@ function startVraagAutomaat() {
     check('met een knop om GitHub alsnog te koppelen', !!$('#git-repo-inloggen'))
     ghRepoAntwoord = { ok: true, repos: [] }
     $('#modal-proj-cancel').click(); await tick()
+    gitStaatPerPad['C:\\Users\\a\\Desktop\\andere-map'] = maakStaat({
+      ...gezond, remoteLijst: [{ naam: 'origin', url: 'https://github.com/redubbledd1-ops/DayKit.git' }],
+    })
+    $('#btn-add-proj').click(); await tick(); await tick()
+    pickedFolder = 'C:\\Users\\a\\Desktop\\andere-map'
+    $$('#loc-list .loc-browse')[0].click(); await tick(); await tick()
+    check('een map die al aan git hangt neemt de reponaam', $('#f-name').value === 'DayKit')
+    $('#modal-proj-cancel').click(); await tick()
+    delete gitStaatPerPad['C:\\Users\\a\\Desktop\\andere-map']
     gitStaatNu = null
   }
 
@@ -4848,6 +4890,17 @@ function startVraagAutomaat() {
       $('#modal-proj').hidden === false && $$('#loc-list input.mono')[0].value === 'C:\\site')
     check('en met een naam die uit de map komt', $('#f-name').value === 'site')
     $('#modal-proj-cancel').click(); await tick()
+
+    gitStaatPerPad['C:\\site'] = window.GitTools.maakStaat({
+      beschikbaar: true, isRepo: true, remotes: ['origin'],
+      remoteLijst: [{ naam: 'origin', url: 'https://github.com/a/DayKit.git' }],
+    })
+    kiesKnop('als project toevoegen')
+    await sleep(['C:\\site'])
+    check('met git wint de reponaam van de map', $('#f-name').value === 'DayKit')
+    $('#modal-proj-cancel').click(); await tick()
+    delete gitStaatPerPad['C:\\site']
+    gitStaatNu = null
 
     // Een tekstbestand gaat naar de editor-tab (niet meer een los modal).
     webMappen = []

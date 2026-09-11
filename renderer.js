@@ -14,6 +14,7 @@ let editingId   = null
 let deleteId    = null
 let pendingLocs = []
 let cloneNaamOvergenomen = false
+let cloneNaamBron = ''            // 'git' | 'map' | '' — git wint van de mapnaam
 let settingsSubPage      = null   // null | 'talen' — sub-pagina binnen Instellingen
 let LANGUAGES            = []     // opgehaald bij opstart, zie i18n.js/main.js locales/languages.js
 let detectedLanguageCode = null   // Windows-taal, voor bovenaan pinnen in de Talen-lijst
@@ -1000,6 +1001,20 @@ async function controleerAlleKoppelingen() {
 // verouderde geschiedenis publiceert. Niet-blokkerend: één samenvatting met een
 // knop om ze langs te lopen.
 let opstartKoppelMeldingGedaan = false
+
+function naamMismatchGenegeerd(pad, url) {
+  const n = padNorm(pad)
+  const u = String(url || '').toLowerCase()
+  return (settings.gitNaamOk || []).some(x => padNorm(x.pad) === n && String(x.url || '').toLowerCase() === u)
+}
+
+function onthoudNaamMismatchOk(pad, url) {
+  if (!pad || !url) return
+  const rest = (settings.gitNaamOk || []).filter(x => padNorm(x.pad) !== padNorm(pad))
+  settings.gitNaamOk = [...rest, { pad, url }]
+  window.api.saveSettings(settings)
+}
+
 async function meldOnafgemaakteKoppelingen() {
   if (opstartKoppelMeldingGedaan) return
   opstartKoppelMeldingGedaan = true
@@ -1008,16 +1023,26 @@ async function meldOnafgemaakteKoppelingen() {
   for (const p of projects) {
     const staat = gitStaatVan(p)
     if (!staat || !staat.isRepo || !staat.commits) continue
+    const pad = actieveLocPad(p)
     const oud = GitTools.oudeKopieVerdenking(staat)
     const half = !!staat.heeftRemote && !staat.upstream && !staat.koppelingStuk
-    if (!oud && !half) continue
+    const mismatch = GitTools.verkeerdeKoppeling(staat, p.name, pad)
+      && !naamMismatchGenegeerd(pad, staat.remoteUrl)
+    if (!oud && !half && !mismatch) continue
     const detail = oud
       ? I18N.t('git.opstart.detail.' + oud.soort, {
           branch: oud.branch || staat.branch || '', doel: oud.remoteHead || staat.remoteHead || 'main',
           achter: oud.achter || 0,
         })
+      : mismatch ? I18N.t('git.opstart.detail.naam-mismatch', {
+          lokaal: mismatch.lokaal, repo: mismatch.repo,
+        })
       : I18N.t('git.opstart.detail.half')
-    verdacht.push({ project: p, regel: I18N.t('git.opstart.regel', { project: p.name, detail }) })
+    verdacht.push({
+      project: p,
+      mismatch: mismatch || null,
+      regel: I18N.t('git.opstart.regel', { project: p.name, detail }),
+    })
   }
   if (!verdacht.length) return
 
@@ -1036,7 +1061,9 @@ async function meldOnafgemaakteKoppelingen() {
     await selectProject(v.project.id)
     const pad = actieveLocPad(v.project)
     const staat = gitStaten[pad]
-    if (staat) await herstelKoppeling(v.project, pad, staat)
+    if (!staat) continue
+    if (v.mismatch) await biedVerkeerdeKoppelingAan(v.project, pad, staat, v.mismatch)
+    else await herstelKoppeling(v.project, pad, staat)
   }
 }
 
@@ -1067,6 +1094,12 @@ function meldGitPadenAanMain() {
   const paden = []
   for (const p of projects) {
     for (const loc of projectLocaties(p)) paden.push(loc.pad)
+  }
+  // Map die je in het projectvenster kiest, nog vóór opslaan: anders weigert
+  // git:info die map en kunnen we de reponaam niet overnemen.
+  for (const loc of pendingLocs) {
+    const pad = loc && String(loc.path || '').trim()
+    if (pad) paden.push(pad)
   }
   try { window.api.gitPaden({ accountId: actiefAccount, paden }) } catch {}
 }
@@ -11212,7 +11245,7 @@ async function vraagOverMap(pad) {
   if (!keuze) return
 
   if (keuze === 'verkenner') { openInVerkenner(pad); return }
-  if (keuze === 'project')   { openNieuwProjectMet(pad, naam); return }
+  if (keuze === 'project')   { await openNieuwProjectMet(pad, naam); return }
   if (keuze === 'site')      { await startSite(pad, gevonden); return }
 }
 
@@ -11227,8 +11260,8 @@ async function openNieuwProjectMet(pad, naam) {
   openNewModal()
   pendingLocs = [{ label: 'main', path: pad }]
   refreshLocList()
-  const naamVeld = document.getElementById('f-name')
-  if (naamVeld && !naamVeld.value.trim()) naamVeld.value = naam
+  zetAutomatischeProjectNaam(naam, 'map')
+  await neemNaamUitLocatie()
   updateCloneDoelPreview()
   // Map met html → website-vinkje aan, zodat je niet handmatig hoeft te zoeken.
   const r = await window.api.projectSoort(pad).catch(() => null)
@@ -17054,6 +17087,15 @@ async function runGitCmd(project, cmdKey) {
       await controleerKoppeling(actieveLocPad(project), true)
     }
   }
+  if (cmdKey === 'git-pull' && result && result.success === false
+      && GitTools.pullFfGeweigerd(result.output)) {
+    const pad = actieveLocPad(project)
+    const staat = gitStaten[pad]
+    const mismatch = staat && GitTools.verkeerdeKoppeling(staat, project.name, pad)
+    if (mismatch && !naamMismatchGenegeerd(pad, staat.remoteUrl)) {
+      await biedVerkeerdeKoppelingAan(project, pad, staat, mismatch)
+    }
+  }
 }
 
 // Vraagt git bij dit commando zelf om inloggegevens? Dan heeft het een echt
@@ -18085,6 +18127,8 @@ async function koppelGithub(project) {
       await meldKort(I18N.t('git.link.bezetTitle'), I18N.t('git.link.bezetText', { naam: repoNaam }))
     }
     await controleerKoppeling(pad, true)
+    await ververesGitStaat(project, true)
+    neemNaamNaGitKoppelen(project, repoNaam)
     return
   }
 
@@ -18120,6 +18164,8 @@ async function koppelGithub(project) {
   // hem ook. Bij andermans repo faalt dit stil (geen admin).
   if (urlUit && urlUit.success) await beschermMainNaAanmaken(pad)
   await controleerKoppeling(pad, true)
+  await ververesGitStaat(project, true)
+  neemNaamNaGitKoppelen(project, GitTools.repoNaamUitUrl(url))
 }
 
 // ── Opnieuw beginnen met de geschiedenis ─────────────────────────────────────
@@ -18197,6 +18243,64 @@ async function zoekGhRepoOpNaam(naam) {
   return GitTools.zoekRepoOpNaam(lijst, naam)
 }
 
+// Deze map heet anders dan de repo waar hij aan hangt. Dat is hoe AgendaAlarm
+// op een DayKit-project belandt: een eerdere koppeling op deze pc, niet git
+// dat zelf de verkeerde naam verzint. Drie keuzes: het is bewust (hernoemd),
+// het adres klopt niet, of de koppeling moet eraf.
+async function biedVerkeerdeKoppelingAan(project, pad, staat, mismatch) {
+  const keus = await vraagKeuze({
+    titel: I18N.t('git.koppel.mismatch.titel'),
+    tekst: I18N.t('git.koppel.mismatch.tekst', {
+      lokaal: mismatch.lokaal, repo: mismatch.repo,
+    }),
+    regels: [mismatch.url || staat.remoteUrl || ''],
+    knoppen: [
+      { label: I18N.t('git.koppel.mismatch.later'), waarde: '' },
+      { label: I18N.t('git.koppel.mismatch.houden'), waarde: 'houden' },
+      { label: I18N.t('git.koppel.mismatch.los'), waarde: 'los', soort: 'gevaar' },
+      { label: I18N.t('git.koppel.mismatch.ander'), waarde: 'ander', soort: 'primair' },
+    ],
+  })
+  if (!keus) return
+  if (keus === 'houden') {
+    onthoudNaamMismatchOk(pad, staat.remoteUrl || mismatch.url)
+    vraagProjectHertekenen()
+    return
+  }
+  if (keus === 'los') {
+    const ja = await vraagJaNee(I18N.t('git.oudeKopie.losmakenTitel'),
+      I18N.t('git.oudeKopie.losmakenTekst', { remote: staat.remote || 'origin' }),
+      I18N.t('git.oudeKopie.losmaken'), 'gevaar')
+    if (!ja) return
+    const volgt = String(staat.upstream || '').split('/')[0]
+    if (volgt && volgt === (staat.remote || 'origin')) {
+      await executeCmd(project, 'git branch --unset-upstream', 'git-koppelen')
+    }
+    await executeCmd(project, GitTools.ontkoppelCommando(staat), 'git-koppelen')
+    await controleerKoppeling(pad, true)
+    await ververesGitStaat(project, true)
+    renderMain()
+    return
+  }
+  const ruw = await vraagTekst({
+    titel: I18N.t('git.link.urlTitle'),
+    tekst: I18N.t('git.link.urlText'),
+    waarde: '',
+    placeholder: 'https://github.com/gebruiker/repo.git',
+    okLabel: I18N.t('git.link.linkOk'),
+  })
+  if (!ruw) return
+  const cmd = GitTools.remoteUrlCommando(staat.remote || 'origin', ruw)
+  if (!cmd) {
+    await meldKort(I18N.t('git.link.urlBadTitle'), I18N.t('git.link.urlBadText'))
+    return
+  }
+  await executeCmd(project, cmd, 'git-koppelen')
+  await controleerKoppeling(pad, true)
+  await ververesGitStaat(project, true)
+  renderMain()
+}
+
 // Een repository die er al staat aan deze map koppelen. Aanmaken hoeft niet
 // meer; wat er nog moet gebeuren is het adres erbij zetten en pushen — precies
 // wat `gh repo create --push` ook gedaan zou hebben.
@@ -18204,16 +18308,24 @@ async function zoekGhRepoOpNaam(naam) {
 // Geeft 'andere-naam' terug als de gebruiker toch een nieuwe repo wil onder een
 // andere naam; 'gestopt' bij annuleren; anders 'klaar'.
 async function koppelAanBestaandeRepo(project, pad, staat, repo) {
+  const denkbeeld = { ...staat, heeftRemote: true, remoteUrl: repo.url }
+  const mismatch = GitTools.verkeerdeKoppeling(denkbeeld, project.name, pad)
   const keus = await vraagKeuze({
-    titel: I18N.t('git.link.bestaatTitle'),
-    tekst: I18N.t('git.link.bestaatText', {
-      naam: repo.volledig || repo.naam,
-      zicht: I18N.t(repo.prive ? 'git.link.private' : 'git.link.public'),
-    }),
+    titel: I18N.t(mismatch ? 'git.koppel.mismatch.titel' : 'git.link.bestaatTitle'),
+    tekst: mismatch
+      ? I18N.t('git.koppel.mismatch.tekstKoppel', {
+          lokaal: mismatch.lokaal, repo: mismatch.repo, naam: repo.volledig || repo.naam,
+        })
+      : I18N.t('git.link.bestaatText', {
+          naam: repo.volledig || repo.naam,
+          zicht: I18N.t(repo.prive ? 'git.link.private' : 'git.link.public'),
+        }),
+    regels: mismatch ? [repo.url || ''] : undefined,
     knoppen: [
       { label: I18N.t('common.cancel'), waarde: '' },
       { label: I18N.t('git.link.bestaatAnder'), waarde: 'ander' },
-      { label: I18N.t('git.link.bestaatKoppel'), waarde: 'koppel', soort: 'primair' },
+      { label: I18N.t(mismatch ? 'git.koppel.mismatch.toch' : 'git.link.bestaatKoppel'),
+        waarde: 'koppel', soort: mismatch ? '' : 'primair' },
     ],
   })
   if (!keus) return 'gestopt'
@@ -18245,6 +18357,7 @@ async function koppelAanBestaandeRepo(project, pad, staat, repo) {
   }
   await controleerKoppeling(pad, true)
   await ververesGitStaat(project, true)
+  neemNaamNaGitKoppelen(project, repo.naam)
   renderMain()
   return 'klaar'
 }
@@ -18694,7 +18807,7 @@ function setupModalEvents() {
   const repoZoek = document.getElementById('f-git-repo-zoek')
   if (repoZoek) repoZoek.oninput = () => tekenRepoLijst()
   const naamVeld = document.getElementById('f-name')
-  if (naamVeld) naamVeld.oninput = () => { cloneNaamOvergenomen = false }
+  if (naamVeld) naamVeld.oninput = () => { cloneNaamOvergenomen = false; cloneNaamBron = '' }
   // Het potlood zit ín de cmd-knop van de zijbalk. Klikken mag die knop niet
   // ook nog eens openen, en lang drukken hoort de sorteerstand niet aan te
   // zetten — vandaar dat beide gebeurtenissen hier stoppen.
@@ -18862,7 +18975,10 @@ function markeerIcoonKeuze() {
 // het typen stilligt.
 function plantIcoonKeuze() {
   clearTimeout(icoonKeuzeTimer)
-  icoonKeuzeTimer = setTimeout(() => { ververesIcoonKeuze() }, 300)
+  icoonKeuzeTimer = setTimeout(() => {
+    ververesIcoonKeuze()
+    if (!editingId) void neemNaamUitLocatie()
+  }, 300)
 }
 
 async function ververesIcoonKeuze() {
@@ -19041,7 +19157,8 @@ function tekenGitSectie() {
 
   if (!staat) { doel.innerHTML = `<div class="git-set-leeg">${esc(I18N.t('gitset.laden'))}</div>`; return }
 
-  const problemen = GitTools.gitProblemen(staat)
+  const problemen = GitTools.gitProblemen(staat, { projectNaam: p.name, mapPad: pad })
+    .filter(pr => pr.id !== 'naam-mismatch' || !naamMismatchGenegeerd(pad, staat.remoteUrl))
   const ernst = GitTools.ergsteErnst(problemen)
 
   // 1. Waar staat het, en werkt het.
@@ -19128,7 +19245,10 @@ function tekenGitSectie() {
     delen.push(`<div class="git-set-problemen">` + problemen.map(pr => `
       <div class="git-set-probleem e-${esc(pr.ernst)}">
         <i class="ti ${pr.ernst === 'fout' ? 'ti-alert-triangle' : pr.ernst === 'let-op' ? 'ti-alert-circle' : 'ti-info-circle'}"></i>
-        <span>${esc(I18N.t('gitset.prob.' + pr.id, { aantal: pr.aantal || 0, remote: pr.remote || '', url: pr.url || '' }))}</span>
+        <span>${esc(I18N.t('gitset.prob.' + pr.id, {
+          aantal: pr.aantal || 0, remote: pr.remote || '', url: pr.url || '',
+          lokaal: pr.lokaal || '', repo: pr.repo || '',
+        }))}</span>
         ${pr.actie ? `<button class="btn-ghost btn-mini" data-git-actie="${esc(pr.actie)}">${esc(I18N.t('gitset.actie.' + pr.actie))}</button>` : ''}
       </div>`).join('') + `</div>`)
   } else if (staat.isRepo) {
@@ -19222,7 +19342,10 @@ function bindGitSectie(p, pad, staat, koppelProblemen = []) {
     else if (actie === 'profiel')  await controleerIdentiteit(p, nu)
     else if (actie === 'gitignore') await regelGitignore(p)
     else if (actie === 'langepaden') await zetLangePaden(p)
-    else if (actie === 'remotes')  await meldKort(I18N.t('gitset.remotesTitel'), I18N.t('gitset.remotesTekst'))
+    else if (actie === 'verkeerde-koppeling') {
+      const m = GitTools.verkeerdeKoppeling(nu, p.name, pad)
+      if (m) await biedVerkeerdeKoppelingAan(p, pad, nu, m)
+    }
     await naAfloop()
   }))
 }
@@ -19230,6 +19353,7 @@ function bindGitSectie(p, pad, staat, koppelProblemen = []) {
 function openNewModal() {
   editingId = null; selEmoji = '📱'; selIcoonModus = 'auto'
   cloneNaamOvergenomen = false
+  cloneNaamBron = ''
   document.getElementById('modal-title').textContent = I18N.t('modal.project.title')
   document.getElementById('f-name').value   = ''
   document.getElementById('f-device').value = ''
@@ -19312,6 +19436,7 @@ function toonCloneVeld(aan) {
   if (zoek && !aan) zoek.value = ''
   if (!aan) {
     cloneNaamOvergenomen = false
+    cloneNaamBron = ''
     // Verse lijst bij de volgende keer: tussendoor kan er van account gewisseld
     // zijn, en dan hoort er een andere lijst te staan.
     cloneRepos = null
@@ -19346,13 +19471,53 @@ function updateCloneDoelPreview() {
 
 function onCloneUrlInvoer() {
   const naam = GitTools.repoNaamUitUrl(cloneUrlInvoer())
-  const nameEl = document.getElementById('f-name')
-  if (naam && nameEl && (!nameEl.value.trim() || cloneNaamOvergenomen)) {
-    nameEl.value = naam
-    cloneNaamOvergenomen = true
-  }
+  if (naam) zetAutomatischeProjectNaam(naam, 'git')
   updateCloneDoelPreview()
   markeerGekozenRepo()
+}
+
+// Naam in het projectvenster: git gaat boven de mapnaam, wat de gebruiker
+// zelf typte blijft staan.
+function zetAutomatischeProjectNaam(naam, bron) {
+  const el = document.getElementById('f-name')
+  if (!naam || !el) return
+  const huidig = el.value.trim()
+  if (huidig && !cloneNaamOvergenomen) return
+  if (huidig && cloneNaamBron === 'git' && bron === 'map') return
+  el.value = naam
+  cloneNaamOvergenomen = true
+  cloneNaamBron = bron || cloneNaamBron || 'map'
+}
+
+async function neemNaamUitLocatie() {
+  if (editingId) return
+  const pad = (pendingLocs.find(l => l && l.path && String(l.path).trim()) || {}).path || ''
+  if (!pad) return
+  const mapNaam = pad.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || ''
+  let gitNaam = ''
+  meldGitPadenAanMain()
+  try {
+    const staat = await window.api.gitInfo(pad)
+    if (staat && staat.isRepo) gitNaam = GitTools.repoNaamUitUrl(staat.remoteUrl || '')
+  } catch {}
+  if (gitNaam) zetAutomatischeProjectNaam(gitNaam, 'git')
+  else if (mapNaam) zetAutomatischeProjectNaam(mapNaam, 'map')
+}
+
+function neemNaamNaGitKoppelen(project, gitNaamHint) {
+  if (!project) return
+  const pad = actieveLocPad(project)
+  const staat = (pad && gitStaten[pad]) || gitStaatVan(project)
+  const gitNaam = GitTools.veiligeRepoNaam(gitNaamHint)
+    || GitTools.repoNaamUitUrl((staat && staat.remoteUrl) || '')
+    || GitTools.repoNaamVoorstel(staat, '', pad)
+  if (!gitNaam) return
+  if (naamMismatchGenegeerd(pad, (staat && staat.remoteUrl) || '')) return
+  if (!GitTools.magNaamUitGitOvernemen(project.name, gitNaam, pad)) return
+  project.name = gitNaam
+  saveProjects()
+  renderSidebar()
+  vraagProjectHertekenen()
 }
 
 // ── Een project van je GitHub-account kiezen ─────────────────────────────────
@@ -19628,6 +19793,7 @@ async function haalRepoBinnen(project, adres, doel, ouder) {
   }
 
   await controleerKoppeling(doel, true)
+  neemNaamNaGitKoppelen(project, GitTools.repoNaamUitUrl(adres))
   const profiel = profielVanProject(project)
   if (GitTools.profielGeldig(profiel)) await pasProfielToe(project, profiel)
   bepaalToolsVoorProject(project).then(verborgen => {
@@ -19658,7 +19824,13 @@ function refreshLocList() {
     browseBtn.innerHTML = '<i class="ti ti-folder-open" style="font-size:14px"></i>'
     browseBtn.onclick = async () => {
       const picked = await window.api.pickFolder()
-      if (picked) { pendingLocs[i].path = picked; pathInput.value = picked; updateCloneDoelPreview(); plantIcoonKeuze() }
+      if (picked) {
+        pendingLocs[i].path = picked
+        pathInput.value = picked
+        updateCloneDoelPreview()
+        plantIcoonKeuze()
+        if (!editingId) void neemNaamUitLocatie()
+      }
     }
 
     const delBtn = document.createElement('button')

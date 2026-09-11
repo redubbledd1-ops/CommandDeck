@@ -5165,7 +5165,10 @@ echo   afgesloten
 echo.
 
 echo Stap 2/6: dependencies installeren (npm install)
-call npm install
+rem --no-audit/--no-fund: anders lijkt een update mislukt door
+rem waarschuwingen (engine, funding, "high severity") die de install
+rem niet tegenhouden.
+call npm install --no-audit --no-fund
 if errorlevel 1 (
   echo.
   echo Update mislukt bij npm install ^(zie foutmelding hierboven^)

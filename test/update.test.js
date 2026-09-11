@@ -245,6 +245,8 @@ Module._load=orig
   check('het slot legt vast wanneer het gezet is', bat3.includes('echo bezig sinds %DATE% %TIME%>'))
   check('en gaat er ook af als npm install struikelt',
     bat3.slice(bat3.indexOf('npm install'), bat3.indexOf('Stap 3/6')).includes(`del /f /q "${lock}"`))
+  check('npm-waarschuwingen (audit/funding) staan de update niet in de weg',
+    bat.includes('npm install --no-audit --no-fund'))
 
   // ── bestand tegen tijdelijke netwerkfouten ─────────────────────────────────
   const backup = path.join(SRC, 'dist', 'CommandDeck.vorige.exe')
