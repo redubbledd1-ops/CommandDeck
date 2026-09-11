@@ -980,7 +980,11 @@ function losSnelkoppelingOp(p) {
   if (!p || !/\.lnk$/i.test(p)) return p
   try {
     const link = shell.readShortcutLink(p)
-    if (link.target && fs.existsSync(link.target)) return link.target
+    if (link.target) {
+      // Store-apps onder WindowsApps zijn soms ACL-verborgen voor existsSync,
+      // maar wél startbaar. Die targets houden we dus toch.
+      if (fs.existsSync(link.target) || /\\WindowsApps\\/i.test(link.target)) return link.target
+    }
   } catch {}
   return p
 }
@@ -990,7 +994,8 @@ function losSnelkoppelingOp(p) {
 // De map "Applications" die je in de verkenner ziet is geen echte map maar een
 // virtuele shell-lijst; een bestandskiezer kan daar niets vinden omdat het geen
 // bestanden zijn. Het startmenu bevat wél echte snelkoppelingen, en die wijzen
-// naar de programma's zelf.
+// naar de programma's zelf. Store-apps (Claude, …) zetten vaak géén .lnk in
+// Start Menu\Programs — die komen via Get-StartApps / WindowsApps erbij.
 function scanStartMenu(dir, uit, diepte = 0) {
   if (diepte > 4 || uit.length > 800) return
   let items = []
@@ -1006,10 +1011,113 @@ function scanStartMenu(dir, uit, diepte = 0) {
 
     try {
       const link = shell.readShortcutLink(vol)
-      if (!link.target || !/\.exe$/i.test(link.target) || !fs.existsSync(link.target)) continue
+      if (!link.target || !/\.exe$/i.test(link.target)) continue
+      const bestaat = fs.existsSync(link.target)
+      const storeApp = /\\WindowsApps\\/i.test(link.target)
+      // Store-installaties: bestaatSync faalt soms door ACL terwijl de exe wél
+      // startbaar is. Die houden we; klassieke paden zonder bestand skippen we.
+      if (!bestaat && !storeApp) continue
       uit.push({ naam, pad: link.target })
     } catch {}
   }
+}
+
+// AppX / Store: AppID "Claude_pzs8sxrjxfjjc!Claude" → nieuwste package-map → exe
+// uit AppxManifest.xml. Zo blijft Claude (en soortgenoten) vindbaar zonder .lnk.
+function vindAppxExecutable(appId) {
+  if (!appId || !appId.includes('!')) return null
+  const [family, appKey] = appId.split('!')
+  if (!family) return null
+  const underscore = family.lastIndexOf('_')
+  if (underscore < 0) return null
+  const naam = family.slice(0, underscore)
+  const uitgever = family.slice(underscore + 1)
+  const wortels = [
+    path.join(process.env.ProgramFiles || 'C:\\Program Files', 'WindowsApps'),
+    path.join(process.env.ProgramFiles || 'C:\\Program Files', 'WindowsApps', 'Deleted'),
+  ]
+  for (const wa of wortels) {
+    let dirs = []
+    try { dirs = fs.readdirSync(wa) } catch { continue }
+    const hits = dirs
+      .filter(d => d.startsWith(naam + '_') && d.endsWith('_' + uitgever))
+      .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
+    for (const d of hits) {
+      const basis = path.join(wa, d)
+      const manifest = path.join(basis, 'AppxManifest.xml')
+      let exeRel = null
+      try {
+        const xml = fs.readFileSync(manifest, 'utf8')
+        // Zoek Application met dit Id; Executable="app\Claude.exe"
+        const blok = xml.match(new RegExp(
+          `<Application[^>]*Id="${appKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"[^>]*>`,
+          'i'))
+        const bron = blok ? blok[0] : xml
+        const m = bron.match(/\bExecutable="([^"]+\.exe)"/i)
+        if (m) exeRel = m[1].replace(/\//g, '\\')
+      } catch {}
+      if (!exeRel) {
+        // Fallback: app\<Naam>.exe komt vaak voor bij full-trust desktop bridges
+        const kandidaten = [
+          path.join('app', appKey + '.exe'),
+          path.join('app', naam + '.exe'),
+        ]
+        for (const k of kandidaten) {
+          try { if (fs.existsSync(path.join(basis, k))) { exeRel = k; break } } catch {}
+        }
+      }
+      if (!exeRel) continue
+      const exe = path.join(basis, exeRel)
+      try {
+        if (fs.existsSync(exe) || /\\WindowsApps\\/i.test(exe)) return exe
+      } catch {}
+    }
+  }
+  return null
+}
+
+function resolveStartAppPad(appId) {
+  if (!appId) return null
+  // Klassieke apps: Get-StartApps geeft vaak het volledige .exe-pad als AppID
+  if (/\.exe$/i.test(appId)) {
+    try { if (fs.existsSync(appId)) return appId } catch {}
+    return null
+  }
+  if (appId.includes('!')) return vindAppxExecutable(appId)
+  return null
+}
+
+let startAppsCache = null  // { t, lijst }
+
+function lijstStartApps() {
+  if (process.platform !== 'win32') return []
+  if (startAppsCache && Date.now() - startAppsCache.t < 5 * 60 * 1000) return startAppsCache.lijst
+  let uit = ''
+  try {
+    uit = execFileSync('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-Command',
+      'Get-StartApps | ForEach-Object { $_.Name + [char]9 + $_.AppID }',
+    ], { encoding: 'utf8', timeout: 20000, windowsHide: true, maxBuffer: 4 * 1024 * 1024, env: childEnv() })
+  } catch {
+    return startAppsCache ? startAppsCache.lijst : []
+  }
+  const lijst = []
+  const gezien = new Set()
+  for (const regel of String(uit).split(/\r?\n/)) {
+    const i = regel.indexOf('\t')
+    if (i < 0) continue
+    const naam = regel.slice(0, i).trim()
+    const appId = regel.slice(i + 1).trim()
+    if (!naam || !appId || /^(uninstall|verwijder)/i.test(naam)) continue
+    const pad = resolveStartAppPad(appId)
+    if (!pad) continue
+    const k = pad.toLowerCase()
+    if (gezien.has(k)) continue
+    gezien.add(k)
+    lijst.push({ naam, pad })
+  }
+  startAppsCache = { t: Date.now(), lijst }
+  return lijst
 }
 
 ipcMain.handle('app:listPrograms', () => {
@@ -1020,8 +1128,10 @@ ipcMain.handle('app:listPrograms', () => {
 
   const gevonden = []
   mappen.forEach(d => scanStartMenu(d, gevonden))
+  // Store-apps zonder .lnk (Claude Desktop e.d.)
+  for (const p of lijstStartApps()) gevonden.push(p)
 
-  // Hetzelfde programma staat vaak in beide startmenu's
+  // Hetzelfde programma staat vaak in beide startmenu's én in Get-StartApps
   const gezien = new Set()
   return gevonden
     .filter(p => { const k = p.pad.toLowerCase(); if (gezien.has(k)) return false; gezien.add(k); return true })
@@ -1124,6 +1234,19 @@ function herstelClaudeCodePad(pad) {
 ipcMain.handle('app:scanEditors', () => {
   const wortels = programmaWortels()
 
+  // Schijf eerst: Get-StartApps (powershell) kan op een verse pc 20s hangen.
+  // Cursor/VS Code staan meestal gewoon onder LocalAppData; die mogen niet
+  // wachten tot Store-ontdekking klaar is.
+  const gevonden = []
+  const gezien = new Set()
+  const zet = (ed, pad, bron) => {
+    if (!pad || gezien.has(ed.id)) return
+    gezien.add(ed.id)
+    gevonden.push({ id: ed.id, label: ed.label, path: pad, bron })
+  }
+
+  for (const ed of EDITORS) zet(ed, zoekEditorOpSchijf(ed, wortels), 'installatiemap')
+
   // Het startmenu levert naam + pad; dat vangt installaties op onbekende plekken
   let startMenu = []
   try {
@@ -1133,33 +1256,46 @@ ipcMain.handle('app:scanEditors', () => {
     ].filter(d => d && fs.existsSync(d))
     mappen.forEach(d => scanStartMenu(d, startMenu))
   } catch {}
-
-  const gevonden = []
   for (const ed of EDITORS) {
-    let pad = zoekEditorOpSchijf(ed, wortels)
-    let bron = 'installatiemap'
+    if (gezien.has(ed.id) || !ed.startMenu) continue
+    const hit = startMenu.find(p => ed.startMenu.test(p.naam))
+    if (hit) zet(ed, hit.pad, 'startmenu')
+  }
+  try {
+    for (const p of lijstStartApps()) startMenu.push(p)
+  } catch {}
+  for (const ed of EDITORS) {
+    if (gezien.has(ed.id) || !ed.startMenu) continue
+    const hit = startMenu.find(p => ed.startMenu.test(p.naam))
+    if (hit) zet(ed, hit.pad, 'startmenu')
+  }
 
-    if (!pad && ed.startMenu) {
-      const hit = startMenu.find(p => ed.startMenu.test(p.naam))
-      if (hit) { pad = hit.pad; bron = 'startmenu' }
-    }
-    if (!pad && ed.cli) {
+  for (const ed of EDITORS) {
+    if (!gezien.has(ed.id) && ed.cli) {
       const p = zoekInPad(ed.cli)
-      if (p) { pad = p; bron = 'PATH' }
+      if (p) zet(ed, p, 'PATH')
     }
-    // Claude Code (npm): postinstall kopieert de native binary naar
-    // bin/claude.exe. Mislukt die stap, dan wijst claude.cmd naar een
-    // spookbestand — liever de echte win32-binary of PATH.
-    if (pad && ed.id === 'claudeCode') {
-      const hersteld = herstelClaudeCodePad(pad)
-      if (hersteld) pad = hersteld
-      else if (!fs.existsSync(pad) || claudeCmdDoelOntbreekt(pad)) {
-        const viaPad = ed.cli && zoekInPad(ed.cli)
-        if (viaPad && !claudeCmdDoelOntbreekt(viaPad)) { pad = viaPad; bron = 'PATH' }
-        else pad = null
+  }
+
+  // Claude Code (npm): postinstall kopieert de native binary naar
+  // bin/claude.exe. Mislukt die stap, dan wijst claude.cmd naar een
+  // spookbestand — liever de echte win32-binary of PATH.
+  const claudeIdx = gevonden.findIndex(g => g.id === 'claudeCode')
+  if (claudeIdx >= 0) {
+    const ed = EDITORS.find(e => e.id === 'claudeCode')
+    const pad = gevonden[claudeIdx].path
+    const hersteld = herstelClaudeCodePad(pad)
+    if (hersteld) gevonden[claudeIdx].path = hersteld
+    else if (!fs.existsSync(pad) || claudeCmdDoelOntbreekt(pad)) {
+      const viaPad = ed && ed.cli && zoekInPad(ed.cli)
+      if (viaPad && !claudeCmdDoelOntbreekt(viaPad)) {
+        gevonden[claudeIdx].path = viaPad
+        gevonden[claudeIdx].bron = 'PATH'
+      } else {
+        gezien.delete('claudeCode')
+        gevonden.splice(claudeIdx, 1)
       }
     }
-    if (pad) gevonden.push({ id: ed.id, label: ed.label, path: pad, bron })
   }
   return gevonden
 })

@@ -13,8 +13,10 @@ t('geen dubbele ids', new Set(EDITORS.map(e => e.id)).size === EDITORS.length)
 t('elke editor is op minstens één manier te vinden',
   EDITORS.every(e => e.paden || e.versieMap || e.cli || e.startMenu))
 t('de bekende namen zitten erin',
-  ['sublime', 'notepadpp', 'visualstudio', 'idea', 'zed', 'windsurf', 'neovim']
+  ['sublime', 'cursor', 'visualstudio', 'idea', 'zed', 'windsurf', 'neovim']
     .every(id => EDITORS.some(e => e.id === id)))
+t('Notepad++ staat er bewust niet in — dat kan geen mappen openen',
+  !EDITORS.some(e => e.id === 'notepadpp'))
 t('Claude Code en de Claude-app staan als aparte items in de catalogus',
   EDITORS.some(e => e.id === 'claudeCode') && EDITORS.some(e => e.id === 'claudeDesktop') &&
   EDITORS.find(e => e.id === 'claudeCode').label !== EDITORS.find(e => e.id === 'claudeDesktop').label)
@@ -25,13 +27,15 @@ const maak = (p) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.wri
 
 // C-schijf
 const cPf = path.join(TMP, 'C', 'Program Files')
-maak(path.join(cPf, 'Notepad++', 'notepad++.exe'))
 maak(path.join(cPf, 'JetBrains', 'IntelliJ IDEA 2023.2', 'bin', 'idea64.exe'))
 maak(path.join(cPf, 'JetBrains', 'IntelliJ IDEA 2024.3', 'bin', 'idea64.exe'))
-// Claude Code (CLI, claude.exe) én de Claude-app (Claude.exe): aparte
-// catalogus-items met dezelfde exe-stam — beide moeten los gevonden worden.
+// Claude Code (CLI, claude.exe) én de Claude-app via Store/WindowsApps
+// (geen Claude\Claude.exe meer — dat is precies het pad dat we vroeger misten).
 maak(path.join(cPf, 'Claude Code', 'claude.exe'))
-maak(path.join(cPf, 'Claude', 'Claude.exe'))
+const wa = path.join(cPf, 'WindowsApps', 'Claude_1.46388.1.0_x64__pzs8sxrjxfjjc')
+maak(path.join(wa, 'app', 'Claude.exe'))
+fs.writeFileSync(path.join(wa, 'AppxManifest.xml'),
+  '<Package><Applications><Application Id="Claude" Executable="app\\Claude.exe"/></Applications></Package>')
 // D-schijf: hier staat Sublime, om te zien dat we verder kijken dan C
 const dPf = path.join(TMP, 'D', 'Program Files')
 maak(path.join(dPf, 'Sublime Text', 'sublime_text.exe'))
@@ -97,7 +101,6 @@ if (echteLocal) process.env.LOCALAPPDATA = echteLocal
 
 const vind = (id) => gevonden.find(g => g.id === id)
 
-t('Notepad++ wordt gevonden op de C-schijf', !!vind('notepadpp'))
 t('Sublime wordt gevonden op de D-schijf', !!vind('sublime'))
 t('en dus niet alleen op C', vind('sublime') && vind('sublime').path.startsWith('D:'))
 t('Cursor wordt gevonden in de gebruikersmap', !!vind('cursor'))
@@ -105,7 +108,8 @@ t('Zed wordt gevonden via PATH', !!vind('zed') && vind('zed').bron === 'PATH')
 t('IntelliJ wordt gevonden ondanks het versienummer in het pad', !!vind('idea'))
 t('en daarvan de nieuwste versie', vind('idea') && vind('idea').path.includes('2024.3'))
 t('Claude Code wordt gevonden', !!vind('claudeCode'))
-t('en de Claude-app apart, ondanks dezelfde exe-stam', !!vind('claudeDesktop'))
+t('en de Claude-app via WindowsApps/Store, ondanks dezelfde exe-stam',
+  !!vind('claudeDesktop') && /WindowsApps/i.test(vind('claudeDesktop').path))
 t('elk resultaat vertelt waar het vandaan komt', gevonden.every(g => g.bron))
 t('elk resultaat wijst naar een bestand dat bestaat',
   gevonden.every(g => { const n = naarNep(g.path); return echteExists(n === null ? g.path : n) }))

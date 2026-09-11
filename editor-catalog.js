@@ -55,10 +55,7 @@ const EDITORS = [
   { id: 'sublime', label: 'Sublime Text', cli: 'subl',
     paden: ['Sublime Text\\sublime_text.exe', 'Sublime Text 3\\sublime_text.exe', 'Sublime Text 4\\sublime_text.exe'],
     startMenu: /^sublime text/i },
-
-  { id: 'notepadpp', label: 'Notepad++',
-    paden: ['Notepad++\\notepad++.exe'],
-    startMenu: /^notepad\+\+/i },
+  // Notepad++ expres niet: dat opent geen map, alleen losse bestanden.
 
   { id: 'pulsar', label: 'Pulsar',
     paden: ['Pulsar\\Pulsar.exe'],
@@ -128,6 +125,8 @@ const EDITORS = [
 
   // De desktop-app. Die opent geen map, maar krijgt het project mee via zijn
   // eigen claude://-koppeling (zie cmd:openClaudeDesktop in main.js).
+  // Store-installatie: WindowsApps\Claude_<versie>_x64__<uitgever>\app\Claude.exe
+  // — géén klassieke Start Menu\.lnk, dus versieMap onder WindowsApps.
   { id: 'claudeDesktop', label: 'Claude (desktop)',
     paden: ['Claude\\Claude.exe'],
     gebruiker: [
@@ -135,6 +134,7 @@ const EDITORS = [
       'AnthropicClaude\\Claude.exe',
       'Programs\\Claude\\Claude.exe',
     ],
+    versieMap: { onder: 'WindowsApps', patroon: /^Claude_/i, exe: 'app\\Claude.exe' },
     startMenu: /^claude$/i },
 
   // ── AI op de opdrachtregel ────────────────────────────────────────────────

@@ -144,7 +144,7 @@
   "settings.customEditors.scanButton": "scan for editors",
   "settings.customEditors.addButton": "add editor",
   "settings.customEditors.namePlaceholder": "Name",
-  "settings.customEditors.emptyHint": "No custom editors yet. Add one to get e.g. Notepad++, Sublime, or your own script as a button on your projects.",
+  "settings.customEditors.emptyHint": "No programs yet. Known editors are found automatically at startup; you can also add one by hand or press \"find editors\".",
   "settings.customEditors.defaultLabel": "editor",
   "settings.customEditors.noneFoundToast": "No new editors found",
   "settings.customEditors.pathPlaceholder": "C:\\path\\to\\editor.exe",

@@ -1618,6 +1618,18 @@ window.addEventListener('DOMContentLoaded', async () => {
     // Nog een ronde git:info zodat de zojuist opgehaalde uitslag in de staat zit.
     for (const p of projects) { try { await ververesGitStaat(p, true) } catch {} }
     meldOnafgemaakteKoppelingen()
+    // Tweede kans op de pull-melding: de eerste fetch (t+800) faalt vaak omdat
+    // WiFi/VPN nog niet klaar is, en kan hier nóg lopen (timeout 15s). Wacht
+    // die af, wis mislukte pogingen, en probeer opnieuw — anders blijft de
+    // ochtend stil ondanks dat "ophalen bij openen" aan staat.
+    const eind = Date.now() + 20000
+    while (achterstandBezig && Date.now() < eind) {
+      await new Promise(r => setTimeout(r, 200))
+    }
+    for (const [pad, l] of Object.entries(gitLaatsteFetch)) {
+      if (l && typeof l === 'object' && l.ok === false) delete gitLaatsteFetch[pad]
+    }
+    controleerAchterstand()
   }, 3500)
 
   // Het main-proces houdt het sluiten tegen en vraagt ons na te kijken.
@@ -13284,7 +13296,12 @@ function alGeconfigureerd() {
     }
     if (catalogId) cats.add(catalogId)
   }
+  // Alleen écht ingeschakelde oude knoppen tellen. De verse-install defaults
+  // hebben Cursor/VS Code/Claude al in `settings.editors` staan — uit, met
+  // alleen een cli-naam als pad. Die catalogus-ids overslaan maakte dat een
+  // verse pc wél Notepad++ vond (niet in die lijst) en Cursor/VS Code negeerde.
   Object.entries(settings.editors || {}).forEach(([k, e]) => {
+    if (!e?.enabled) return
     const def = OUDE_EDITOR_DEFS.find(d => d.key === k)
     voeg(e?.path, def && def.catalogId)
   })
@@ -16557,10 +16574,11 @@ async function controleerAchterstand() {
 
   achterstandBezig = true
   try {
-    // Ook bij een mislukte fetch de tijd bijwerken: anders probeert hij het
-    // bij elke klik opnieuw als je offline bent.
-    gitLaatsteFetch[pad] = Date.now()
     const r = await window.api.gitFetch(pad)
+    // Gelukt → tien minuten rust. Mislukt → korte wachttijd, zodat een koude
+    // start (WiFi nog weg) later wél een melding kan geven i.p.v. de hele
+    // ochtend stil te blijven. Offline-spam blijft beperkt door die korte poos.
+    gitLaatsteFetch[pad] = { t: Date.now(), ok: !!(r && r.ok) }
     if (!r || !r.ok) return
 
     const na = await ververesGitPad(pad, true)
@@ -16574,6 +16592,7 @@ async function controleerAchterstand() {
   } catch {
     // Netwerk weg, remote onbereikbaar: de indicator blijft staan op wat hij
     // wist. Dat is beter dan een foutmelding over iets waar je niet om vroeg.
+    gitLaatsteFetch[pad] = { t: Date.now(), ok: false }
   } finally {
     achterstandBezig = false
   }

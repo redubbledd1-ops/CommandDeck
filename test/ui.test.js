@@ -3833,7 +3833,7 @@ function startVraagAutomaat() {
   // ── gevonden editors aanbieden ─────────────────────────────────────────────
   gevondenEditorsMock = [
     { id: 'sublime',   label: 'Sublime Text', path: 'D:\\Program Files\\Sublime Text\\sublime_text.exe', bron: 'installatiemap' },
-    { id: 'notepadpp', label: 'Notepad++',    path: 'C:\\Program Files\\Notepad++\\notepad++.exe',       bron: 'installatiemap' },
+    { id: 'pulsar',    label: 'Pulsar',       path: 'C:\\Program Files\\Pulsar\\Pulsar.exe',             bron: 'installatiemap' },
     { id: 'zed',       label: 'Zed',          path: 'C:\\bin\\zed.exe',                                   bron: 'PATH' },
   ]
   $('#btn-settings').click(); await tick()
@@ -3866,6 +3866,29 @@ function startVraagAutomaat() {
   gevondenEditorsMock = []
   $('#btn-scan-editors').click(); await tick(); await tick(); await tick()
   check('niets gevonden opent geen venster', $('#modal-found').hidden === true)
+
+  // verse install: Cursor/VS Code staan uit in de defaults, maar MOETEN wél
+  // aangeboden worden. Vroeger filterde alGeconfigureerd ze weg op catalogus-id,
+  // waardoor alleen bv. Notepad++ overbleef.
+  settings.editors = {
+    cursor: { enabled: false, path: 'cursor' },
+    claudeCode: { enabled: false, path: 'claude' },
+    vscode: { enabled: false, path: 'code' },
+    androidStudio: { enabled: false, path: 'D:\\Program Files\\Android\\Android Studio\\bin\\studio64.exe' },
+    claudeDesktop: { enabled: false, path: '' },
+  }
+  settings.customEditors = []
+  settings.editorsGeweigerd = []
+  gevondenEditorsMock = [
+    { id: 'cursor', label: 'Cursor', path: 'C:\\Users\\x\\AppData\\Local\\Programs\\Cursor\\Cursor.exe', bron: 'installatiemap' },
+    { id: 'vscode', label: 'Visual Studio Code', path: 'C:\\Users\\x\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe', bron: 'installatiemap' },
+  ]
+  $('#btn-scan-editors').click(); await tick(); await tick(); await tick()
+  check('uitgeschakelde standaard-editors worden aangeboden', $$('[data-found]').length === 2)
+  check('cursor zit erbij op een verse install', $('#found-list').textContent.includes('Cursor'))
+  check('vscode ook', $('#found-list').textContent.includes('Visual Studio Code'))
+  $('#modal-found-skip').click(); await tick(); await tick()
+  gevondenEditorsMock = []
 
   // opruimen via de app zelf, zodat de renderer het ook meekrijgt
   $$('[data-ce-del]').forEach(b => b.click()); await tick()

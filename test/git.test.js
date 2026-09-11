@@ -684,6 +684,14 @@ t('nooit eerder gefetcht mag altijd', G.magFetchen(stGekoppeld, null, NU) === tr
 t('net gefetcht mag niet opnieuw', G.magFetchen(stGekoppeld, NU - 60_000, NU) === false)
 t('precies op de grens mag wel', G.magFetchen(stGekoppeld, NU - TIEN_MIN, NU) === true)
 t('ruim over de grens mag ook', G.magFetchen(stGekoppeld, NU - 60 * 60_000, NU) === true)
+t('gelukte fetch als object volgt de lange interval',
+  G.magFetchen(stGekoppeld, { t: NU - 60_000, ok: true }, NU) === false)
+t('mislukte fetch mag eerder opnieuw (koud netwerk)',
+  G.magFetchen(stGekoppeld, { t: NU - 60_000, ok: false }, NU) === true)
+t('mislukte fetch net geleden mag nog niet',
+  G.magFetchen(stGekoppeld, { t: NU - 10_000, ok: false }, NU) === false)
+t('mislukte fetch op de korte grens mag wel',
+  G.magFetchen(stGekoppeld, { t: NU - G.FETCH_FAIL_INTERVAL_MS, ok: false }, NU) === true)
 t('zonder remote valt er niets te halen',
   G.magFetchen(G.maakStaat({ isRepo: true, remotes: [], branch: 'main' }), null, NU) === false)
 t('geen repo, geen fetch', G.magFetchen(G.maakStaat({ isRepo: false }), null, NU) === false)
@@ -1597,6 +1605,10 @@ t('en kijkt pas ná het inloggen welk project openstaat',
   /await wachtOpVrijVenster\(\)\) return[\s\S]{0,400}const p = projects\.find\(x => x\.id === activeId\)/.test(rendererAchter))
 t('na het wisselen van account wordt er opnieuw gekeken',
   /await ververesAlleGitStaten\(true\)[\s\S]{0,220}controleerAchterstand\(\)/.test(rendererAchter))
+t('bij opstarten komt er een tweede kans na de netwerkronden',
+  /meldOnafgemaakteKoppelingen\(\)[\s\S]{0,900}ok === false[\s\S]{0,200}controleerAchterstand\(\)/.test(rendererAchter))
+t('een mislukte fetch houdt geen tien minuten stil',
+  /gitLaatsteFetch\[pad\] = \{ t: Date\.now\(\), ok: !!\(r && r\.ok\) \}/.test(rendererAchter))
 t('weggezet werk komt na het ophalen weer terug',
   /stashPopCommando\(bovenste\.ref\)/.test(rendererAchter))
 t('en bij een mislukte stash wordt er niets opgehaald',

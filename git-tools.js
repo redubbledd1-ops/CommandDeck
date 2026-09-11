@@ -531,12 +531,33 @@
   // fetch is netwerk, en tien projecten aanklikken mag geen tien
   // netwerkrondes per minuut worden.
   const FETCH_INTERVAL_MS = 10 * 60 * 1000
+  // Mislukte fetch (WiFi nog niet klaar bij opstarten): niet tien minuten
+  // stilhouden. Kort genoeg om spam bij offline te dempen, lang genoeg voor
+  // een tweede kans zodra het netwerk er wél is.
+  const FETCH_FAIL_INTERVAL_MS = 45 * 1000
 
-  function magFetchen(staat, laatsteFetch, nu = Date.now(), interval = FETCH_INTERVAL_MS) {
+  // laatsteFetch: tijdstip (oud) of { t, ok }. Bij mislukte fetch geldt de
+  // korte wachttijd, anders de gewone tien minuten.
+  function fetchIntervalMs(laatsteFetch, interval) {
+    if (interval != null) return interval
+    if (laatsteFetch && typeof laatsteFetch === 'object' && laatsteFetch.ok === false) {
+      return FETCH_FAIL_INTERVAL_MS
+    }
+    return FETCH_INTERVAL_MS
+  }
+
+  function fetchTijdstip(laatsteFetch) {
+    if (laatsteFetch == null) return null
+    if (typeof laatsteFetch === 'object') return laatsteFetch.t || null
+    return laatsteFetch
+  }
+
+  function magFetchen(staat, laatsteFetch, nu = Date.now(), interval) {
     if (!staat || !staat.beschikbaar || !staat.isRepo) return false
     if (!staat.gekoppeld) return false        // niets om bij op te halen
-    if (!laatsteFetch) return true
-    return (nu - laatsteFetch) >= interval
+    const t = fetchTijdstip(laatsteFetch)
+    if (!t) return true
+    return (nu - t) >= fetchIntervalMs(laatsteFetch, interval)
   }
 
   // Melden we dat de remote vóórloopt? Alleen als er ook echt iets te halen
@@ -2340,7 +2361,7 @@
     identiteitBlokkeert, veiligConfigWaarde, geldigeGhGebruiker,
     identiteitCommando, profielCommando, ghSwitchCommando, vraagtOmInloggen,
     INLOG_ONTHOUDEN, INLOG_VRAGEN, INLOG_KEUZES,
-    indicator, onveiligeRedenen, magFetchen, achterstandMelding, FETCH_INTERVAL_MS,
+    indicator, onveiligeRedenen, magFetchen, achterstandMelding, FETCH_INTERVAL_MS, FETCH_FAIL_INTERVAL_MS,
     achterstandKeuzes, pullCommando,
     globaalIdentiteitCommando, globaalGhGebruikerCommando, accountActiveerStappen,
     koppelingProblemen, ghRepoUitUrl,
