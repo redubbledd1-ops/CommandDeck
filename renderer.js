@@ -353,6 +353,17 @@ function normaliseerEditorKleuren() {
   return veranderd
 }
 
+// Catalogus-id's die nooit blijvend geweigerd mogen raken. `editorsGeweigerd`
+// bestaat om de stille opstart-scan niet te laten zeuren over een editor die
+// je één keer overslaat (zie zoekEditors) -- maar Claude Code is niet "een
+// editor", het is de knop waar deze hele app om draait. Eén ongelukkige klik
+// op "overslaan" (of de knop raakt om wat voor reden dan ook kwijt uit
+// customEditors) betekende voorheen dat hij nooit meer stil terugkwam: de
+// nachtmerrie die steeds opnieuw "gefixt" werd zonder dat de oorzaak weg was.
+// Nu geldt: staat hij op schijf, dan verschijnt hij vanzelf weer bij de
+// volgende start, hoe vaak je hem ook wegklikte.
+const EDITORS_NOOIT_WEIGEREN = new Set(['claudeCode'])
+
 // Vroegere versies hadden vaste editors (Cursor, VS Code, …). Die komen nu in
 // dezelfde lijst als automatisch gevonden programma's.
 const OUDE_EDITOR_DEFS = [
@@ -395,6 +406,17 @@ function migreerStandaardEditors() {
 // Uitvoerprogramma's die de gebruiker zelf heeft toegevoegd (of automatisch gevonden)
 function eigenEditors() {
   return (settings.customEditors || []).filter(e => e.enabled !== false && e.path)
+}
+
+// Ruimt een oudere, blijvende weigering van Claude Code op (van vóór deze
+// regel bestond). Zonder deze opschoning bleef zo'n pc de stille opstart-scan
+// voor altijd negeren, ook na deze fix.
+function herstelNooitWeigeren() {
+  const lijst = settings.editorsGeweigerd || []
+  const schoon = lijst.filter(id => !EDITORS_NOOIT_WEIGEREN.has(id))
+  if (schoon.length === lijst.length) return false
+  settings.editorsGeweigerd = schoon
+  return true
 }
 
 function editorsZelfde(a, b) {
@@ -1605,7 +1627,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   const accP = laadAccounts()
 
   if (migreerStandaardEditors() || ontdubbelCustomEditors() || normaliseerEditorKleuren()
-      || migreerSnelRijen()) window.api.saveSettings(settings)
+      || migreerSnelRijen() || herstelNooitWeigeren()) window.api.saveSettings(settings)
 
   // Project-verkenner begint altijd opnieuw bij de projectlocatie. Alleen
   // cmd/ps onthouden hun map over herstarts heen.
@@ -13421,7 +13443,7 @@ async function zoekEditors({ stil = false, automatisch = false } = {}) {
     !bestaand.paden.has(norm(g.path)) &&
     !bestaand.cats.has(g.id) &&
     !bestaand.stammen.has(padStam(g.path)) &&
-    (!stil || !geweigerd.has(g.id)))
+    (!stil || !geweigerd.has(g.id) || EDITORS_NOOIT_WEIGEREN.has(g.id)))
 
   if (!gevondenEditors.length) {
     if (!stil && !automatisch) showToast(I18N.t('settings.customEditors.noneFoundToast'))
@@ -13487,8 +13509,10 @@ function voegGevondenEditorsToe() {
     ...(settings.customEditors || []),
     ...gekozen.map(g => maakCustomEditor(g)),
   ]
-  // Wat je niet aanvinkt hoeft niet nog eens gevraagd te worden
-  const nietGekozen = gevondenEditors.filter(g => !gekozen.includes(g)).map(g => g.id)
+  // Wat je niet aanvinkt hoeft niet nog eens gevraagd te worden -- behalve
+  // Claude Code (zie EDITORS_NOOIT_WEIGEREN): die mag niet blijvend geweigerd
+  // raken, anders komt hij na het wegklikken nooit meer stil terug.
+  const nietGekozen = gevondenEditors.filter(g => !gekozen.includes(g) && !EDITORS_NOOIT_WEIGEREN.has(g.id)).map(g => g.id)
   settings.editorsGeweigerd = [...new Set([...(settings.editorsGeweigerd || []), ...nietGekozen])]
   settings.editorsGezocht = true
   window.api.saveSettings(settings)
@@ -13500,7 +13524,8 @@ function voegGevondenEditorsToe() {
 }
 
 function slaGevondenEditorsOver() {
-  settings.editorsGeweigerd = [...new Set([...(settings.editorsGeweigerd || []), ...gevondenEditors.map(g => g.id)])]
+  const ids = gevondenEditors.map(g => g.id).filter(id => !EDITORS_NOOIT_WEIGEREN.has(id))
+  settings.editorsGeweigerd = [...new Set([...(settings.editorsGeweigerd || []), ...ids])]
   settings.editorsGezocht = true
   window.api.saveSettings(settings)
   sluitGevondenEditors()

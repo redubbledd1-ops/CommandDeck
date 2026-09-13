@@ -462,7 +462,7 @@ window.eval(fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8')
   + '\n  verwijderMap, folderOp,'
   + '\n  verfLezer,'
   + '\n  gekoppeldeRepoAdressen, zetBewerkt: (id) => { editingId = id },'
-  + '\n  editorsZelfde,'
+  + '\n  editorsZelfde, zoekEditors, herstelNooitWeigeren, EDITORS_NOOIT_WEIGEREN,'
   + '\n  vergeetProjIcoon, projIcoonAuto,'
   + '\n  splitSlotIds: () => (werkSplit.slots || []).map(s => s.projectId) };')
 startVraagAutomaat()
@@ -3935,6 +3935,54 @@ function startVraagAutomaat() {
   $('#settings-save').click(); await tick(); await tick()
   check('de toegevoegde editors zijn weer weg', settings.customEditors.length === 0)
   $('#btn-settings').click(); await tick()
+
+  // ── Claude Code mag nooit blijvend verdwijnen ───────────────────────────────
+  // Dit is de terugkerende klacht: de knop is er op een dag ineens niet meer.
+  // `editorsGeweigerd` was daarvan de sluipende oorzaak — één keer wegklikken
+  // of overslaan betekende voorgoed genegeerd worden door de stille
+  // opstart-scan. Claude Code staat nu op EDITORS_NOOIT_WEIGEREN en moet daar
+  // op alle drie de manieren aan ontsnappen.
+  const claudeGevonden = { id: 'claudeCode', label: 'Claude Code', path: 'C:\\Users\\x\\AppData\\Roaming\\npm\\claude.cmd', bron: 'PATH' }
+  $('#btn-settings').click(); await tick() // btn-settings is een toggle en stond nog aan
+
+  // 1) handmatig overslaan mag hem niet blijvend weigeren
+  settings.customEditors = []
+  settings.editorsGeweigerd = []
+  gevondenEditorsMock = [claudeGevonden]
+  $('#btn-scan-editors').click(); await tick(); await tick(); await tick()
+  $('#modal-found-skip').click(); await tick(); await tick()
+  check('overslaan zet Claude Code niet in de weigerlijst', !settings.editorsGeweigerd.includes('claudeCode'))
+
+  // 2) uitvinken bij "toevoegen" mag dat ook niet
+  gevondenEditorsMock = [claudeGevonden]
+  $('#btn-scan-editors').click(); await tick(); await tick(); await tick()
+  $$('[data-found]')[0].checked = false
+  $('#modal-found-add').click(); await tick(); await tick()
+  check('uitvinken zet Claude Code niet in de weigerlijst', !settings.editorsGeweigerd.includes('claudeCode'))
+  check('en hij is ook niet toegevoegd (bewust uitgevinkt)',
+    !settings.customEditors.some(e => e.catalogId === 'claudeCode'))
+
+  // 3) staat hij (van vóór deze fix) al in de weigerlijst, dan vindt de
+  // stille opstart-scan (automatisch:true, stil:true) hem toch weer
+  settings.customEditors = []
+  settings.editorsGeweigerd = ['claudeCode']
+  gevondenEditorsMock = [claudeGevonden]
+  await W.__test.zoekEditors({ stil: true, automatisch: true })
+  check('de stille scan voegt Claude Code toch toe, ondanks de weigerlijst',
+    settings.customEditors.some(e => e.catalogId === 'claudeCode'))
+
+  // 4) een oude, vastgeroeste weigering wordt bij het opstarten opgeschoond
+  settings.editorsGeweigerd = ['claudeCode', 'arduino']
+  const geschoond = W.__test.herstelNooitWeigeren()
+  check('opschonen meldt een wijziging', geschoond === true)
+  check('claudeCode is weg uit de weigerlijst', !settings.editorsGeweigerd.includes('claudeCode'))
+  check('andere weigeringen blijven staan', settings.editorsGeweigerd.includes('arduino'))
+  check('nog een keer opschonen meldt niets meer te doen', W.__test.herstelNooitWeigeren() === false)
+
+  gevondenEditorsMock = []
+  settings.customEditors = []
+  settings.editorsGeweigerd = []
+  $('#btn-settings').click(); await tick() // weer uit, zoals de volgende sectie verwacht
 
   // ── eigen editors ──────────────────────────────────────────────────────────
   $('#btn-settings').click(); await tick()

@@ -1072,12 +1072,57 @@ function scanStartMenu(dir, uit, diepte = 0) {
   }
 }
 
-// AppX / Store: AppID "Claude_pzs8sxrjxfjjc!Claude" → nieuwste package-map → exe
-// uit AppxManifest.xml. Zo blijft Claude (en soortgenoten) vindbaar zonder .lnk.
-function vindAppxExecutable(appId) {
+// Leest Executable="app\Claude.exe" uit AppxManifest.xml in een package-map.
+function leesAppxExecutable(basis, appKey) {
+  const manifest = path.join(basis, 'AppxManifest.xml')
+  let exeRel = null
+  try {
+    const xml = fs.readFileSync(manifest, 'utf8')
+    // Zoek Application met dit Id; Executable="app\Claude.exe"
+    const blok = xml.match(new RegExp(
+      `<Application[^>]*Id="${appKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"[^>]*>`,
+      'i'))
+    const bron = blok ? blok[0] : xml
+    const m = bron.match(/\bExecutable="([^"]+\.exe)"/i)
+    if (m) exeRel = m[1].replace(/\//g, '\\')
+  } catch {}
+  if (!exeRel) {
+    // Fallback: app\<Naam>.exe komt vaak voor bij full-trust desktop bridges
+    const kandidaten = [
+      path.join('app', appKey + '.exe'),
+      path.join('app', path.basename(basis).split('_')[0] + '.exe'),
+    ]
+    for (const k of kandidaten) {
+      try { if (fs.existsSync(path.join(basis, k))) { exeRel = k; break } } catch {}
+    }
+  }
+  if (!exeRel) return null
+  const exe = path.join(basis, exeRel)
+  try {
+    if (fs.existsSync(exe) || /\\WindowsApps\\/i.test(exe)) return exe
+  } catch {}
+  return null
+}
+
+// AppX / Store: AppID "Claude_pzs8sxrjxfjjc!Claude" → package-map → exe uit
+// AppxManifest.xml. Zo blijft Claude (en soortgenoten) vindbaar zonder .lnk.
+//
+// `installLocation` komt van Get-AppxPackage (zie lijstStartAppsAsync) en is
+// de enige betrouwbare weg: C:\Program Files\WindowsApps zélf oplijsten met
+// fs.readdirSync levert zonder beheerdersrechten altijd EPERM op — Windows
+// blokkeert die map-listing standaard, ook al mag je een bestand erin wél
+// rechtstreeks lezen als je het volledige pad al kent (vandaar de fallback
+// hieronder, die zelden nog iets vindt maar geen kwaad kan).
+function vindAppxExecutable(appId, installLocation) {
   if (!appId || !appId.includes('!')) return null
   const [family, appKey] = appId.split('!')
   if (!family) return null
+
+  if (installLocation) {
+    const exe = leesAppxExecutable(installLocation, appKey)
+    if (exe) return exe
+  }
+
   const underscore = family.lastIndexOf('_')
   if (underscore < 0) return null
   const naam = family.slice(0, underscore)
@@ -1093,47 +1138,21 @@ function vindAppxExecutable(appId) {
       .filter(d => d.startsWith(naam + '_') && d.endsWith('_' + uitgever))
       .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
     for (const d of hits) {
-      const basis = path.join(wa, d)
-      const manifest = path.join(basis, 'AppxManifest.xml')
-      let exeRel = null
-      try {
-        const xml = fs.readFileSync(manifest, 'utf8')
-        // Zoek Application met dit Id; Executable="app\Claude.exe"
-        const blok = xml.match(new RegExp(
-          `<Application[^>]*Id="${appKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"[^>]*>`,
-          'i'))
-        const bron = blok ? blok[0] : xml
-        const m = bron.match(/\bExecutable="([^"]+\.exe)"/i)
-        if (m) exeRel = m[1].replace(/\//g, '\\')
-      } catch {}
-      if (!exeRel) {
-        // Fallback: app\<Naam>.exe komt vaak voor bij full-trust desktop bridges
-        const kandidaten = [
-          path.join('app', appKey + '.exe'),
-          path.join('app', naam + '.exe'),
-        ]
-        for (const k of kandidaten) {
-          try { if (fs.existsSync(path.join(basis, k))) { exeRel = k; break } } catch {}
-        }
-      }
-      if (!exeRel) continue
-      const exe = path.join(basis, exeRel)
-      try {
-        if (fs.existsSync(exe) || /\\WindowsApps\\/i.test(exe)) return exe
-      } catch {}
+      const exe = leesAppxExecutable(path.join(wa, d), appKey)
+      if (exe) return exe
     }
   }
   return null
 }
 
-function resolveStartAppPad(appId) {
+function resolveStartAppPad(appId, installLocation) {
   if (!appId) return null
   // Klassieke apps: Get-StartApps geeft vaak het volledige .exe-pad als AppID
   if (/\.exe$/i.test(appId)) {
     try { if (fs.existsSync(appId)) return appId } catch {}
     return null
   }
-  if (appId.includes('!')) return vindAppxExecutable(appId)
+  if (appId.includes('!')) return vindAppxExecutable(appId, installLocation)
   return null
 }
 
@@ -1143,12 +1162,13 @@ function parseStartAppsTekst(uit) {
   const lijst = []
   const gezien = new Set()
   for (const regel of String(uit || '').split(/\r?\n/)) {
-    const i = regel.indexOf('\t')
-    if (i < 0) continue
-    const naam = regel.slice(0, i).trim()
-    const appId = regel.slice(i + 1).trim()
+    const kolommen = regel.split('\t')
+    if (kolommen.length < 2) continue
+    const naam = kolommen[0].trim()
+    const appId = kolommen[1].trim()
+    const installLocation = (kolommen[2] || '').trim()
     if (!naam || !appId || /^(uninstall|verwijder)/i.test(naam)) continue
-    const pad = resolveStartAppPad(appId)
+    const pad = resolveStartAppPad(appId, installLocation)
     if (!pad) continue
     const k = pad.toLowerCase()
     if (gezien.has(k)) continue
@@ -1160,6 +1180,10 @@ function parseStartAppsTekst(uit) {
 
 // Get-StartApps via PowerShell kan op een verse pc 20s hangen. Nooit synchroon
 // op de hoofdthread: anders staat het venster stil bij het opstarten.
+//
+// InstallLocation komt van Get-AppxPackage: dat werkt via de AppX-API en dus
+// ook zonder beheerdersrechten, in tegenstelling tot zelf C:\Program
+// Files\WindowsApps oplijsten (zie vindAppxExecutable hierboven).
 function lijstStartAppsAsync() {
   if (process.platform !== 'win32') return Promise.resolve([])
   if (startAppsCache && Date.now() - startAppsCache.t < 5 * 60 * 1000) {
@@ -1168,7 +1192,12 @@ function lijstStartAppsAsync() {
   return new Promise((resolve) => {
     execFile('powershell.exe', [
       '-NoProfile', '-NonInteractive', '-Command',
-      'Get-StartApps | ForEach-Object { $_.Name + [char]9 + $_.AppID }',
+      '$locs = @{}; ' +
+      'Get-AppxPackage | ForEach-Object { if ($_.PackageFamilyName) { $locs[$_.PackageFamilyName] = $_.InstallLocation } }; ' +
+      'Get-StartApps | ForEach-Object { ' +
+      '$fam = ""; if ($_.AppID -match "^([^!]+)!") { $fam = $Matches[1] }; ' +
+      '$loc = ""; if ($fam -and $locs.ContainsKey($fam)) { $loc = $locs[$fam] }; ' +
+      '$_.Name + [char]9 + $_.AppID + [char]9 + $loc }',
     ], {
       encoding: 'utf8', timeout: 20000, windowsHide: true,
       maxBuffer: 4 * 1024 * 1024, env: childEnv(),
