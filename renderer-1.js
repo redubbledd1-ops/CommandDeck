@@ -12298,9 +12298,7 @@ function logSettingsMarkup() {
       }).join('')
     : `<div class="log-leeg">${esc(I18N.t('settings.log.leeg'))}</div>`
 
-  return `
-      <div>
-        <div class="settings-section-title">${I18N.t('settings.section.logTitle')}</div>
+  return instelSectieHtml('log', esc(I18N.t('settings.section.logTitle')), `
         <div class="instel-rij">
           <span class="instel-uitleg">${I18N.t('settings.log.uitleg')}</span>
         </div>
@@ -12319,7 +12317,7 @@ function logSettingsMarkup() {
           <button class="term-btn" id="log-wis"><i class="ti ti-trash" style="font-size:13px"></i> ${esc(I18N.t('settings.log.wis'))}</button>
         </div>
         <div class="log-lijst">${rijen}</div>
-      </div>`
+  `)
 }
 
 async function ververesLog() {
@@ -12401,9 +12399,7 @@ function codeKleurenMarkup() {
           <span class="ck-kleur-naam">${esc(I18N.t('settings.codeKleuren.soort.' + soort))}</span>
         </label>`).join('')
 
-  return `
-      <div>
-        <div class="settings-section-title">${I18N.t('settings.section.codeKleurenTitle')}</div>
+  return instelSectieHtml('codekleuren', esc(I18N.t('settings.section.codeKleurenTitle')), `
         <div class="editor-row enabled">
           <input type="checkbox" id="ck-aan" ${aan ? 'checked' : ''} />
           <div class="editor-row-name"><i class="ti ti-palette"></i> ${I18N.t('settings.codeKleuren.aanLabel')}</div>
@@ -12427,7 +12423,7 @@ function codeKleurenMarkup() {
         </div>
         <pre class="ck-voorbeeld mono" id="ck-voorbeeld"></pre>
         <span class="instel-uitleg">${I18N.t('settings.codeKleuren.grensDesc', { max: Math.round(CodeKleuren.MAX_TEKENS / 1000) })}</span>
-      </div>`
+  `)
 }
 
 function tekenCkVoorbeeld() {
@@ -12547,8 +12543,10 @@ function renderSettingsPanel() {
       <span class="settings-header-title">${I18N.t('sidebar.settingsTitle')}</span>
     </div>
     <div class="settings-body">
-      <div>
-        <div class="settings-section-title">${I18N.t('settings.section.accountsTitle')}</div>
+      ${instelSectieHtml('account-git', esc(I18N.t('settings.section.accountGitTitle')), `
+        <div class="instel-rij">
+          <span class="instel-uitleg">${I18N.t('settings.git.accountIsGitUitleg')}</span>
+        </div>
         ${accountRijenHtml()}
         <div class="instel-rij">
           <button class="add-proj-btn" id="btn-account-add" style="margin:0">
@@ -12559,9 +12557,6 @@ function renderSettingsPanel() {
         <div class="instel-rij">
           <span class="instel-uitleg account-eerlijk">${I18N.t('accounts.eerlijk')}</span>
         </div>
-      </div>
-      <div>
-        <div class="settings-section-title">${I18N.t('settings.section.gitTitle')}</div>
         <div class="instel-rij">
           <div class="editor-row-name"><i class="ti ti-git-branch"></i> ${I18N.t('settings.git.label')}</div>
           <select class="loc-select" id="set-git-afsluiten">
@@ -12600,9 +12595,8 @@ function renderSettingsPanel() {
           </button>
           <span class="instel-uitleg">${I18N.t('settings.git.inlogEerlijk')}</span>
         </div>
-      </div>
-      <div>
-        <div class="settings-section-title">${I18N.t('settings.section.autofixTitle')}</div>
+      `)}
+      ${instelSectieHtml('autofix', esc(I18N.t('settings.section.autofixTitle')), `
         <div class="editor-row enabled" id="autofix-row">
           <input type="checkbox" id="autofix-check" ${settings.autoFix?.enabled !== false ? 'checked' : ''} />
           <div class="editor-row-name"><i class="ti ti-wand"></i> ${I18N.t('settings.autofix.label')}</div>
@@ -12610,9 +12604,8 @@ function renderSettingsPanel() {
             ${I18N.t('settings.autofix.desc')}
           </div>
         </div>
-      </div>
-      <div>
-        <div class="settings-section-title">${I18N.t('settings.section.sidebarTitle')}</div>
+      `)}
+      ${instelSectieHtml('sidebar', esc(I18N.t('settings.section.sidebarTitle')), `
         <div class="editor-row enabled">
           <input type="checkbox" id="set-sectie-cmd" ${zijbalkSectieAan('cmd') ? 'checked' : ''} />
           <div class="editor-row-name"><i class="ti ti-terminal-2"></i> ${I18N.t('settings.sidebar.cmdLabel')}</div>
@@ -12623,9 +12616,8 @@ function renderSettingsPanel() {
           <div class="editor-row-name"><i class="ti ti-device-desktop"></i> ${I18N.t('settings.sidebar.dezepcLabel')}</div>
           <div class="instel-uitleg">${I18N.t('settings.sidebar.dezepcDesc')}</div>
         </div>
-      </div>
-      <div>
-        <div class="settings-section-title">${I18N.t('settings.section.explorerTitle')}</div>
+      `)}
+      ${instelSectieHtml('explorer', esc(I18N.t('settings.section.explorerTitle')), `
         <div class="editor-row enabled">
           <input type="checkbox" id="set-mapgroottes" ${settings.mapGroottes !== false ? 'checked' : ''} />
           <div class="editor-row-name"><i class="ti ti-ruler-measure"></i> ${I18N.t('settings.explorer.folderSizesLabel')}</div>
@@ -12633,27 +12625,24 @@ function renderSettingsPanel() {
             ${I18N.t('settings.explorer.folderSizesDesc')}
           </div>
         </div>
-      </div>
-      <div>
-        <div class="settings-section-title">${I18N.t('settings.section.textTitle')}</div>
+      `)}
+      ${instelSectieHtml('text', esc(I18N.t('settings.section.textTitle')), `
         <div class="editor-row enabled">
           <input type="checkbox" id="set-text-meta" ${textMetaZichtbaar() ? 'checked' : ''} />
           <div class="editor-row-name"><i class="ti ti-notes"></i> ${I18N.t('text.showMetaInEditor')}</div>
           <div class="instel-uitleg">${I18N.t('text.showMetaInEditorDesc')}</div>
         </div>
-      </div>
+      `)}
       ${codeKleurenMarkup()}
-      <div>
-        <div class="settings-section-title">${I18N.t('settings.section.projectOpenTitle')}</div>
+      ${instelSectieHtml('projectopen', esc(I18N.t('settings.section.projectOpenTitle')), `
         <div class="instel-rij">
           <span class="instel-uitleg">${I18N.t('settings.projectOpen.desc')}</span>
         </div>
         ${projectOpenRijHtml('website', 'ti-world')}
         ${projectOpenRijHtml('flutter', 'ti-brand-flutter')}
         ${projectOpenRijHtml('overig', 'ti-folder')}
-      </div>
-      <div>
-        <div class="settings-section-title">${I18N.t('settings.section.historyTitle')}</div>
+      `)}
+      ${instelSectieHtml('history', esc(I18N.t('settings.section.historyTitle')), `
         <div class="editor-row enabled">
           <input type="checkbox" id="hist-enabled" ${hist.enabled !== false ? 'checked' : ''} />
           <div class="editor-row-name"><i class="ti ti-history"></i> ${I18N.t('settings.history.enabledLabel')}</div>
@@ -12681,10 +12670,9 @@ function renderSettingsPanel() {
           <button class="term-btn stop" id="hist-clear-all"><i class="ti ti-trash" style="font-size:13px"></i> ${I18N.t('settings.history.clearAllButton')}</button>
           <span class="hist-count">${I18N.t('settings.history.countSummary', { commands: (history.entries || []).length, runs: (history.recent || []).length })}</span>
         </div>
-      </div>
-      <div>
-        <div class="settings-section-title-row">
-          <div class="settings-section-title">${I18N.t('settings.section.customEditorsTitle')}</div>
+      `)}
+      ${instelSectieHtml('customeditors', esc(I18N.t('settings.section.customEditorsTitle')), `
+        <div class="instel-rij">
           <button class="term-btn" id="btn-scan-editors" title="${I18N.t('settings.customEditors.scanTitle')}"><i class="ti ti-search" style="font-size:13px"></i> ${I18N.t('settings.customEditors.scanButton')}</button>
         </div>
         <p style="font-size:11px;color:var(--muted);margin:4px 0 8px">
@@ -12694,9 +12682,8 @@ function renderSettingsPanel() {
         <button class="add-proj-btn" id="btn-add-custom-editor" style="margin:0;margin-top:4px">
           <i class="ti ti-plus"></i> ${I18N.t('settings.customEditors.addButton')}
         </button>
-      </div>
-      <div>
-        <div class="settings-section-title">${I18N.t('settings.section.deleteTitle')}</div>
+      `)}
+      ${instelSectieHtml('delete', esc(I18N.t('settings.section.deleteTitle')), `
         <div class="instel-rij">
           <div class="editor-row-name"><i class="ti ti-trash"></i> ${I18N.t('settings.delete.label')}</div>
           <select class="loc-select" id="set-wiswijze">
@@ -12710,11 +12697,10 @@ function renderSettingsPanel() {
             <i class="ti ti-arrow-back-up" style="font-size:13px"></i> ${I18N.t('wis.restoreButtonShort', { count: verborgenKnopAantal() })}
           </button>` : ''}
         </div>
-      </div>
+      `)}
       ${logSettingsMarkup()}
       ${aiSettingsMarkup()}
-      <div>
-        <div class="settings-section-title">${I18N.t('settings.section.languageTitle')}</div>
+      ${instelSectieHtml('language', esc(I18N.t('settings.section.languageTitle')), `
         <div class="settings-proj-item" id="settings-open-talen">
           <i class="ti ti-language" style="font-size:20px;color:var(--muted2)"></i>
           <div class="settings-proj-info">
@@ -12723,14 +12709,13 @@ function renderSettingsPanel() {
           </div>
           <button class="settings-proj-edit"><i class="ti ti-chevron-right"></i></button>
         </div>
-      </div>
-      <div>
-        <div class="settings-section-title">${I18N.t('sidebar.sectionProjects')}</div>
+      `)}
+      ${instelSectieHtml('projects', esc(I18N.t('sidebar.sectionProjects')), `
         ${projRows}
         <button class="add-proj-btn" id="settings-add-proj" style="margin:0;margin-top:4px">
           <i class="ti ti-plus"></i> ${I18N.t('sidebar.addProject')}
         </button>
-      </div>
+      `)}
     </div>
     <div class="settings-save-bar">
       <button class="btn-ghost" id="settings-cancel">${I18N.t('common.cancel')}</button>
@@ -12738,6 +12723,7 @@ function renderSettingsPanel() {
     </div>
   `
 
+  setupInstelSecties(panel)
   renderCustomEditors()
   bedraadCodeKleuren()
   bedraadAiSettings()
@@ -12978,12 +12964,11 @@ function renderSettingsPanel() {
 let aiSettingsHerladen = false
 
 function aiSettingsMarkup() {
-  const titel = I18N.t('settings.section.aiTitle')
+  const titel = esc(I18N.t('settings.section.aiTitle'))
   if (!aiProviders.length) {
-    return `<div>
-      <div class="settings-section-title">${titel}</div>
+    return instelSectieHtml('ai', titel, `
       <div class="hint-row">${I18N.t('settings.ai.loadingHint')}</div>
-    </div>`
+    `)
   }
 
   const cfg     = settings.ai || {}
@@ -18945,14 +18930,42 @@ function setupTerminalInput(project) {
   input.focus()
 }
 
-// ── Modal: Add / Edit project ─────────────────────────────────────────────────
-// De vier secties (Algemeen/Knoppen/Git/Programma's) klappen in en uit zoals
-// de GitHub-repo-kiezer hierboven al deed: kop is de knop, pijltje wisselt van
-// klasse. Los van elkaar onthouden hoeft niet -- bij elke keer openen (nieuw
-// project of bewerken) gaan ze weer allemaal dicht, zie sluitAlleInstelSecties.
-const INSTEL_SECTIES = ['algemeen', 'knoppen', 'git', 'programmas']
+// ── Inklapbare secties (gedeeld tussen het project-venster en het
+// instellingen-scherm) ───────────────────────────────────────────────────────
+// Kop is de knop, pijltje wisselt van klasse (geen CSS-rotate) -- zelfde idee
+// als de bestaande GitHub-repo-kiezer hierboven.
+//
+// Twee heel verschillende plekken gebruiken dit:
+//   - het project-venster (Algemeen/Knoppen/Git/Programma's) is een modal die
+//     telkens vers opengaat, voor een willekeurig project -- die mag altijd
+//     weer vers-dicht beginnen, zie sluitAlleInstelSecties.
+//   - het instellingen-scherm tekent zichzelf steeds opnieuw (bijna elke
+//     instelling die je wijzigt roept renderSettingsPanel() aan) en zou zonder
+//     onthouden staat bij elke klik weer dichtklappen. instelSectieOpen is die
+//     onthouden staat; instelSectieHtml() gebruikt hem om de eerste tekening
+//     meteen in de juiste stand te zetten.
+let instelSectieOpen = {}   // sleutel -> bool; ontbreekt = dicht (standaard)
+
+// Bouwt de complete sectie (kop + inhoud) als HTML-string, voor gebruik in een
+// template die met innerHTML wordt neergezet (het instellingen-scherm). Het
+// project-venster heeft zijn kop/inhoud al staan in index.html en heeft dit
+// niet nodig.
+function instelSectieHtml(sleutel, titel, inhoudHtml) {
+  const open = !!instelSectieOpen[sleutel]
+  return `
+    <div class="instel-sectie" data-instel-sectie="${sleutel}">
+      <button type="button" class="instel-sectie-kop${open ? '' : ' dicht'}" data-instel-sectie="${sleutel}">
+        <i class="ti ${open ? 'ti-chevron-down' : 'ti-chevron-right'} instel-sectie-pijl"></i>
+        <span>${titel}</span>
+      </button>
+      <div class="instel-sectie-inhoud" id="instel-inhoud-${sleutel}" ${open ? '' : 'hidden'}>
+        ${inhoudHtml}
+      </div>
+    </div>`
+}
 
 function zetInstelSectie(sleutel, open) {
+  instelSectieOpen[sleutel] = !!open
   const vak = document.getElementById('instel-inhoud-' + sleutel)
   if (vak) vak.hidden = !open
   const kop = document.querySelector(`.instel-sectie-kop[data-instel-sectie="${sleutel}"]`)
@@ -18964,21 +18977,26 @@ function zetInstelSectie(sleutel, open) {
 }
 
 function wisselInstelSectie(sleutel) {
-  const vak = document.getElementById('instel-inhoud-' + sleutel)
-  if (!vak) return
-  zetInstelSectie(sleutel, vak.hidden)
+  zetInstelSectie(sleutel, !instelSectieOpen[sleutel])
 }
 
+// Alleen voor het project-venster: dat mag altijd vers-dicht beginnen, ook als
+// er van een vorige keer nog een andere stand in instelSectieOpen zou staan.
+const MODAL_INSTEL_SECTIES = ['algemeen', 'knoppen', 'git', 'programmas']
 function sluitAlleInstelSecties() {
-  INSTEL_SECTIES.forEach(s => zetInstelSectie(s, false))
+  MODAL_INSTEL_SECTIES.forEach(s => zetInstelSectie(s, false))
 }
 
-function setupInstelSecties() {
-  document.querySelectorAll('.instel-sectie-kop[data-instel-sectie]').forEach(kop => {
+// wortel: het instellingen-scherm bindt dit na elke innerHTML-tekening opnieuw
+// (data-instel-sectie="..."), scoped op het paneel; het project-venster hoeft
+// dat maar één keer te doen, zijn koppen staan al vast in index.html.
+function setupInstelSecties(wortel = document) {
+  wortel.querySelectorAll('.instel-sectie-kop[data-instel-sectie]').forEach(kop => {
     kop.onclick = () => wisselInstelSectie(kop.dataset.instelSectie)
   })
 }
 
+// ── Modal: Add / Edit project ─────────────────────────────────────────────────
 function setupModalEvents() {
   setupInstelSecties()
   document.getElementById('modal-proj-close').onclick  = closeProjectModal

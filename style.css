@@ -1265,6 +1265,28 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
 .git-repo-acties { padding: 0 8px 6px; }
 .git-clone-doel { font-size: 11px; color: var(--muted); margin-top: 6px; word-break: break-all; }
 
+/* ── Inklapbare secties in het project-venster (Algemeen/Knoppen/Git/
+   Programma's). Zelfde idee als de git-repo-kop-knop hierboven: de kop is de
+   knop, het pijltje wisselt van klasse (geen CSS-rotate) zoals de zijbalk dat
+   ook al deed. Allemaal standaard dicht — zie zetInstelSectie() in renderer.js. */
+.instel-sectie { border-top: 1px solid var(--border); margin-top: 14px; padding-top: 10px; }
+.instel-sectie:first-child { border-top: none; margin-top: 0; padding-top: 0; }
+.instel-sectie-kop {
+  display: flex; align-items: center; gap: 7px; width: 100%; text-align: left;
+  background: none; border: 0; padding: 4px 2px; margin: 0;
+  color: var(--text); font: inherit; font-size: 13px; font-weight: 600;
+  cursor: pointer; user-select: none; -webkit-user-select: none;
+}
+.instel-sectie-kop:hover { color: var(--accent); }
+.instel-sectie-kop.dicht { color: var(--muted2); }
+.instel-sectie-kop.dicht:hover { color: var(--accent); }
+.instel-sectie-pijl { font-size: 13px; color: var(--muted); flex-shrink: 0; }
+.instel-sectie-kop:hover .instel-sectie-pijl { color: var(--accent); }
+.instel-sectie-inhoud { padding-top: 10px; }
+.instel-sectie-inhoud[hidden] { display: none; }
+/* Eerste veld in een sectie hoeft niet nog eens los af te steken. */
+.instel-sectie-inhoud > .field-label:first-child { margin-top: 0; }
+
 /* Zichtbare commando's (project bewerken) */
 .cmdvis-group { margin-top: 6px; }
 .cmdvis-group + .cmdvis-group { margin-top: 14px; }
@@ -1277,6 +1299,7 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
 }
 .cmdvis-row:hover { border-color: var(--border2); color: var(--text); }
 .cmdvis-row i { font-size: 13px; }
+.cmdvis-leeg { font-size: 12px; color: var(--muted); padding: 4px 2px; line-height: 1.4; }
 /* Waarom dit vinkje leeg staat. Zonder deze tekst lijkt een knop die standaard
    uit staat op een knop die je zelf ooit hebt weggeklikt. */
 .cmdvis-standaard-uit { margin-left: 6px; font-size: 10px; color: var(--muted2); opacity: 0.75; }

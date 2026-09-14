@@ -155,71 +155,111 @@
       <span id="modal-title" data-i18n="modal.project.title">Project toevoegen</span>
       <button class="modal-close" id="modal-proj-close"><i class="ti ti-x"></i></button>
     </div>
-    <label class="field-label" data-i18n="modal.project.nameLabel">naam</label>
-    <input class="field" id="f-name" placeholder="dd_crypto" />
-    <label class="field-label" data-i18n="modal.project.iconLabel">icoon</label>
-    <!-- Heeft de projectmap een eigen app-icoon, dan is dat de standaardkeuze
-         en staat de emoji-rij eronder als overschrijving. Zonder eigen icoon
-         blijft alleen de emoji-rij over, precies zoals het was. -->
-    <div class="icoon-keuze" id="f-icoon-keuze" hidden>
-      <button type="button" class="icoon-optie" id="f-icoon-auto">
-        <img class="icoon-optie-img" id="f-icoon-auto-img" alt="" draggable="false" />
-        <span class="icoon-optie-tekst">
-          <span class="icoon-optie-titel" data-i18n="modal.project.iconAuto">eigen icoon van het project</span>
-          <span class="icoon-optie-sub" id="f-icoon-auto-sub"></span>
-        </span>
+    <!-- Vier inklapbare secties, allemaal standaard dicht (zetInstelSecties()
+         klapt ze weer dicht bij elke openNewModal/openEditModal). Verdeling:
+         Algemeen (naam/icoon/device/locaties/website), Knoppen (git/flutter/
+         eigen commando's), Git (koppelen + git-status), Programma's (editors
+         en AI-diensten) — zie project-instellingen-secties-en-knoppen.md. -->
+    <div class="instel-sectie" data-instel-sectie="algemeen">
+      <button type="button" class="instel-sectie-kop" data-instel-sectie="algemeen">
+        <i class="ti ti-chevron-right instel-sectie-pijl"></i>
+        <span data-i18n="modal.project.sectionGeneral">Algemeen</span>
       </button>
-      <button type="button" class="icoon-optie" id="f-icoon-emoji">
-        <span class="icoon-optie-emoji" id="f-icoon-emoji-vb">📱</span>
-        <span class="icoon-optie-tekst">
-          <span class="icoon-optie-titel" data-i18n="modal.project.iconEmoji">emoji gebruiken</span>
-          <span class="icoon-optie-sub" data-i18n="modal.project.iconEmojiSub">overschrijft het gevonden icoon</span>
-        </span>
-      </button>
-    </div>
-    <p class="icoon-hint" id="f-icoon-hint" hidden></p>
-    <div class="emoji-row" id="emoji-row"></div>
-    <label class="field-label"><span data-i18n="modal.project.deviceLabel">android device id</span> <span class="opt" data-i18n="common.optional">(optioneel)</span></label>
-    <input class="field mono" id="f-device" placeholder="437d872e" />
-    <label class="field-label" data-i18n="modal.project.locationsLabel">locaties</label>
-    <div id="loc-list"></div>
-    <button class="add-loc-btn" id="btn-add-loc"><i class="ti ti-plus"></i> <span data-i18n="modal.project.addLocation">locatie toevoegen</span></button>
-    <label class="check-row" style="margin-top:10px">
-      <input type="checkbox" id="f-website" />
-      <span data-i18n="modal.project.websiteLabel">website-project (editor vooraan)</span>
-    </label>
-    <!-- Een project van GitHub binnenhalen. Alleen bij een nieuw project: bij
-         bewerken staat de map er al en hoort dit bij de git-sectie hieronder. -->
-    <div id="f-git-clone" hidden>
-      <label class="field-label"><span data-i18n="modal.project.gitCloneLabel">git-repository</span> <span class="opt" data-i18n="common.optional">(optioneel)</span></label>
-      <p class="git-clone-hint" data-i18n="modal.project.gitCloneTekst">Kies een project van je GitHub-account, of plak een adres. De bestanden worden binnengehaald in de map hierboven.</p>
-      <button class="git-repo-kop-knop" id="btn-git-repos" type="button">
-        <i class="ti ti-chevron-down"></i>
-        <span data-i18n="modal.project.gitRepoKiezen">GitHub Repo's</span>
-      </button>
-      <div class="git-repo-kiezer" id="f-git-repos">
-        <div class="git-repo-kop">
-          <input class="field" id="f-git-repo-zoek" spellcheck="false" autocomplete="off"
-                 data-i18n-placeholder="modal.project.gitRepoZoek" placeholder="zoeken in je repositories" />
-          <button class="btn-ghost btn-mini" id="btn-git-repos-herlaad" type="button"
-                  data-i18n-title="modal.project.gitRepoHerladen" title="lijst opnieuw ophalen"><i class="ti ti-refresh"></i></button>
+      <div class="instel-sectie-inhoud" id="instel-inhoud-algemeen" hidden>
+        <label class="field-label" data-i18n="modal.project.nameLabel">naam</label>
+        <input class="field" id="f-name" placeholder="dd_crypto" />
+        <label class="field-label" data-i18n="modal.project.iconLabel">icoon</label>
+        <!-- Heeft de projectmap een eigen app-icoon, dan is dat de standaardkeuze
+             en staat de emoji-rij eronder als overschrijving. Zonder eigen icoon
+             blijft alleen de emoji-rij over, precies zoals het was. -->
+        <div class="icoon-keuze" id="f-icoon-keuze" hidden>
+          <button type="button" class="icoon-optie" id="f-icoon-auto">
+            <img class="icoon-optie-img" id="f-icoon-auto-img" alt="" draggable="false" />
+            <span class="icoon-optie-tekst">
+              <span class="icoon-optie-titel" data-i18n="modal.project.iconAuto">eigen icoon van het project</span>
+              <span class="icoon-optie-sub" id="f-icoon-auto-sub"></span>
+            </span>
+          </button>
+          <button type="button" class="icoon-optie" id="f-icoon-emoji">
+            <span class="icoon-optie-emoji" id="f-icoon-emoji-vb">📱</span>
+            <span class="icoon-optie-tekst">
+              <span class="icoon-optie-titel" data-i18n="modal.project.iconEmoji">emoji gebruiken</span>
+              <span class="icoon-optie-sub" data-i18n="modal.project.iconEmojiSub">overschrijft het gevonden icoon</span>
+            </span>
+          </button>
         </div>
-        <div class="git-repo-lijst" id="f-git-repo-lijst"></div>
+        <p class="icoon-hint" id="f-icoon-hint" hidden></p>
+        <div class="emoji-row" id="emoji-row"></div>
+        <label class="field-label"><span data-i18n="modal.project.deviceLabel">android device id</span> <span class="opt" data-i18n="common.optional">(optioneel)</span></label>
+        <input class="field mono" id="f-device" placeholder="437d872e" />
+        <label class="field-label" data-i18n="modal.project.locationsLabel">locaties</label>
+        <div id="loc-list"></div>
+        <button class="add-loc-btn" id="btn-add-loc"><i class="ti ti-plus"></i> <span data-i18n="modal.project.addLocation">locatie toevoegen</span></button>
+        <label class="check-row" style="margin-top:10px">
+          <input type="checkbox" id="f-website" />
+          <span data-i18n="modal.project.websiteLabel">website-project (editor vooraan)</span>
+        </label>
       </div>
-      <p class="git-clone-hint git-clone-of" data-i18n="modal.project.gitCloneOf">Staat hij er niet bij, of komt hij ergens anders vandaan? Plak dan het adres.</p>
-      <input class="field mono" id="f-git-url" spellcheck="false" autocomplete="off"
-             data-i18n-placeholder="modal.project.gitClonePlaceholder"
-             placeholder="gebruiker/repo of https://github.com/gebruiker/repo.git" />
-      <div class="git-clone-doel" id="f-git-clone-doel" hidden></div>
     </div>
-    <label class="field-label" data-i18n="modal.project.visibleCommandsLabel">zichtbare commando's</label>
-    <div id="cmdvis-section"></div>
-    <!-- Alles wat met de git-koppeling van dít project te maken heeft. Verborgen
-         bij een nieuw project: er is dan nog geen map om iets over te zeggen. -->
-    <div id="f-git-sectie" hidden>
-      <label class="field-label" data-i18n="modal.project.gitLabel">git</label>
-      <div id="git-sectie"></div>
+
+    <div class="instel-sectie" data-instel-sectie="knoppen">
+      <button type="button" class="instel-sectie-kop" data-instel-sectie="knoppen">
+        <i class="ti ti-chevron-right instel-sectie-pijl"></i>
+        <span data-i18n="modal.project.sectionButtons">Knoppen</span>
+      </button>
+      <div class="instel-sectie-inhoud" id="instel-inhoud-knoppen" hidden>
+        <div id="cmdvis-section"></div>
+      </div>
     </div>
+
+    <div class="instel-sectie" data-instel-sectie="git">
+      <button type="button" class="instel-sectie-kop" data-instel-sectie="git">
+        <i class="ti ti-chevron-right instel-sectie-pijl"></i>
+        <span data-i18n="modal.project.sectionGit">Git</span>
+      </button>
+      <div class="instel-sectie-inhoud" id="instel-inhoud-git" hidden>
+        <!-- Een project van GitHub binnenhalen. Alleen bij een nieuw project: bij
+             bewerken staat de map er al en toont dit blok de git-status. -->
+        <div id="f-git-clone" hidden>
+          <label class="field-label"><span data-i18n="modal.project.gitCloneLabel">git-repository</span> <span class="opt" data-i18n="common.optional">(optioneel)</span></label>
+          <p class="git-clone-hint" data-i18n="modal.project.gitCloneTekst">Kies een project van je GitHub-account, of plak een adres. De bestanden worden binnengehaald in de map hierboven.</p>
+          <button class="git-repo-kop-knop" id="btn-git-repos" type="button">
+            <i class="ti ti-chevron-down"></i>
+            <span data-i18n="modal.project.gitRepoKiezen">GitHub Repo's</span>
+          </button>
+          <div class="git-repo-kiezer" id="f-git-repos">
+            <div class="git-repo-kop">
+              <input class="field" id="f-git-repo-zoek" spellcheck="false" autocomplete="off"
+                     data-i18n-placeholder="modal.project.gitRepoZoek" placeholder="zoeken in je repositories" />
+              <button class="btn-ghost btn-mini" id="btn-git-repos-herlaad" type="button"
+                      data-i18n-title="modal.project.gitRepoHerladen" title="lijst opnieuw ophalen"><i class="ti ti-refresh"></i></button>
+            </div>
+            <div class="git-repo-lijst" id="f-git-repo-lijst"></div>
+          </div>
+          <p class="git-clone-hint git-clone-of" data-i18n="modal.project.gitCloneOf">Staat hij er niet bij, of komt hij ergens anders vandaan? Plak dan het adres.</p>
+          <input class="field mono" id="f-git-url" spellcheck="false" autocomplete="off"
+                 data-i18n-placeholder="modal.project.gitClonePlaceholder"
+                 placeholder="gebruiker/repo of https://github.com/gebruiker/repo.git" />
+          <div class="git-clone-doel" id="f-git-clone-doel" hidden></div>
+        </div>
+        <!-- Alles wat met de git-koppeling van dít project te maken heeft. Verborgen
+             bij een nieuw project: er is dan nog geen map om iets over te zeggen. -->
+        <div id="f-git-sectie" hidden>
+          <div id="git-sectie"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="instel-sectie" data-instel-sectie="programmas">
+      <button type="button" class="instel-sectie-kop" data-instel-sectie="programmas">
+        <i class="ti ti-chevron-right instel-sectie-pijl"></i>
+        <span data-i18n="modal.project.sectionPrograms">Programma's</span>
+      </button>
+      <div class="instel-sectie-inhoud" id="instel-inhoud-programmas" hidden>
+        <div id="progvis-section"></div>
+      </div>
+    </div>
+
     <div class="modal-footer">
       <button class="btn-ghost" id="modal-proj-cancel" data-i18n="common.cancel">annuleren</button>
       <button class="btn-primary" id="modal-proj-save" data-i18n="common.save">opslaan</button>
