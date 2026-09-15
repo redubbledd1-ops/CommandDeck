@@ -22,10 +22,11 @@ let talenLaden           = null   // in-flight Promise van zorgVoorTalen()
 let talenZoekterm        = ''
 let pendingCmdVisibility = {}
 let pendingSecties = {}      // hele secties aan/uit voor het project dat je bewerkt
+let pendingToolsHandmatig = false // Flutter-schakelaar in het venster zelf gezet
 let pendingCustomCmds = []   // eigen knoppen van het project dat je bewerkt
 let pendingCmdVolgorde = { run: [], tools: [] }
 let cmdSorteerModus = ''     // '' | 'run' — volgorde aanpassen in projectweergave
-let cmdvisSorteerModus = ''  // '' | 'run' — volgorde in projectinstellingen
+let cmdvisSorteerModus = ''  // '' | 'run' | 'run-flutter' | 'run-prog'
 let selEmoji    = '📱'
 // 'auto' = het eigen icoon van de projectmap als dat er is, 'emoji' = altijd de
 // gekozen emoji. Zie projIcoonInhoud() verderop.
@@ -100,9 +101,9 @@ const EMOJIS = ['📱','💰','🎵','🏠','🚀','💎','🎮','🔥','⚡','�
 
 // Uitvoeren is voor programma's, AI en eigen snelkoppelingen.
 // Flutter-run hoort bij tools, naast devices / pub / build.
-// Git hoort bij uitvoeren en niet bij tools: de tools-sectie wordt bij een
-// niet-Flutter-project standaard verborgen (zie bepaalToolsVoorProject), en
-// juist daar wil je git-knoppen hebben. De definities staan in git-tools.js,
+// Git hoort bij uitvoeren en niet bij tools: de Flutter-knoppen staan bij een
+// niet-Flutter-project standaard uit (zie bepaalToolsVoorProject), en juist
+// daar wil je git-knoppen hebben. De definities staan in git-tools.js,
 // zodat main.js en de tests dezelfde lijst gebruiken.
 const RUN_CMD_DEFS = GitTools.GIT_CMD_DEFS.map(d => ({ ...d }))
 
@@ -118,6 +119,10 @@ const TOOLS_CMD_DEFS = [
   { id: 'build-web',     label: 'build web',       icon: 'ti-cloud-upload',          cls: 'buildweb' },
   { id: 'build-windows', label: 'build windows',   icon: 'ti-box',                   cls: 'buildwin' },
 ]
+
+function isFlutterKnopId(id) {
+  return TOOLS_CMD_DEFS.some(d => d.id === id)
+}
 
 // Helpknoppen voor website-projecten (html/css/js). Definities in web-knoppen.js.
 const WEB_CMD_DEFS = (typeof WebKnoppen !== 'undefined' ? WebKnoppen.WEB_CMD_DEFS : [])
@@ -135,7 +140,11 @@ const CMD_STANDAARD_UIT = new Set(
 )
 
 // Wat geldt er als je nog nooit iets over deze knop hebt gezegd?
-function cmdStandaardAan(id) {
+// Flutter-knoppen staan uit tot het project als Flutter is herkend, of tot je
+// ze in de projectinstellingen zelf aanzet. Anders blijven ze op een Node-
+// of website-project in de weg staan.
+function cmdStandaardAan(id, bron) {
+  if (isFlutterKnopId(id) && !flutterKnoppenAan(bron)) return false
   return !CMD_STANDAARD_UIT.has(id)
 }
 
@@ -507,7 +516,8 @@ function migreerToolsNaarMap(p) {
   const f = {
     id: nieuwMapId(), sectie: 'run', label: I18N.t('folder.flutter'),
     // Stond de tools-sectie uit (geen Flutter-project), dan hoort de map dicht
-    // te staan. De knoppen zijn er nog wel: dicht is niet weg.
+    // te staan. Uit in de instellingen is iets anders: dan zijn de knoppen
+    // zelf uit, en is er geen map meer te zien.
     open: sectieAan(p, 'tools'), auto: FLUTTER_MAP,
   }
   p.cmdFolders = [...(p.cmdFolders || []), f]
@@ -538,7 +548,11 @@ function migreerAlleProjecten() {
 // blijft automatisch meelopen — tenzij je het in het projectvenster zelf zet
 // (websiteHandmatig). Anders blijft een project met html per ongeluk "geen
 // website" omdat het vinkje bij aanmaken standaard uit stond.
-async function bepaalToolsVoorProject(p) {
+//
+// `opnieuw`: ook kijken als tools al een boolean is. Nodig bij een nieuw
+// project (het venster zet tools even op false zodat de knoppen standaard uit
+// staan) en na een clone (de map was leeg, de bestanden komen pas daarna).
+async function bepaalToolsVoorProject(p, opt = {}) {
   if (!p) return false
   const loc = p.locations?.[p.activeLocation] || p.locations?.[0]
   if (!loc?.path) return false
@@ -546,18 +560,22 @@ async function bepaalToolsVoorProject(p) {
   // Al eens vastgesteld wat voor project dit is? Dan niet opnieuw de map
   // ondervragen bij elke keer openen: het soort verandert niet zomaar, en de
   // extra projectSoort-aanroep gaf een merkbare hik bij het wisselen.
-  if (p.secties && typeof p.secties.tools === 'boolean') return false
+  const alBekend = p.secties && typeof p.secties.tools === 'boolean'
+  if (alBekend && !opt.opnieuw) return false
 
   const r = await window.api.projectSoort(loc.path)
   if (!r || !r.ok) return false          // map even niet bereikbaar: later nog eens
 
   let hertekenen = false
+  let verborgen = false
 
-  if (!(p.secties && typeof p.secties.tools === 'boolean')) {
-    p.secties = { ...(p.secties || {}), tools: !!r.flutter }
+  if (!alBekend || opt.opnieuw) {
+    const aan = !!r.flutter
+    p.secties = { ...(p.secties || {}), tools: aan }
     const f = flutterMap(p)
-    if (f) f.open = !!r.flutter
-    hertekenen = !r.flutter
+    if (f) f.open = aan
+    hertekenen = true
+    verborgen = !aan
   }
 
   const gok = WebTools.isWebsiteGok({ flutter: !!r.flutter, html: !!r.html })
@@ -572,7 +590,9 @@ async function bepaalToolsVoorProject(p) {
   }
 
   saveProjects()
-  return hertekenen
+  // 'uit' is truthy, dus callers die hertekenen mogen dat blijven gebruiken,
+  // en wie een toast wil onderscheidt op === 'uit'.
+  return verborgen ? 'uit' : hertekenen
 }
 
 function projectIsWebsite(p) {
@@ -581,6 +601,14 @@ function projectIsWebsite(p) {
 
 function projectIsFlutter(p) {
   return !!(p && p.secties && p.secties.tools)
+}
+
+// Flutter-knoppen in de rij: aan, tenzij ze in dit project bewust uit staan.
+// Nog nooit gekeken (tools ontbreekt) telt als aan, zodat bestaande projecten
+// niet even hun knoppen verliezen voordat de herkenning klaar is. Uit is
+// `tools === false`: geen Flutter gevonden, of in de instellingen uitgezet.
+function flutterKnoppenAan(p) {
+  return !(p && p.secties && p.secties.tools === false)
 }
 
 function openKeuzeVoorProject(p) {
@@ -1308,7 +1336,7 @@ function projectRij(bron, sectie) {
     bron,
     sectie,
     alle: () => alleCmdKnopIds(bron, sectie),
-    standaardAan: cmdStandaardAan,
+    standaardAan: (id) => cmdStandaardAan(id, bron),
     zichtbaarheid: bron.cmdVisibility || pendingCmdVisibility,
     toonbaar: (ids) => projectToonbaar(bron, ids),
     sorteert: sorteertSectie(sectie),
@@ -1366,6 +1394,8 @@ function projectToonbaar(bron, ids) {
         if (typeof WebKnoppen !== 'undefined' && WebKnoppen.isWebAuto(f.auto)) {
           return !!(taal && f.auto.startsWith('web-' + taal + '-'))
         }
+      } else if (!flutterKnoppenAan(bron) && f.auto === FLUTTER_MAP) {
+        return false
       } else if (typeof WebKnoppen !== 'undefined' && WebKnoppen.isWebAuto(f.auto)) {
         return false
       }
@@ -1379,6 +1409,8 @@ function projectToonbaar(bron, ids) {
     if (website) {
       if (TOOLS_CMD_DEFS.some(d => d.id === id)) return false
       if (id.startsWith('editor:custom:')) return false
+    } else if (!flutterKnoppenAan(bron)) {
+      if (isFlutterKnopId(id)) return false
     }
     return true
   })
@@ -1585,6 +1617,8 @@ function modalProjectCtx() {
     customCmds: pendingCustomCmds,
     cmdVolgorde: pendingCmdVolgorde,
     website: !!document.getElementById('f-website')?.checked,
+    secties: pendingSecties,
+    cmdVisibility: pendingCmdVisibility,
   }
 }
 
@@ -3778,7 +3812,11 @@ async function selectProject(id) {
   // "eerste keer" nooit waar en start openProjectStart nooit.
   const eersteOpen = !Object.prototype.hasOwnProperty.call(settings.termTabs || {}, id)
 
+  // Verplaats- én wismodus horen bij dít project. De prullenbak bestaat alleen
+  // tijdens herschikken; die modus gaat hier uit, en zonder prullenbak zou de
+  // wismodus blijven hangen zonder knop om hem uit te zetten.
   cmdSorteerModus = ''
+  knopWisModus = ''
   bergVerkennerOp()
   activeId = id
   sitePreviewToonUitvoer = false
@@ -3793,10 +3831,8 @@ async function selectProject(id) {
     const p = projects.find(x => x.id === id)
     bepaalToolsVoorProject(p).then(async verborgen => {
       if (activeId !== id) return
-      if (verborgen) {
-        vraagProjectHertekenen()
-        showToast(I18N.t('project.notFlutterToast'))
-      }
+      if (verborgen === 'uit') showToast(I18N.t('project.notFlutterToast'))
+      if (verborgen) vraagProjectHertekenen()
       // Eerste keer: globale "project openen"-keuze (editor, site, Windows, …).
       // Had je zelf al een tab, dan laten we die staan.
       if (eersteOpen) await openProjectStart(p)
@@ -4411,6 +4447,9 @@ function zetRijSorteerModus(sectie, aan) {
   if (sectie === SNEL_SECTIE.cmd) cmdSnelSorteerModus = !!aan
   else if (sectie === SNEL_SECTIE.ps) psSnelSorteerModus = !!aan
   else cmdSorteerModus = aan ? sectie : ''
+  // Weghalen kan alleen tijdens herschikken. Zonder verplaatsmodus is er geen
+  // knop om de wismodus uit te zetten, dus die gaat mee uit.
+  if (!aan && knopWisModus === sectie) knopWisModus = ''
 }
 
 // Hoeveel knoppen staan er nu verborgen? Alleen wat "alleen hier" weggehaald
@@ -11343,9 +11382,13 @@ async function openNieuwProjectMet(pad, naam) {
   updateCloneDoelPreview()
   // Map met html → website-vinkje aan, zodat je niet handmatig hoeft te zoeken.
   const r = await window.api.projectSoort(pad).catch(() => null)
-  if (r && r.ok && WebTools.isWebsiteGok({ flutter: !!r.flutter, html: !!r.html })) {
-    const vak = document.getElementById('f-website')
-    if (vak) vak.checked = true
+  if (r && r.ok) {
+    if (WebTools.isWebsiteGok({ flutter: !!r.flutter, html: !!r.html })) {
+      const vak = document.getElementById('f-website')
+      if (vak) vak.checked = true
+    }
+    pendingSecties = { ...pendingSecties, tools: !!r.flutter }
+    renderCmdVisibilitySection()
   }
 }
 
@@ -19012,6 +19055,8 @@ function setupModalEvents() {
   document.getElementById('modal-proj-cancel').onclick = closeProjectModal
   document.getElementById('modal-proj-save').onclick   = () => saveProjectModal()
   document.getElementById('btn-add-loc').onclick       = () => addLocEntry()
+  const websiteVak = document.getElementById('f-website')
+  if (websiteVak) websiteVak.onchange = () => renderCmdVisibilitySection()
   const gitUrl = document.getElementById('f-git-url')
   if (gitUrl) gitUrl.oninput = onCloneUrlInvoer
   const repoKnop = document.getElementById('btn-git-repos')
@@ -19192,7 +19237,24 @@ function plantIcoonKeuze() {
   icoonKeuzeTimer = setTimeout(() => {
     ververesIcoonKeuze()
     if (!editingId) void neemNaamUitLocatie()
+    void kijkFlutterVoorModal()
   }, 300)
+}
+
+// Bij een nieuw project: kijken of de gekozen map Flutter is, zodat de
+// knoppen in het venster al de goede standaard hebben vóór je opslaat.
+async function kijkFlutterVoorModal() {
+  if (editingId || pendingToolsHandmatig) return
+  if (document.getElementById('modal-proj')?.hidden) return
+  const loc = pendingLocs.find(l => l && l.path && String(l.path).trim())
+  if (!loc) return
+  const r = await window.api.projectSoort(loc.path.trim()).catch(() => null)
+  if (!r || !r.ok) return
+  if (document.getElementById('modal-proj')?.hidden || editingId || pendingToolsHandmatig) return
+  const aan = !!r.flutter
+  if (pendingSecties.tools === aan) return
+  pendingSecties = { ...pendingSecties, tools: aan }
+  renderCmdVisibilitySection()
 }
 
 async function ververesIcoonKeuze() {
@@ -19582,7 +19644,8 @@ function openNewModal() {
   document.getElementById('f-website').checked = false
   pendingLocs = [{ label: 'main', path: '' }]
   pendingCmdVisibility = {}
-  pendingSecties = {}
+  pendingSecties = { tools: false }
+  pendingToolsHandmatig = false
   pendingCustomCmds = []
   pendingCmdVolgorde = { run: [], tools: [] }
   cmdvisSorteerModus = ''
@@ -19608,6 +19671,7 @@ function openEditModal(id) {
   pendingLocs = p.locations.map(l => ({ ...l }))
   pendingCmdVisibility = { ...(p.cmdVisibility || {}) }
   pendingSecties = { ...(p.secties || {}) }
+  pendingToolsHandmatig = true
   pendingCustomCmds = (p.customCmds || []).map(c => ({ ...c }))
   pendingCmdVolgorde = {
     run:   [...((p.cmdVolgorde && p.cmdVolgorde.run)   || [])],
@@ -19950,6 +20014,8 @@ async function saveProjectModal() {
     p.device = device; p.locations = locs
     p.cmdVisibility = { ...pendingCmdVisibility }
     p.secties = { ...pendingSecties }
+    const flutter = flutterMap(p)
+    if (flutter) flutter.open = flutterKnoppenAan(p)
     p.customCmds = pendingCustomCmds.map(c => ({ ...c }))
     p.cmdVolgorde = {
       run:   [...(pendingCmdVolgorde.run   || [])],
@@ -19970,11 +20036,14 @@ async function saveProjectModal() {
   saveProjects(); renderSidebar()
 
   const vers = !editingId ? projects[projects.length - 1] : null
+  const toolsHandmatig = pendingToolsHandmatig
 
-  // Nieuw project zonder eigen keuze over tools: even kijken of het Flutter is
+  // Nieuw project zonder eigen keuze over tools: even kijken of het Flutter is.
+  // Het venster zet tools standaard op false (knoppen uit tot we weten of het
+  // Flutter is); zonder `opnieuw` zou die boolean de herkenning tegenhouden.
   if (vers) {
-    bepaalToolsVoorProject(vers).then(verborgen => {
-      if (verborgen) showToast(I18N.t('project.notFlutterToast'))
+    bepaalToolsVoorProject(vers, { opnieuw: !toolsHandmatig }).then(verborgen => {
+      if (verborgen === 'uit') showToast(I18N.t('project.notFlutterToast'))
       if (activeId === vers.id) vraagProjectHertekenen()
       renderSidebar()
     })
@@ -20020,8 +20089,8 @@ async function haalRepoBinnen(project, adres, doel, ouder) {
   neemNaamNaGitKoppelen(project, GitTools.repoNaamUitUrl(adres))
   const profiel = profielVanProject(project)
   if (GitTools.profielGeldig(profiel)) await pasProfielToe(project, profiel)
-  bepaalToolsVoorProject(project).then(verborgen => {
-    if (verborgen) showToast(I18N.t('project.notFlutterToast'))
+  bepaalToolsVoorProject(project, { opnieuw: true }).then(verborgen => {
+    if (verborgen === 'uit') showToast(I18N.t('project.notFlutterToast'))
     if (activeId === project.id) vraagProjectHertekenen()
     renderSidebar()
   })
@@ -20054,6 +20123,7 @@ function refreshLocList() {
         updateCloneDoelPreview()
         plantIcoonKeuze()
         if (!editingId) void neemNaamUitLocatie()
+        void kijkFlutterVoorModal()
       }
     }
 
@@ -20083,8 +20153,9 @@ function renderCmdVisibilitySection() {
 
   // Het vinkje volgt dezelfde regel als de knoppenrij zelf: geen keuze
   // vastgelegd betekent de standaard van die knop, en die is niet voor
-  // iedereen "aan".
-  const aan = (id) => cmdZichtbaar({}, id, pendingCmdVisibility)
+  // iedereen "aan". In dit venster telt pendingSecties mee, anders zou
+  // Flutter altijd "aan" lijken zolang je nog niet hebt opgeslagen.
+  const aan = (id) => cmdZichtbaar(modalProjectCtx(), id, pendingCmdVisibility)
 
   const rowHtml = (row, i, sleutel, totaal) => {
     const sorteren = cmdvisSorteerModus === sleutel
@@ -20102,8 +20173,9 @@ function renderCmdVisibilitySection() {
     }
     // "standaard uit" erbij zetten is het halve punt van het mechanisme: zonder
     // die tekst is een leeg vinkje niet te onderscheiden van iets dat je zelf
-    // ooit hebt uitgezet en vergeten bent.
-    const hint = CMD_STANDAARD_UIT.has(row.id)
+    // ooit hebt uitgezet en vergeten bent. Flutter-knoppen krijgen die tekst
+    // als Flutter voor dit project uit staat.
+    const hint = (CMD_STANDAARD_UIT.has(row.id) || (isFlutterKnopId(row.id) && pendingSecties.tools === false))
       ? `<span class="cmdvis-standaard-uit">${esc(I18N.t('cmdvis.defaultOff'))}</span>` : ''
     return `${wrapOpen}<label class="cmdvis-row">
       <input type="checkbox" data-cmdvis-id="${row.id}" ${aan(row.id) ? 'checked' : ''} />
@@ -20112,13 +20184,16 @@ function renderCmdVisibilitySection() {
     </label>${wrapClose}`
   }
 
-  // `metSchakelaar`: alleen "Knoppen" krijgt de aan/uit-schakelaar voor de hele
-  // rij (bron.secties.run) -- die schakelaar bestond al en verbergt in de app
-  // ook meteen de programma-knoppen mee, dus een tweede, eigen schakelaar voor
-  // Programma's zou iets beloven wat er niet is. Vandaar alleen het dimmen
-  // (".uit") wanneer die schakelaar uit staat, geen los schuifje in dat blok.
-  const groupBlok = (title, sleutel, rows, metSchakelaar, legeTekst) => {
-    const sectieAan = pendingSecties.run !== false
+  // `toggleKey`: welke sectie de schakelaar zet. Programma's heeft er geen:
+  // die schakelaar bestond al op "Knoppen" en verbergt in de app ook meteen
+  // de programma-knoppen mee. Flutter wel: dat is een eigen groep knoppen
+  // die je per project aan of uit wilt, zonder de rest van de rij mee te nemen.
+  const groupBlok = (title, sleutel, rows, toggleKey, legeTekst, dimKey) => {
+    const dimSectie = dimKey || toggleKey || 'run'
+    const eigenAan = pendingSecties[dimSectie] !== false
+    const rijAan = pendingSecties.run !== false
+    const sectieAan = eigenAan && (dimSectie === 'run' || rijAan)
+    const toggleAan = toggleKey ? pendingSecties[toggleKey] !== false : eigenAan
     const sorteren = cmdvisSorteerModus === sleutel
     const lijst = rows.length
       ? `<div class="cmdvis-list">${rows.map((row, i) => rowHtml(row, i, sleutel, rows.length)).join('')}</div>`
@@ -20127,8 +20202,8 @@ function renderCmdVisibilitySection() {
     <div class="cmdvis-group ${sectieAan ? '' : 'uit'} ${sorteren ? 'cmdvis-sorteren' : ''}" data-cmdvis-sectie="${sleutel}">
       <div class="cmdvis-group-title">
         <span>${title}</span>
-        ${metSchakelaar ? `<label class="toggle-switch" title="${esc(I18N.t('cmdvis.sectionToggleTitle'))}">
-          <input type="checkbox" data-sectie="run" ${sectieAan ? 'checked' : ''} />
+        ${toggleKey ? `<label class="toggle-switch" title="${esc(I18N.t('cmdvis.sectionToggleTitle'))}">
+          <input type="checkbox" data-sectie="${esc(toggleKey)}" ${toggleAan ? 'checked' : ''} />
           <span class="toggle-slider"></span>
         </label>` : ''}
       </div>
@@ -20139,11 +20214,16 @@ function renderCmdVisibilitySection() {
 
   const alleRows = cmdvisRijen('run')
   const knopRows = alleRows.filter(row => !isProgKnopId(row.id))
+  const flutterRows = knopRows.filter(row => isFlutterKnopId(row.id))
+  const andereRows = knopRows.filter(row => !isFlutterKnopId(row.id))
   const progRows = alleRows.filter(row => isProgKnopId(row.id))
 
-  container.innerHTML = groupBlok(esc(I18N.t('project.buttonsSectionLabel')), 'run', knopRows, true, I18N.t('cmdvis.empty'))
+  container.innerHTML = groupBlok(esc(I18N.t('project.buttonsSectionLabel')), 'run', andereRows, 'run', I18N.t('cmdvis.empty'))
+    + (flutterRows.length
+      ? groupBlok(esc(I18N.t('folder.flutter')), 'run-flutter', flutterRows, 'tools', I18N.t('cmdvis.empty'))
+      : '')
   if (progContainer) {
-    progContainer.innerHTML = groupBlok(esc(I18N.t('project.programsSectionLabel')), 'run-prog', progRows, false, I18N.t('cmdvis.programsEmpty'))
+    progContainer.innerHTML = groupBlok(esc(I18N.t('project.programsSectionLabel')), 'run-prog', progRows, null, I18N.t('cmdvis.programsEmpty'), 'run')
   }
 
   const containers = [container, progContainer].filter(Boolean)
@@ -20151,6 +20231,7 @@ function renderCmdVisibilitySection() {
     doel.querySelectorAll('[data-sectie]').forEach(chk => {
       chk.onchange = () => {
         pendingSecties[chk.dataset.sectie] = chk.checked
+        if (chk.dataset.sectie === 'tools') pendingToolsHandmatig = true
         renderCmdVisibilitySection()
       }
     })
@@ -20166,12 +20247,12 @@ function renderCmdVisibilitySection() {
     })
   })
 
-  // Slepen: "Knoppen" sleept zoals altijd binnen de volle 'run'-lijst.
-  // "Programma's" is een eigen deellijst (subset) binnen diezelfde onderliggende
-  // volgorde -- zie verplaatsCmdSubset -- zodat een sleep daar de Knoppen-
-  // volgorde niet aanraakt en omgekeerd.
+  // Slepen: "Knoppen" en "Flutter" zijn deellijsten binnen dezelfde
+  // onderliggende volgorde -- zie verplaatsCmdSubset -- zodat een sleep in de
+  // ene lijst de andere niet aanraakt. Programma's net zo.
   const sleepBlokken = [
-    { sleutel: 'run', groep: container.querySelector('.cmdvis-group[data-cmdvis-sectie="run"]'), subset: null },
+    { sleutel: 'run', groep: container.querySelector('.cmdvis-group[data-cmdvis-sectie="run"]'), subset: andereRows.map(r => r.id) },
+    { sleutel: 'run-flutter', groep: container.querySelector('.cmdvis-group[data-cmdvis-sectie="run-flutter"]'), subset: flutterRows.map(r => r.id) },
     { sleutel: 'run-prog', groep: progContainer?.querySelector('.cmdvis-group[data-cmdvis-sectie="run-prog"]'), subset: progRows.map(r => r.id) },
   ]
 

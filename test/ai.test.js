@@ -417,6 +417,9 @@ check('zonder systeemprompt blijft het veld weg',
   }
   check('de wismodus stopt zodra het verplaatsen stopt',
     (bron.match(/knopWisModus = ''/g) || []).length >= 4)
+  const sel = bron.slice(bron.indexOf('async function selectProject'), bron.indexOf('function toggleSettings'))
+  check('wisselen van project stopt de wismodus',
+    /cmdSorteerModus = ''/.test(sel) && /knopWisModus = ''/.test(sel))
   // Rechts in de kop, en de klaar-knop erachter. Zonder eigen hoekje bepaalt
   // de rest van die kop (het schuifje, --release) waar ze belanden.
   check('ze zitten in een eigen hoekje rechts', /class="kop-acties"/.test(bron))

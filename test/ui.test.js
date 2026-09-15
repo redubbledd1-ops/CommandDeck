@@ -464,7 +464,9 @@ window.eval(fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8')
   + '\n  gekoppeldeRepoAdressen, zetBewerkt: (id) => { editingId = id },'
   + '\n  editorsZelfde, zoekEditors, herstelNooitWeigeren, EDITORS_NOOIT_WEIGEREN,'
   + '\n  vergeetProjIcoon, projIcoonAuto,'
-  + '\n  splitSlotIds: () => (werkSplit.slots || []).map(s => s.projectId) };')
+  + '\n  splitSlotIds: () => (werkSplit.slots || []).map(s => s.projectId),'
+  + '\n  zetKnopWis: (v) => { knopWisModus = v }, knopWis: () => knopWisModus,'
+  + '\n  renderMain };')
 startVraagAutomaat()
 const W = window
 const inBevrorenPaneel = (el) => {
@@ -1321,6 +1323,17 @@ function startVraagAutomaat() {
   vulNieuw($$('#loc-list .field')[0], 'main')
   vulNieuw($$('#loc-list .field')[1], 'C:\\gekozen')
   $('#modal-proj-save').click(); await tick(); await tick()
+
+  // Wismodus hoort bij het project waar je hem aanzette. Herschikken gaat bij
+  // wisselen al uit, en zonder prullenbak zou weghalen blijven hangen.
+  $$('.proj-item')[0].click(); await tick(); await tick()
+  W.__test.zetRijSorteerModus('run', true)
+  W.__test.zetKnopWis('run')
+  W.__test.renderMain()
+  check('wismodus staat op het raster', !!$('.cmd-grid.cmd-wissen') && !!$('.knop-wis.aan'))
+  $$('.proj-item')[1].click(); for (let i = 0; i < 4; i++) await tick()
+  check('ander project stopt de wismodus',
+    W.__test.knopWis() === '' && !$('.cmd-grid.cmd-wissen') && !$('.knop-wis'))
 
   $$('.proj-item')[0].click(); await tick()
   $('[data-tab="output"]').click(); await tick()
@@ -2634,7 +2647,9 @@ function startVraagAutomaat() {
 
   // ook in de projectinstellingen
   $$('.proj-edit')[0].click(); await tick()
-  check('de instellingen hebben een hoofdschakelaar', $$('[data-sectie]').length === 1)
+  check('de instellingen hebben een hoofdschakelaar', !!$('[data-sectie="run"]'))
+  check('en flutter heeft een eigen schakelaar', !!$('[data-sectie="tools"]'))
+  check('die bij een Flutter-project aan staat', $('[data-sectie="tools"]').checked === true)
 
   // ── knoppen die standaard uit staan ────────────────────────────────────────
   // Het verschil dat telt: ze bestaan wél in de lijst (anders weet niemand dat
@@ -2702,6 +2717,22 @@ function startVraagAutomaat() {
   $('#modal-proj-save').click(); await tick(); await tick()
   check('knoppen terug → map ook terug', flutterKop())
 
+  // Flutter als geheel uit: de map en de knoppen weg, git blijft.
+  $$('.proj-edit')[0].click(); await tick()
+  const flutterSchakel = () => $('[data-sectie="tools"]')
+  flutterSchakel().checked = false
+  flutterSchakel().dispatchEvent(new window.Event('change')); await tick()
+  check('flutter uitzetten maakt de groep grijs',
+    !!$('.cmdvis-group[data-cmdvis-sectie="run-flutter"].uit'))
+  $('#modal-proj-save').click(); await tick(); await tick()
+  check('Flutter uitzetten haalt de map uit de rij', !flutterKop() && !$('[data-cmd="run-android"]'))
+  check('en de rest van de rij blijft', !!$('[data-sectieblok="run"]'))
+  $$('.proj-edit')[0].click(); await tick()
+  flutterSchakel().checked = true
+  flutterSchakel().dispatchEvent(new window.Event('change')); await tick()
+  $('#modal-proj-save').click(); await tick(); await tick()
+  check('en weer aanzetten zet de map terug', flutterKop())
+
   // ── is dit wel een Flutter-project? ────────────────────────────────────────
   // Tools slaan alleen ergens op bij Flutter. Dat wordt één keer nagekeken, bij
   // een nieuw project en de eerste keer dat je het opent.
@@ -2738,15 +2769,25 @@ function startVraagAutomaat() {
   const webRij = projects.findIndex(p => p.name === 'web-app')
   soortVragen = []
   $$('.proj-item')[webRij].click(); for (let i = 0; i < 6; i++) await tick()
-  check('de flutter-map is dan dicht, niet weg',
-    !!$('.cmd-map-kop.dicht') && !$('[data-cmd="run-android"]'))
+  check('zonder Flutter zijn de flutter-knoppen weg',
+    !flutterKop() && !$('[data-cmd="run-android"]'))
   check('en de rij staat er gewoon',
     !!$('[data-sectieblok="run"]') && !$('[data-sectieblok="run"]').classList.contains('sectie-uit'))
   check('een tweede keer openen vraagt niets meer', soortVragen.length === 0)
 
-  // je eigen keuze wint van de automaat
-  $('.cmd-map-kop').click(); await tick()
+  // In de instellingen staan ze wel, standaard uit, zodat je ze aan kunt zetten.
+  $$('.proj-edit')[webRij].click(); await tick()
+  check('niet-Flutter heeft flutter-knoppen uit',
+    flutterSchakel() && flutterSchakel().checked === false)
+  check('en de vinkjes staan standaard uit',
+    toolIds.every(id => cmdVink(id) && !cmdVink(id).checked)
+    && $$('#cmdvis-section [data-cmdvis-sectie="run-flutter"] .cmdvis-standaard-uit').length === toolIds.length)
+  flutterSchakel().checked = true
+  flutterSchakel().dispatchEvent(new window.Event('change')); await tick()
   soortVragen = []
+  $('#modal-proj-save').click(); await tick(); await tick()
+  check('zelf aanzetten zet de knoppen neer',
+    !!$('[data-map-groep] [data-cmd="run-android"]'))
   $$('.proj-item')[0].click(); await tick()
   $$('.proj-item')[webRij].click(); for (let i = 0; i < 6; i++) await tick()
   check('een eigen keuze blijft staan',
