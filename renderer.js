@@ -12298,7 +12298,8 @@ function logSettingsMarkup() {
       }).join('')
     : `<div class="log-leeg">${esc(I18N.t('settings.log.leeg'))}</div>`
 
-  return instelSectieHtml('log', esc(I18N.t('settings.section.logTitle')), `
+  return `
+        ${instelSubkopHtml(esc(I18N.t('settings.section.logTitle')))}
         <div class="instel-rij">
           <span class="instel-uitleg">${I18N.t('settings.log.uitleg')}</span>
         </div>
@@ -12317,7 +12318,7 @@ function logSettingsMarkup() {
           <button class="term-btn" id="log-wis"><i class="ti ti-trash" style="font-size:13px"></i> ${esc(I18N.t('settings.log.wis'))}</button>
         </div>
         <div class="log-lijst">${rijen}</div>
-  `)
+  `
 }
 
 async function ververesLog() {
@@ -12399,7 +12400,8 @@ function codeKleurenMarkup() {
           <span class="ck-kleur-naam">${esc(I18N.t('settings.codeKleuren.soort.' + soort))}</span>
         </label>`).join('')
 
-  return instelSectieHtml('codekleuren', esc(I18N.t('settings.section.codeKleurenTitle')), `
+  return `
+        ${instelSubkopHtml(esc(I18N.t('settings.section.codeKleurenTitle')))}
         <div class="editor-row enabled">
           <input type="checkbox" id="ck-aan" ${aan ? 'checked' : ''} />
           <div class="editor-row-name"><i class="ti ti-palette"></i> ${I18N.t('settings.codeKleuren.aanLabel')}</div>
@@ -12423,7 +12425,7 @@ function codeKleurenMarkup() {
         </div>
         <pre class="ck-voorbeeld mono" id="ck-voorbeeld"></pre>
         <span class="instel-uitleg">${I18N.t('settings.codeKleuren.grensDesc', { max: Math.round(CodeKleuren.MAX_TEKENS / 1000) })}</span>
-  `)
+  `
 }
 
 function tekenCkVoorbeeld() {
@@ -12596,16 +12598,8 @@ function renderSettingsPanel() {
           <span class="instel-uitleg">${I18N.t('settings.git.inlogEerlijk')}</span>
         </div>
       `)}
-      ${instelSectieHtml('autofix', esc(I18N.t('settings.section.autofixTitle')), `
-        <div class="editor-row enabled" id="autofix-row">
-          <input type="checkbox" id="autofix-check" ${settings.autoFix?.enabled !== false ? 'checked' : ''} />
-          <div class="editor-row-name"><i class="ti ti-wand"></i> ${I18N.t('settings.autofix.label')}</div>
-          <div class="instel-uitleg">
-            ${I18N.t('settings.autofix.desc')}
-          </div>
-        </div>
-      `)}
-      ${instelSectieHtml('sidebar', esc(I18N.t('settings.section.sidebarTitle')), `
+      ${instelSectieHtml('uiterlijk', esc(I18N.t('settings.section.uiterlijkTitle')), `
+        ${instelSubkopHtml(esc(I18N.t('settings.section.sidebarTitle')))}
         <div class="editor-row enabled">
           <input type="checkbox" id="set-sectie-cmd" ${zijbalkSectieAan('cmd') ? 'checked' : ''} />
           <div class="editor-row-name"><i class="ti ti-terminal-2"></i> ${I18N.t('settings.sidebar.cmdLabel')}</div>
@@ -12616,8 +12610,7 @@ function renderSettingsPanel() {
           <div class="editor-row-name"><i class="ti ti-device-desktop"></i> ${I18N.t('settings.sidebar.dezepcLabel')}</div>
           <div class="instel-uitleg">${I18N.t('settings.sidebar.dezepcDesc')}</div>
         </div>
-      `)}
-      ${instelSectieHtml('explorer', esc(I18N.t('settings.section.explorerTitle')), `
+        ${instelSubkopHtml(esc(I18N.t('settings.section.explorerTitle')))}
         <div class="editor-row enabled">
           <input type="checkbox" id="set-mapgroottes" ${settings.mapGroottes !== false ? 'checked' : ''} />
           <div class="editor-row-name"><i class="ti ti-ruler-measure"></i> ${I18N.t('settings.explorer.folderSizesLabel')}</div>
@@ -12625,24 +12618,23 @@ function renderSettingsPanel() {
             ${I18N.t('settings.explorer.folderSizesDesc')}
           </div>
         </div>
-      `)}
-      ${instelSectieHtml('text', esc(I18N.t('settings.section.textTitle')), `
+        ${instelSubkopHtml(esc(I18N.t('settings.section.textTitle')))}
         <div class="editor-row enabled">
           <input type="checkbox" id="set-text-meta" ${textMetaZichtbaar() ? 'checked' : ''} />
           <div class="editor-row-name"><i class="ti ti-notes"></i> ${I18N.t('text.showMetaInEditor')}</div>
           <div class="instel-uitleg">${I18N.t('text.showMetaInEditorDesc')}</div>
         </div>
+        ${codeKleurenMarkup()}
       `)}
-      ${codeKleurenMarkup()}
-      ${instelSectieHtml('projectopen', esc(I18N.t('settings.section.projectOpenTitle')), `
+      ${instelSectieHtml('projecten-groep', esc(I18N.t('settings.section.projectenGroepTitle')), `
+        ${instelSubkopHtml(esc(I18N.t('settings.section.projectOpenTitle')))}
         <div class="instel-rij">
           <span class="instel-uitleg">${I18N.t('settings.projectOpen.desc')}</span>
         </div>
         ${projectOpenRijHtml('website', 'ti-world')}
         ${projectOpenRijHtml('flutter', 'ti-brand-flutter')}
         ${projectOpenRijHtml('overig', 'ti-folder')}
-      `)}
-      ${instelSectieHtml('history', esc(I18N.t('settings.section.historyTitle')), `
+        ${instelSubkopHtml(esc(I18N.t('settings.section.historyTitle')))}
         <div class="editor-row enabled">
           <input type="checkbox" id="hist-enabled" ${hist.enabled !== false ? 'checked' : ''} />
           <div class="editor-row-name"><i class="ti ti-history"></i> ${I18N.t('settings.history.enabledLabel')}</div>
@@ -12670,8 +12662,7 @@ function renderSettingsPanel() {
           <button class="term-btn stop" id="hist-clear-all"><i class="ti ti-trash" style="font-size:13px"></i> ${I18N.t('settings.history.clearAllButton')}</button>
           <span class="hist-count">${I18N.t('settings.history.countSummary', { commands: (history.entries || []).length, runs: (history.recent || []).length })}</span>
         </div>
-      `)}
-      ${instelSectieHtml('customeditors', esc(I18N.t('settings.section.customEditorsTitle')), `
+        ${instelSubkopHtml(esc(I18N.t('settings.section.customEditorsTitle')))}
         <div class="instel-rij">
           <button class="term-btn" id="btn-scan-editors" title="${I18N.t('settings.customEditors.scanTitle')}"><i class="ti ti-search" style="font-size:13px"></i> ${I18N.t('settings.customEditors.scanButton')}</button>
         </div>
@@ -12682,8 +12673,22 @@ function renderSettingsPanel() {
         <button class="add-proj-btn" id="btn-add-custom-editor" style="margin:0;margin-top:4px">
           <i class="ti ti-plus"></i> ${I18N.t('settings.customEditors.addButton')}
         </button>
+        ${instelSubkopHtml(esc(I18N.t('sidebar.sectionProjects')))}
+        ${projRows}
+        <button class="add-proj-btn" id="settings-add-proj" style="margin:0;margin-top:4px">
+          <i class="ti ti-plus"></i> ${I18N.t('sidebar.addProject')}
+        </button>
       `)}
-      ${instelSectieHtml('delete', esc(I18N.t('settings.section.deleteTitle')), `
+      ${instelSectieHtml('systeem', esc(I18N.t('settings.section.systeemTitle')), `
+        ${instelSubkopHtml(esc(I18N.t('settings.section.autofixTitle')))}
+        <div class="editor-row enabled" id="autofix-row">
+          <input type="checkbox" id="autofix-check" ${settings.autoFix?.enabled !== false ? 'checked' : ''} />
+          <div class="editor-row-name"><i class="ti ti-wand"></i> ${I18N.t('settings.autofix.label')}</div>
+          <div class="instel-uitleg">
+            ${I18N.t('settings.autofix.desc')}
+          </div>
+        </div>
+        ${instelSubkopHtml(esc(I18N.t('settings.section.deleteTitle')))}
         <div class="instel-rij">
           <div class="editor-row-name"><i class="ti ti-trash"></i> ${I18N.t('settings.delete.label')}</div>
           <select class="loc-select" id="set-wiswijze">
@@ -12697,10 +12702,11 @@ function renderSettingsPanel() {
             <i class="ti ti-arrow-back-up" style="font-size:13px"></i> ${I18N.t('wis.restoreButtonShort', { count: verborgenKnopAantal() })}
           </button>` : ''}
         </div>
+        ${logSettingsMarkup()}
       `)}
-      ${logSettingsMarkup()}
-      ${aiSettingsMarkup()}
-      ${instelSectieHtml('language', esc(I18N.t('settings.section.languageTitle')), `
+      ${instelSectieHtml('ai-taal', esc(I18N.t('settings.section.aiTaalTitle')), `
+        ${aiSettingsMarkup()}
+        ${instelSubkopHtml(esc(I18N.t('settings.section.languageTitle')))}
         <div class="settings-proj-item" id="settings-open-talen">
           <i class="ti ti-language" style="font-size:20px;color:var(--muted2)"></i>
           <div class="settings-proj-info">
@@ -12709,12 +12715,6 @@ function renderSettingsPanel() {
           </div>
           <button class="settings-proj-edit"><i class="ti ti-chevron-right"></i></button>
         </div>
-      `)}
-      ${instelSectieHtml('projects', esc(I18N.t('sidebar.sectionProjects')), `
-        ${projRows}
-        <button class="add-proj-btn" id="settings-add-proj" style="margin:0;margin-top:4px">
-          <i class="ti ti-plus"></i> ${I18N.t('sidebar.addProject')}
-        </button>
       `)}
     </div>
     <div class="settings-save-bar">
@@ -12966,9 +12966,10 @@ let aiSettingsHerladen = false
 function aiSettingsMarkup() {
   const titel = esc(I18N.t('settings.section.aiTitle'))
   if (!aiProviders.length) {
-    return instelSectieHtml('ai', titel, `
+    return `
+      ${instelSubkopHtml(titel)}
       <div class="hint-row">${I18N.t('settings.ai.loadingHint')}</div>
-    `)
+    `
   }
 
   const cfg     = settings.ai || {}
@@ -12995,7 +12996,8 @@ function aiSettingsMarkup() {
     + ((!model || bekend.some(m => m.id === model)) ? ''
        : `<option value="${esc(model)}" selected>${esc(model)}</option>`)
 
-  return instelSectieHtml('ai', titel, `
+  return `
+    ${instelSubkopHtml(titel)}
     <p style="font-size:11px;color:var(--muted);margin:4px 0 8px">${I18N.t('settings.ai.hint')}</p>
 
     <div class="ai-rij">
@@ -13043,7 +13045,7 @@ function aiSettingsMarkup() {
                value="${Number(cfg.maxTokens) || 4096}" style="width:90px" />
       </label>
     </div>
-  `)
+  `
 }
 
 function bedraadAiSettings() {
@@ -18961,6 +18963,14 @@ function instelSectieHtml(sleutel, titel, inhoudHtml) {
         ${inhoudHtml}
       </div>
     </div>`
+}
+
+// Lichte, niet-inklapbare kop binnen een sectie -- voor als een sectie meerdere
+// vroeger-losse blokken samenvoegt (bv. "Uiterlijk & werkruimte" = zijbalk +
+// verkenner + tekst + code-kleuren) en het anders weer één ongesorteerde muur
+// wordt. Hergebruikt de bestaande .settings-section-title-stijl.
+function instelSubkopHtml(titel) {
+  return `<div class="settings-section-title">${titel}</div>`
 }
 
 function zetInstelSectie(sleutel, open) {
