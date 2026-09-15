@@ -156,10 +156,12 @@
       <button class="modal-close" id="modal-proj-close"><i class="ti ti-x"></i></button>
     </div>
     <!-- Vier inklapbare secties, allemaal standaard dicht (zetInstelSecties()
-         klapt ze weer dicht bij elke openNewModal/openEditModal). Verdeling:
-         Algemeen (naam/icoon/device/locaties/website), Knoppen (git/flutter/
-         eigen commando's), Git (koppelen + git-status), Programma's (editors
-         en AI-diensten) — zie project-instellingen-secties-en-knoppen.md. -->
+         klapt ze weer dicht bij elke openNewModal/openEditModal; openNewModal
+         klapt Algemeen en Git daarna weer open, die zijn nodig bij aanmaken).
+         Vaste volgorde: Algemeen (naam/icoon/device/locaties/website), Git
+         (koppelen + git-status), Knoppen (git/flutter/eigen commando's),
+         Programma's (editors en AI-diensten) — zie
+         project-instellingen-secties-en-knoppen.md. -->
     <div class="instel-sectie" data-instel-sectie="algemeen">
       <button type="button" class="instel-sectie-kop" data-instel-sectie="algemeen">
         <i class="ti ti-chevron-right instel-sectie-pijl"></i>
@@ -202,16 +204,6 @@
       </div>
     </div>
 
-    <div class="instel-sectie" data-instel-sectie="knoppen">
-      <button type="button" class="instel-sectie-kop" data-instel-sectie="knoppen">
-        <i class="ti ti-chevron-right instel-sectie-pijl"></i>
-        <span data-i18n="modal.project.sectionButtons">Knoppen</span>
-      </button>
-      <div class="instel-sectie-inhoud" id="instel-inhoud-knoppen" hidden>
-        <div id="cmdvis-section"></div>
-      </div>
-    </div>
-
     <div class="instel-sectie" data-instel-sectie="git">
       <button type="button" class="instel-sectie-kop" data-instel-sectie="git">
         <i class="ti ti-chevron-right instel-sectie-pijl"></i>
@@ -247,6 +239,16 @@
         <div id="f-git-sectie" hidden>
           <div id="git-sectie"></div>
         </div>
+      </div>
+    </div>
+
+    <div class="instel-sectie" data-instel-sectie="knoppen">
+      <button type="button" class="instel-sectie-kop" data-instel-sectie="knoppen">
+        <i class="ti ti-chevron-right instel-sectie-pijl"></i>
+        <span data-i18n="modal.project.sectionButtons">Knoppen</span>
+      </button>
+      <div class="instel-sectie-inhoud" id="instel-inhoud-knoppen" hidden>
+        <div id="cmdvis-section"></div>
       </div>
     </div>
 

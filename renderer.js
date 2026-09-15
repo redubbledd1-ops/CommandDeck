@@ -611,6 +611,18 @@ function flutterKnoppenAan(p) {
   return !(p && p.secties && p.secties.tools === false)
 }
 
+// Git-knoppen in de rij: aan, tenzij ze in dit project bewust uit staan. Zelfde
+// regel als flutterKnoppenAan, maar dan voor de git-groep.
+function gitKnoppenAan(p) {
+  return !(p && p.secties && p.secties.git === false)
+}
+
+// Programma-knoppen (editors, AI-diensten) in de rij: aan, tenzij ze in dit
+// project bewust uit staan. Zelfde regel als flutterKnoppenAan.
+function progKnoppenAan(p) {
+  return !(p && p.secties && p.secties.prog === false)
+}
+
 function openKeuzeVoorProject(p) {
   const soort = WebTools.projectOpenSoort({
     website: projectIsWebsite(p),
@@ -1363,6 +1375,7 @@ function rijVoor(bron, sectie) {
 // tonen we geen enkele git-knop: liever even niets dan een knop die een seconde
 // later weer verspringt.
 function gitToonbaar(bron, ids) {
+  if (!gitKnoppenAan(bron)) ids = ids.filter(id => !GitTools.isGitId(id))
   if (!ids.some(id => GitTools.isGitId(id))) return ids
   const toon = GitTools.zichtbareGitIds(gitStaatVan(bron))
   return ids.filter(id => !GitTools.isGitId(id) || toon.includes(id))
@@ -1389,6 +1402,8 @@ function projectToonbaar(bron, ids) {
     if (isMapId(id)) {
       const f = folderOp(bron, mapIdVan(id))
       if (!f) return false
+      if (!gitKnoppenAan(bron) && f.auto === 'git') return false
+      if (!progKnoppenAan(bron) && (f.auto === 'prog' || f.auto === 'ai')) return false
       if (website) {
         if (f.auto === FLUTTER_MAP) return false
         if (typeof WebKnoppen !== 'undefined' && WebKnoppen.isWebAuto(f.auto)) {
@@ -1406,6 +1421,7 @@ function projectToonbaar(bron, ids) {
       const def = WebKnoppen.defVan(id)
       return !!(def && def.taal === taal)
     }
+    if (!progKnoppenAan(bron) && isProgKnopId(id)) return false
     if (website) {
       if (TOOLS_CMD_DEFS.some(d => d.id === id)) return false
       if (id.startsWith('editor:custom:')) return false
@@ -19034,7 +19050,7 @@ function wisselInstelSectie(sleutel) {
 
 // Alleen voor het project-venster: dat mag altijd vers-dicht beginnen, ook als
 // er van een vorige keer nog een andere stand in instelSectieOpen zou staan.
-const MODAL_INSTEL_SECTIES = ['algemeen', 'knoppen', 'git', 'programmas']
+const MODAL_INSTEL_SECTIES = ['algemeen', 'git', 'knoppen', 'programmas']
 function sluitAlleInstelSecties() {
   MODAL_INSTEL_SECTIES.forEach(s => zetInstelSectie(s, false))
 }
@@ -19651,6 +19667,10 @@ function openNewModal() {
   cmdvisSorteerModus = ''
   document.getElementById('modal-proj').hidden = false
   sluitAlleInstelSecties()
+  // Bij aanmaken zijn naam/locatie (algemeen) en de git-koppeling meteen van
+  // belang, dus die twee staan hier open. De rest klapt pas open op klik.
+  zetInstelSectie('algemeen', true)
+  zetInstelSectie('git', true)
   buildEmojiPicker()
   refreshEmojiPicker(); refreshLocList(); renderCmdVisibilitySection()
   ververesIcoonKeuze()
@@ -20175,7 +20195,10 @@ function renderCmdVisibilitySection() {
     // die tekst is een leeg vinkje niet te onderscheiden van iets dat je zelf
     // ooit hebt uitgezet en vergeten bent. Flutter-knoppen krijgen die tekst
     // als Flutter voor dit project uit staat.
-    const hint = (CMD_STANDAARD_UIT.has(row.id) || (isFlutterKnopId(row.id) && pendingSecties.tools === false))
+    const hint = (CMD_STANDAARD_UIT.has(row.id)
+        || (isFlutterKnopId(row.id) && pendingSecties.tools === false)
+        || (GitTools.isGitId(row.id) && pendingSecties.git === false)
+        || (isProgKnopId(row.id) && pendingSecties.prog === false))
       ? `<span class="cmdvis-standaard-uit">${esc(I18N.t('cmdvis.defaultOff'))}</span>` : ''
     return `${wrapOpen}<label class="cmdvis-row">
       <input type="checkbox" data-cmdvis-id="${row.id}" ${aan(row.id) ? 'checked' : ''} />
@@ -20184,10 +20207,9 @@ function renderCmdVisibilitySection() {
     </label>${wrapClose}`
   }
 
-  // `toggleKey`: welke sectie de schakelaar zet. Programma's heeft er geen:
-  // die schakelaar bestond al op "Knoppen" en verbergt in de app ook meteen
-  // de programma-knoppen mee. Flutter wel: dat is een eigen groep knoppen
-  // die je per project aan of uit wilt, zonder de rest van de rij mee te nemen.
+  // `toggleKey`: welke sectie de schakelaar zet. Git, Flutter en Programma's
+  // hebben elk hun eigen schakelaar: aparte groepen knoppen die je per project
+  // aan of uit wilt, zonder de rest van de rij ("Knoppen") mee te nemen.
   const groupBlok = (title, sleutel, rows, toggleKey, legeTekst, dimKey) => {
     const dimSectie = dimKey || toggleKey || 'run'
     const eigenAan = pendingSecties[dimSectie] !== false
@@ -20215,15 +20237,19 @@ function renderCmdVisibilitySection() {
   const alleRows = cmdvisRijen('run')
   const knopRows = alleRows.filter(row => !isProgKnopId(row.id))
   const flutterRows = knopRows.filter(row => isFlutterKnopId(row.id))
-  const andereRows = knopRows.filter(row => !isFlutterKnopId(row.id))
+  const gitRows = knopRows.filter(row => !isFlutterKnopId(row.id) && GitTools.isGitId(row.id))
+  const andereRows = knopRows.filter(row => !isFlutterKnopId(row.id) && !GitTools.isGitId(row.id))
   const progRows = alleRows.filter(row => isProgKnopId(row.id))
 
   container.innerHTML = groupBlok(esc(I18N.t('project.buttonsSectionLabel')), 'run', andereRows, 'run', I18N.t('cmdvis.empty'))
+    + (gitRows.length
+      ? groupBlok(esc(I18N.t('folder.autoGit')), 'run-git', gitRows, 'git', I18N.t('cmdvis.empty'))
+      : '')
     + (flutterRows.length
       ? groupBlok(esc(I18N.t('folder.flutter')), 'run-flutter', flutterRows, 'tools', I18N.t('cmdvis.empty'))
       : '')
   if (progContainer) {
-    progContainer.innerHTML = groupBlok(esc(I18N.t('project.programsSectionLabel')), 'run-prog', progRows, null, I18N.t('cmdvis.programsEmpty'), 'run')
+    progContainer.innerHTML = groupBlok(esc(I18N.t('project.programsSectionLabel')), 'run-prog', progRows, 'prog', I18N.t('cmdvis.programsEmpty'))
   }
 
   const containers = [container, progContainer].filter(Boolean)
@@ -20247,11 +20273,12 @@ function renderCmdVisibilitySection() {
     })
   })
 
-  // Slepen: "Knoppen" en "Flutter" zijn deellijsten binnen dezelfde
+  // Slepen: "Knoppen", "Git" en "Flutter" zijn deellijsten binnen dezelfde
   // onderliggende volgorde -- zie verplaatsCmdSubset -- zodat een sleep in de
   // ene lijst de andere niet aanraakt. Programma's net zo.
   const sleepBlokken = [
     { sleutel: 'run', groep: container.querySelector('.cmdvis-group[data-cmdvis-sectie="run"]'), subset: andereRows.map(r => r.id) },
+    { sleutel: 'run-git', groep: container.querySelector('.cmdvis-group[data-cmdvis-sectie="run-git"]'), subset: gitRows.map(r => r.id) },
     { sleutel: 'run-flutter', groep: container.querySelector('.cmdvis-group[data-cmdvis-sectie="run-flutter"]'), subset: flutterRows.map(r => r.id) },
     { sleutel: 'run-prog', groep: progContainer?.querySelector('.cmdvis-group[data-cmdvis-sectie="run-prog"]'), subset: progRows.map(r => r.id) },
   ]

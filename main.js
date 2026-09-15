@@ -16,6 +16,7 @@ const GitTools = require('./git-tools')
 const WebTools = require('./web-tools')
 const NoteTools = require('./note-tools')
 const ProjectIcoon = require('./project-icoon')
+const DesktopSnelkoppeling = require('./desktop-snelkoppeling')
 const Accounts = require('./accounts')
 const { maakAi } = require('./ai-runtime')
 const { SUPPORTED_LANGUAGES } = require('./locales/languages')
@@ -4502,6 +4503,26 @@ ipcMain.handle('projicoon:vergeet', (_, pad) => {
   return true
 })
 
+// Zodra `flutter run -d windows` / `flutter build windows` meldt waar de exe
+// staat, zet (of ververst) hiermee een bureaubladsnelkoppeling — met het eigen
+// icoon van het project als dat er is. Draait alleen op Windows en blokkeert
+// de uitvoer niet: een mislukte snelkoppeling mag de build nooit laten falen.
+async function probeerBureaubladSnelkoppeling(projectId, cwd, line) {
+  if (process.platform !== 'win32') return
+  if (!DesktopSnelkoppeling.vindGebouwdeExe(line)) return
+  try {
+    const flutterWortel = await zoekFlutterWortel()
+    const res = await DesktopSnelkoppeling.verwerkRegel(line, {
+      cwd,
+      flutterWortel,
+      projectIcoon: ProjectIcoon,
+      desktopPad: app.getPath('desktop'),
+      cacheDir: path.join(app.getPath('userData'), 'icoon-cache'),
+    })
+    if (res) sendOutput(projectId, 'info', `🖥 Bureaubladsnelkoppeling gezet: ${path.basename(res.lnkPad)}`)
+  } catch { /* nooit de run zelf laten struikelen */ }
+}
+
 function runCommandOnce({ projectId, cmd, cwd, echoCmd = true, shell } = {}) {
   return new Promise(async (resolve) => {
     if (!validateCwd(projectId, cwd, shell)) {
@@ -4551,6 +4572,7 @@ function runCommandOnce({ projectId, cmd, cwd, echoCmd = true, shell } = {}) {
       if (GitTools.uncWaarschuwing(line)) uitgeweken = true
       capture(line)
       sendOutput(projectId, type, line)
+      probeerBureaubladSnelkoppeling(projectId, cwd, line)
     }
 
     proc.stdout.on('data', d =>
