@@ -1162,6 +1162,8 @@
   "git.profiel.ghTekst": "Het inloggen loopt hier via de GitHub CLI, en die bepaalt zelf welk account gebruikt wordt. Wil je ook daar naar {naam} wisselen? Dit opent een terminal, want gh kan om bevestiging vragen.",
   "git.profiel.ghOk": "wisselen",
   "settings.section.gitTitle": "Git",
+  "settings.section.accountGitTitle": "Account & git",
+  "settings.git.accountIsGitUitleg": "Je account is je git-identiteit: naam, e-mail en GitHub-login voor commits en pushes. Daarom staan ze hier samen.",
   "settings.git.label": "Bij afsluiten",
   "settings.git.desc": "Kijkt bij het sluiten of er werk is dat nergens anders staat. Ziet ook wijzigingen die buiten CommandDeck zijn gemaakt.",
   "settings.git.off": "niet controleren",

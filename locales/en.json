@@ -1162,6 +1162,8 @@
   "git.profiel.ghTekst": "Signing in here goes through the GitHub CLI, which decides for itself which account is used. Do you want to switch that to {naam} as well? This opens a terminal, because gh may ask for confirmation.",
   "git.profiel.ghOk": "switch",
   "settings.section.gitTitle": "Git",
+  "settings.section.accountGitTitle": "Account & git",
+  "settings.git.accountIsGitUitleg": "Your account is your git identity: name, email and GitHub login for commits and pushes. That's why they live together here.",
   "settings.git.label": "On closing",
   "settings.git.desc": "Checks on close whether there is work that exists nowhere else. Also sees changes made outside CommandDeck.",
   "settings.git.off": "do not check",
