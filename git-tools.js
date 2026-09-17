@@ -25,22 +25,17 @@
     { id: 'git-commit',   labelKey: 'git.btn.commit', label: 'commit',          icon: 'ti-git-commit',   cls: 'gitcommit', schrijft: true },
     { id: 'git-push',     labelKey: 'git.btn.push',   label: 'push',            icon: 'ti-arrow-up',     cls: 'gitpush',   schrijft: true },
     { id: 'git-pull',     labelKey: 'git.btn.pull',   label: 'git pull',        icon: 'ti-arrow-down',   cls: 'gitpull'  },
-    // Fetch haalt op wat de app zelf al elke tien minuten stil ophaalt; de
-    // knop voegt daar weinig aan toe. Stash zet werk uit beeld — nuttig, maar
-    // niet iets wat je dagelijks nodig hebt.
-    { id: 'git-fetch',    labelKey: 'git.btn.fetch',  label: 'git fetch',       icon: 'ti-refresh',      cls: 'gitfetch', standaardUit: true },
-    { id: 'git-stash',    labelKey: 'git.btn.stash',  label: 'stash',           icon: 'ti-archive',      cls: 'gitstash',  schrijft: true, gevaar: true, standaardUit: true },
+    { id: 'git-fetch',    labelKey: 'git.btn.fetch',  label: 'git fetch',       icon: 'ti-refresh',      cls: 'gitfetch' },
+    { id: 'git-stash',    labelKey: 'git.btn.stash',  label: 'stash',           icon: 'ti-archive',      cls: 'gitstash',  schrijft: true, gevaar: true },
     // Branches: één knop die een overzicht opent, geen rij losse knoppen.
-    // Wisselen, maken, samenvoegen en verwijderen horen bij elkaar, en de
-    // meeste mensen die in hun eentje werken openen dit nooit.
-    { id: 'git-branch',   labelKey: 'git.btn.branch', label: 'branches',        icon: 'ti-git-fork',     cls: 'gitbranch', schrijft: true, standaardUit: true },
+    // Wisselen, maken, samenvoegen en verwijderen horen bij elkaar.
+    { id: 'git-branch',   labelKey: 'git.btn.branch', label: 'branches',        icon: 'ti-git-fork',     cls: 'gitbranch', schrijft: true },
     // Zien wat er verandert vóór je het vastlegt. Staat wél aan: dit is hoe je
     // merkt dat er een sleutel of een debug-regel meegaat.
     { id: 'git-diff',     labelKey: 'git.btn.diff',   label: 'diff',            icon: 'ti-file-diff',    cls: 'gitdiff' },
     // Terugdraaien: één knop met de drie dingen die je écht wilt kunnen.
-    // Standaard uit, want de meeste dagen heb je hem niet nodig — en als je
-    // hem nodig hebt, moet elke stap een bewuste keuze zijn.
-    { id: 'git-terug',    labelKey: 'git.btn.undo',   label: 'terugdraaien',    icon: 'ti-arrow-back-up', cls: 'gitterug', schrijft: true, gevaar: true, standaardUit: true },
+    // Als gevaarlijk gemarkeerd: elke stap erin blijft een bewuste keuze.
+    { id: 'git-terug',    labelKey: 'git.btn.undo',   label: 'terugdraaien',    icon: 'ti-arrow-back-up', cls: 'gitterug', schrijft: true, gevaar: true },
     // Terughalen staat wél aan, en verschijnt vanzelf zodra er iets in de
     // stash zit — ook als dat er door de afsluitcontrole in is gezet en je
     // de stash-knop nooit hebt aangeraakt. Dit is de weg terug; die mag nooit

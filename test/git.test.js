@@ -282,10 +282,11 @@ gelijk('alleen stash en terugdraaien zijn als gevaarlijk gemarkeerd',
   G.GIT_CMD_DEFS.filter(d => d.gevaar).map(d => d.id), ['git-stash', 'git-terug'])
 
 // ── fase 1: knoppen die standaard uit staan ──────────────────────────────────
-// Uit staan is niet hetzelfde als niet bestaan. Deze twee blijven gewoon in de
-// lijst zitten, zodat de instellingen ze kunnen tonen en je ze aan kunt zetten.
-gelijk('fetch, stash, branches en terugdraaien staan standaard uit',
-  G.STANDAARD_UIT_IDS, ['git-fetch', 'git-stash', 'git-branch', 'git-terug'])
+// Alle git-knoppen staan standaard aan zodra git gekoppeld is — ze worden
+// vaak genoeg gebruikt dat verstoppen meer kost dan het oplevert. Uit kan nog
+// steeds, per knop, via de projectinstellingen.
+gelijk('geen enkele git-knop staat standaard uit',
+  G.STANDAARD_UIT_IDS, [])
 t('standaard uit staat alleen op knoppen die ook echt bestaan',
   G.STANDAARD_UIT_IDS.every(id => G.GIT_IDS.includes(id)))
 t('de dagelijkse lus staat gewoon aan',
@@ -1150,8 +1151,8 @@ t('met wijzigingen mag het wel',
 t('geen repo, niets terug te draaien',
   G.terugdraaiBlokkade('commit', G.maakStaat({ isRepo: false })) === 'geen-repo')
 
-t('de terugdraai-knop staat standaard uit',
-  G.GIT_CMD_DEFS.find(d => d.id === 'git-terug').standaardUit === true)
+t('de terugdraai-knop staat niet standaard uit — wel als gevaarlijk gemarkeerd',
+  !G.GIT_CMD_DEFS.find(d => d.id === 'git-terug').standaardUit)
 t('en is als gevaarlijk gemarkeerd',
   G.GIT_CMD_DEFS.find(d => d.id === 'git-terug').gevaar === true)
 t('hij verschijnt pas als er een commit is',
@@ -1281,8 +1282,8 @@ t('naar dezelfde branch wisselen heeft geen zin', G.wisselBlokkade(schoonSt, 'ma
 t('schoon en een andere branch mag gewoon', G.wisselBlokkade(schoonSt, 'anders') === null)
 t('geen repo, geen wissel', G.wisselBlokkade(G.maakStaat({ isRepo: false }), 'x') === 'geen-repo')
 
-t('de branch-knop staat standaard uit',
-  G.GIT_CMD_DEFS.find(d => d.id === 'git-branch').standaardUit === true)
+t('de branch-knop staat niet standaard uit',
+  !G.GIT_CMD_DEFS.find(d => d.id === 'git-branch').standaardUit)
 t('branches werken ook zonder remote',
   G.zichtbareGitIds(G.maakStaat({ isRepo: true, remotes: [], branch: 'main' })).includes('git-branch'))
 t('maar niet in een repo zonder commits',
