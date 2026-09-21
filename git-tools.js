@@ -2302,12 +2302,32 @@
     return veiligeRepoNaam(projectNaam || '')
   }
 
+  // Mapnaam als submap onder de standaard projectmap: spaties mogen, tekens
+  // die Windows in een pad weigert worden een streepje.
+  function mapNaamVoorPad(naam) {
+    return String(naam || '').trim()
+      .replace(/[\\/:*?"<>|]+/g, '-')
+      .replace(/[. ]+$/g, '')
+      .replace(/^-+|-+$/g, '')
+  }
+
+  function projectMapPad(basis, naam) {
+    const b = String(basis || '').replace(/[\\/]+$/, '')
+    const map = mapNaamVoorPad(naam)
+    if (!b || !map) return ''
+    return joinPad(b, map)
+  }
+
   // Waar de bestanden terechtkomen. Is de gekozen locatie al de reponaam,
   // dan is dat de map zelf; anders komt er een map met die naam onder.
-  function cloneDoelPad(url, locatiePad) {
-    const naam = repoNaamUitUrl(url)
+  // exact: de locatie ís al de projectmap (standaardmap + naam), dus niet
+  // nóg een reponaam-submap eronder zetten.
+  function cloneDoelPad(url, locatiePad, opties) {
     const loc = String(locatiePad || '').replace(/[\\/]+$/, '')
-    if (!naam || !loc) return null
+    if (!loc) return null
+    if (opties && opties.exact) return repoNaamUitUrl(url) ? loc : null
+    const naam = repoNaamUitUrl(url)
+    if (!naam) return null
     const basis = (loc.split(/[/\\]/).filter(Boolean).pop() || '')
     if (basis.toLowerCase() === naam.toLowerCase()) return loc
     const sep = loc.includes('/') && !loc.includes('\\') ? '/' : '\\'
@@ -2423,7 +2443,7 @@
     repoNaamBezetFout, zoekRepoOpNaam, koppelBestaandeCommando, pushGeweigerdFout,
     grootBestandFout, herbouwCommando, negeerRegelVoor,
     bareInitCommando, bareCloneCommando, joinPad, cmdPad,
-    repoNaamUitUrl, cloneDoelPad, cloneOuderPad, cloneCommando,
+    repoNaamUitUrl, cloneDoelPad, cloneOuderPad, cloneCommando, projectMapPad,
     verkeerdeKoppeling, zelfdeRepoNaam, magNaamUitGitOvernemen,
     parseGhRepos, filterRepos, repoSleutel, zonderGekoppelde, gitSlotFout,
     KOPPELING_GEEN, KOPPELING_ONBEKEND, KOPPELING_OK, KOPPELING_STUK,

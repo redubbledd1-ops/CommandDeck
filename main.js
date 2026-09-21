@@ -409,6 +409,9 @@ const DEFAULT_SETTINGS = {
     flutter: 'output',   // output | verkenner | windows | niets
     overig:  'output',
   },
+  // Map waar nieuwe projecten standaard in terechtkomen. De projectnaam
+  // wordt daar een submap. Leeg = zelf een locatie kiezen.
+  projectMap: '',
   // Eigen editors: zoveel als je wilt, elk met een eigen naam en pad
   customEditors: [],
   // Per project (en voor de cmd-sectie) of je output of de verkenner open had

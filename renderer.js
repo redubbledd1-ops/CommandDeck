@@ -15,6 +15,7 @@ let deleteId    = null
 let pendingLocs = []
 let cloneNaamOvergenomen = false
 let cloneNaamBron = ''            // 'git' | 'map' | '' — git wint van de mapnaam
+let locatieAuto = false           // pad volgt standaardmap + naam tot je zelf een map kiest
 let settingsSubPage      = null   // null | 'talen' — sub-pagina binnen Instellingen
 let LANGUAGES            = []     // pas als je Instellingen → talen opent
 let detectedLanguageCode = null   // Windows-taal, voor bovenaan pinnen in de Talen-lijst
@@ -11391,6 +11392,7 @@ function zelfdePad(a, b) {
 // versleept is werk dat de app hoort te doen.
 async function openNieuwProjectMet(pad, naam) {
   openNewModal()
+  locatieAuto = false
   pendingLocs = [{ label: 'main', path: pad }]
   refreshLocList()
   zetAutomatischeProjectNaam(naam, 'map')
@@ -12686,6 +12688,18 @@ function renderSettingsPanel() {
         ${codeKleurenMarkup()}
       `)}
       ${instelSectieHtml('projecten-groep', esc(I18N.t('settings.section.projectenGroepTitle')), `
+        ${instelSubkopHtml(esc(I18N.t('settings.section.projectMapTitle')))}
+        <div class="instel-rij">
+          <div class="editor-path-wrap" style="flex:1 1 100%">
+            <input class="field mono" id="set-project-map" value="${esc(settings.projectMap || '')}"
+                   placeholder="${esc(I18N.t('settings.projectMap.placeholder'))}" />
+            <button class="loc-browse" id="set-project-map-kies" type="button"
+                    title="${esc(I18N.t('settings.projectMap.pickTitle'))}"><i class="ti ti-folder-open"></i></button>
+            <button class="loc-del" id="set-project-map-wis" type="button"
+                    title="${esc(I18N.t('settings.projectMap.clearTitle'))}"><i class="ti ti-x"></i></button>
+          </div>
+          <span class="instel-uitleg">${I18N.t('settings.projectMap.desc')}</span>
+        </div>
         ${instelSubkopHtml(esc(I18N.t('settings.section.projectOpenTitle')))}
         <div class="instel-rij">
           <span class="instel-uitleg">${I18N.t('settings.projectOpen.desc')}</span>
@@ -12978,6 +12992,24 @@ function renderSettingsPanel() {
       window.api.saveSettings(settings)
     }
   })
+  const bewaarProjectMap = (pad) => {
+    settings.projectMap = String(pad || '').trim()
+    window.api.saveSettings(settings)
+  }
+  const projectMapVeld = document.getElementById('set-project-map')
+  if (projectMapVeld) projectMapVeld.onchange = () => bewaarProjectMap(projectMapVeld.value)
+  const projectMapKies = document.getElementById('set-project-map-kies')
+  if (projectMapKies) projectMapKies.onclick = async () => {
+    const picked = await window.api.pickFolder()
+    if (!picked) return
+    bewaarProjectMap(picked)
+    if (projectMapVeld) projectMapVeld.value = picked
+  }
+  const projectMapWis = document.getElementById('set-project-map-wis')
+  if (projectMapWis) projectMapWis.onclick = () => {
+    bewaarProjectMap('')
+    if (projectMapVeld) projectMapVeld.value = ''
+  }
   document.getElementById('hist-seed').onclick = async () => {
     const r = await window.api.seedDefaults()
     if (r && r.history) history = r.history
@@ -13010,6 +13042,8 @@ function renderSettingsPanel() {
     settings.customEditors = (settings.customEditors || [])
       .filter(e => (e.path || '').trim())
       .map(e => ({ ...e, label: (e.label || '').trim() || I18N.t('settings.customEditors.defaultLabel'), path: e.path.trim() }))
+    const mapVeld = document.getElementById('set-project-map')
+    if (mapVeld) settings.projectMap = mapVeld.value.trim()
     window.api.saveSettings(settings)
     showToast(I18N.t('settings.savedToast'))
     vraagProjectHertekenen()
@@ -18996,9 +19030,9 @@ function setupTerminalInput(project) {
 // als de bestaande GitHub-repo-kiezer hierboven.
 //
 // Twee heel verschillende plekken gebruiken dit:
-//   - het project-venster (Algemeen/Knoppen/Git/Programma's) is een modal die
-//     telkens vers opengaat, voor een willekeurig project -- die mag altijd
-//     weer vers-dicht beginnen, zie sluitAlleInstelSecties.
+//   - het project-venster (Algemeen/Git/Knoppen/Programma's) is een modal die
+//     telkens vers opengaat. Bij toevoegen gaan Algemeen en Git open, bij
+//     bewerken blijven ze dicht — zie zetModalInstelSecties.
 //   - het instellingen-scherm tekent zichzelf steeds opnieuw (bijna elke
 //     instelling die je wijzigt roept renderSettingsPanel() aan) en zou zonder
 //     onthouden staat bij elke klik weer dichtklappen. instelSectieOpen is die
@@ -19048,11 +19082,16 @@ function wisselInstelSectie(sleutel) {
   zetInstelSectie(sleutel, !instelSectieOpen[sleutel])
 }
 
-// Alleen voor het project-venster: dat mag altijd vers-dicht beginnen, ook als
-// er van een vorige keer nog een andere stand in instelSectieOpen zou staan.
+// Alleen voor het project-venster. Bij toevoegen gaan Algemeen en Git open
+// (naam, locatie, repository kiezen); bij later bewerken blijven ze dicht,
+// ook als er van een vorige keer nog een andere stand in instelSectieOpen stond.
 const MODAL_INSTEL_SECTIES = ['algemeen', 'git', 'knoppen', 'programmas']
+function zetModalInstelSecties(openSleutels) {
+  const open = new Set(openSleutels || [])
+  MODAL_INSTEL_SECTIES.forEach(s => zetInstelSectie(s, open.has(s)))
+}
 function sluitAlleInstelSecties() {
-  MODAL_INSTEL_SECTIES.forEach(s => zetInstelSectie(s, false))
+  zetModalInstelSecties([])
 }
 
 // wortel: het instellingen-scherm bindt dit na elke innerHTML-tekening opnieuw
@@ -19082,7 +19121,11 @@ function setupModalEvents() {
   const repoZoek = document.getElementById('f-git-repo-zoek')
   if (repoZoek) repoZoek.oninput = () => tekenRepoLijst()
   const naamVeld = document.getElementById('f-name')
-  if (naamVeld) naamVeld.oninput = () => { cloneNaamOvergenomen = false; cloneNaamBron = '' }
+  if (naamVeld) naamVeld.oninput = () => {
+    cloneNaamOvergenomen = false
+    cloneNaamBron = ''
+    volgLocatieMetNaam()
+  }
   // Het potlood zit ín de cmd-knop van de zijbalk. Klikken mag die knop niet
   // ook nog eens openen, en lang drukken hoort de sorteerstand niet aan te
   // zetten — vandaar dat beide gebeurtenissen hier stoppen.
@@ -19665,12 +19708,9 @@ function openNewModal() {
   pendingCustomCmds = []
   pendingCmdVolgorde = { run: [], tools: [] }
   cmdvisSorteerModus = ''
+  locatieAuto = !!projectMapBasis()
   document.getElementById('modal-proj').hidden = false
-  sluitAlleInstelSecties()
-  // Bij aanmaken zijn naam/locatie (algemeen) en de git-koppeling meteen van
-  // belang, dus die twee staan hier open. De rest klapt pas open op klik.
-  zetInstelSectie('algemeen', true)
-  zetInstelSectie('git', true)
+  zetModalInstelSecties(['algemeen', 'git'])
   buildEmojiPicker()
   refreshEmojiPicker(); refreshLocList(); renderCmdVisibilitySection()
   ververesIcoonKeuze()
@@ -19698,6 +19738,7 @@ function openEditModal(id) {
     tools: [...((p.cmdVolgorde && p.cmdVolgorde.tools) || [])],
   }
   cmdvisSorteerModus = ''
+  locatieAuto = false
   document.getElementById('modal-proj').hidden = false
   sluitAlleInstelSecties()
   buildEmojiPicker()
@@ -19730,6 +19771,7 @@ function closeProjectModal() {
   // Niet laten staan: zolang dit gevuld is telt dat project niet mee als
   // "repo al bezet", ook als je allang klaar bent met bewerken.
   editingId = null
+  locatieAuto = false
   cmdvisSorteerModus = ''
   toonCloneVeld(false)
   focusTerminalInput()
@@ -19764,14 +19806,43 @@ function cloneUrlInvoer() {
   return (document.getElementById('f-git-url')?.value || '').trim()
 }
 
+function projectMapBasis() {
+  return String((settings && settings.projectMap) || '').replace(/[\\/]+$/, '')
+}
+
+function standaardLocatiePad(naam) {
+  return GitTools.projectMapPad(projectMapBasis(), naam)
+}
+
+// De locatie van een nieuw project volgt de standaardmap + naam, totdat je
+// zelf een map kiest of het pad typt.
+function volgLocatieMetNaam() {
+  if (editingId || !locatieAuto) return
+  const naam = document.getElementById('f-name')?.value || ''
+  const pad = standaardLocatiePad(naam)
+  if (!pendingLocs[0]) pendingLocs[0] = { label: 'main', path: '' }
+  pendingLocs[0].path = pad
+  const pathInput = document.querySelector('#loc-list .loc-entry input.mono')
+  if (pathInput) pathInput.value = pad
+  updateCloneDoelPreview()
+}
+
+// Standaardmap + projectnaam ís al de projectmap: git clone gaat daarheen,
+// niet nóg een reponaam-map eronder.
+function cloneDoelVanModal() {
+  const url = cloneUrlInvoer()
+  const loc = (pendingLocs[0] && pendingLocs[0].path || '').trim()
+  if (locatieAuto)
+    return GitTools.cloneDoelPad(url, loc || projectMapBasis(), { exact: !!loc })
+  return GitTools.cloneDoelPad(url, loc)
+}
+
 function updateCloneDoelPreview() {
   const doelEl = document.getElementById('f-git-clone-doel')
   if (!doelEl) return
   const vak = document.getElementById('f-git-clone')
   if (!vak || vak.hidden) { doelEl.hidden = true; return }
-  const url = cloneUrlInvoer()
-  const loc = (pendingLocs[0] && pendingLocs[0].path || '').trim()
-  const doel = GitTools.cloneDoelPad(url, loc)
+  const doel = cloneDoelVanModal()
   if (!doel) { doelEl.hidden = true; doelEl.textContent = ''; return }
   doelEl.hidden = false
   doelEl.textContent = I18N.t('modal.project.gitCloneDoel', { pad: doel })
@@ -19780,6 +19851,7 @@ function updateCloneDoelPreview() {
 function onCloneUrlInvoer() {
   const naam = GitTools.repoNaamUitUrl(cloneUrlInvoer())
   if (naam) zetAutomatischeProjectNaam(naam, 'git')
+  volgLocatieMetNaam()
   updateCloneDoelPreview()
   markeerGekozenRepo()
 }
@@ -19795,6 +19867,7 @@ function zetAutomatischeProjectNaam(naam, bron) {
   el.value = naam
   cloneNaamOvergenomen = true
   cloneNaamBron = bron || cloneNaamBron || 'map'
+  volgLocatieMetNaam()
 }
 
 async function neemNaamUitLocatie() {
@@ -20016,7 +20089,7 @@ async function saveProjectModal() {
         document.getElementById('f-git-url')?.focus()
         return
       }
-      cloneDoel = GitTools.cloneDoelPad(cloneAdres, locs[0].path)
+      cloneDoel = cloneDoelVanModal()
       cloneOuder = GitTools.cloneOuderPad(cloneDoel)
       if (!cloneDoel || !cloneOuder) {
         await meldKort(I18N.t('git.link.urlBadTitle'), I18N.t('git.clone.geenOuder'))
@@ -20129,8 +20202,16 @@ function refreshLocList() {
     labelInput.oninput = () => { pendingLocs[i].label = labelInput.value }
 
     const pathInput = document.createElement('input')
-    pathInput.className = 'field mono'; pathInput.value = loc.path; pathInput.placeholder = I18N.t('location.pathPlaceholder')
-    pathInput.oninput = () => { pendingLocs[i].path = pathInput.value; updateCloneDoelPreview(); plantIcoonKeuze() }
+    pathInput.className = 'field mono'; pathInput.value = loc.path
+    pathInput.placeholder = (i === 0 && locatieAuto && projectMapBasis())
+      ? GitTools.joinPad(projectMapBasis(), '…')
+      : I18N.t('location.pathPlaceholder')
+    pathInput.oninput = () => {
+      pendingLocs[i].path = pathInput.value
+      if (i === 0) locatieAuto = false
+      updateCloneDoelPreview()
+      plantIcoonKeuze()
+    }
 
     const browseBtn = document.createElement('button')
     browseBtn.className = 'loc-browse'; browseBtn.title = I18N.t('location.pickFolderTitle')
@@ -20140,6 +20221,7 @@ function refreshLocList() {
       if (picked) {
         pendingLocs[i].path = picked
         pathInput.value = picked
+        if (i === 0) locatieAuto = false
         updateCloneDoelPreview()
         plantIcoonKeuze()
         if (!editingId) void neemNaamUitLocatie()

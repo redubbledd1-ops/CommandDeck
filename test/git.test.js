@@ -1475,6 +1475,16 @@ t('clone onder de gekozen map',
 t('clone in de map zelf als die al zo heet',
   G.cloneDoelPad('a/b', 'C:\\Projects\\b') === 'C:\\Projects\\b')
 t('zonder locatie geen doel', G.cloneDoelPad('a/b', '') === null)
+t('exact doel blijft de gekozen map, ook als de naam anders is',
+  G.cloneDoelPad('a/b', 'C:\\Projects\\mijn-app', { exact: true }) === 'C:\\Projects\\mijn-app')
+t('zonder adres geen exact doel',
+  G.cloneDoelPad('', 'C:\\Projects\\mijn-app', { exact: true }) === null)
+t('standaardmap + naam wordt de projectmap',
+  G.projectMapPad('C:\\Projects', 'Mijn App') === 'C:\\Projects\\Mijn App')
+t('ongeldige tekens in de projectnaam worden een streepje',
+  G.projectMapPad('C:\\Projects', 'a:b') === 'C:\\Projects\\a-b')
+t('zonder standaardmap geen pad', G.projectMapPad('', 'x') === '')
+t('zonder naam geen pad', G.projectMapPad('C:\\Projects', '') === '')
 t('ouder van het doel', G.cloneOuderPad('C:\\Projects\\b') === 'C:\\Projects')
 t('ouder van een schijfwortel-map', G.cloneOuderPad('D:\\repo') === 'D:\\')
 t('clone-commando citeert adres en map',
@@ -2261,11 +2271,22 @@ for (const sleutel of ['modal.project.gitLabel', 'modal.project.gitCloneLabel',
   t('de sectie wordt getekend', ren.includes('function tekenGitSectie'))
   // Een nieuw project heeft nog geen map; dan valt er niets te zeggen.
   t('en blijft weg zolang er geen map is', /vak\.hidden = !p \|\| !actieveLocPad\(p\)/.test(ren))
-  t('de sectie gaat open bij bewerken', /openEditModal[\s\S]{0,1200}toonGitSectie\(p\)/.test(ren))
-  t('en leeg bij een nieuw project', /openNewModal[\s\S]{0,900}toonGitSectie\(null\)/.test(ren))
+  t('de sectie gaat open bij bewerken', /openEditModal[\s\S]{0,1600}toonGitSectie\(p\)/.test(ren))
+  t('en leeg bij een nieuw project', /openNewModal[\s\S]{0,1600}toonGitSectie\(null\)/.test(ren))
   t('maar wel een veld om te clonen', html.includes('id="f-git-clone"') && html.includes('id="f-git-url"'))
-  t('een nieuw project toont dat veld', /openNewModal[\s\S]{0,1200}toonCloneVeld\(true\)/.test(ren))
-  t('bewerken verbergt het', /openEditModal[\s\S]{0,1600}toonCloneVeld\(false\)/.test(ren))
+  t('een nieuw project toont dat veld', /openNewModal[\s\S]{0,1800}toonCloneVeld\(true\)/.test(ren))
+  t('bewerken verbergt het', /openEditModal[\s\S]{0,1800}toonCloneVeld\(false\)/.test(ren))
+  t('nieuw project opent algemeen en git',
+    /function openNewModal[\s\S]*?zetModalInstelSecties\(\['algemeen', 'git'\]\)/.test(ren))
+  t('bestaand project laat de secties dicht',
+    /function openEditModal[\s\S]*?sluitAlleInstelSecties\(\)/.test(ren))
+  t('de standaardmap vult de locatie',
+    /locatieAuto = !!projectMapBasis\(\)/.test(ren) && /function volgLocatieMetNaam/.test(ren))
+  t('git clone in een auto-pad nest niet',
+    /function cloneDoelVanModal/.test(ren) && /exact: !!loc/.test(ren))
+  t('instellingen hebben een standaard projectmap',
+    ren.includes('id="set-project-map"')
+    && /projectMap: ''/.test(fs.readFileSync(path.join(APP, 'main.js'), 'utf8')))
   t('na clonen wordt de git-staat nagekeken',
     /async function haalRepoBinnen/.test(ren) && /controleerKoppeling\(doel, true\)/.test(ren))
   t('en de projectnaam komt uit git als die nog de mapnaam was',

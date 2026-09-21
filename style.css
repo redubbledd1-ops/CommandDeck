@@ -1265,10 +1265,11 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
 .git-repo-acties { padding: 0 8px 6px; }
 .git-clone-doel { font-size: 11px; color: var(--muted); margin-top: 6px; word-break: break-all; }
 
-/* ── Inklapbare secties in het project-venster (Algemeen/Knoppen/Git/
+/* ── Inklapbare secties in het project-venster (Algemeen/Git/Knoppen/
    Programma's). Zelfde idee als de git-repo-kop-knop hierboven: de kop is de
    knop, het pijltje wisselt van klasse (geen CSS-rotate) zoals de zijbalk dat
-   ook al deed. Allemaal standaard dicht — zie zetInstelSectie() in renderer.js. */
+   ook al deed. Bij "project toevoegen" gaan Algemeen en Git open; bij bewerken
+   blijven ze dicht — zie zetModalInstelSecties() in renderer.js. */
 .instel-sectie { border-top: 1px solid var(--border); margin-top: 14px; padding-top: 10px; }
 .instel-sectie:first-child { border-top: none; margin-top: 0; padding-top: 0; }
 .instel-sectie-kop {

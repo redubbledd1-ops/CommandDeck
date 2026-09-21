@@ -4371,6 +4371,8 @@ function startVraagAutomaat() {
     $$('.proj-edit')[0].click(); await tick(); await tick()
     check('een niet-afgemaakte koppeling is een fout',
       !!$('.git-set-probleem.e-fout [data-git-actie="koppeling-afmaken"]'))
+    check('bewerken laat algemeen dicht', $('#instel-inhoud-algemeen').hidden)
+    check('bewerken laat git dicht', $('#instel-inhoud-git').hidden)
     $('#modal-proj-save').click(); await tick(); await tick()
 
     // Bij een nieuw project is er nog geen map om iets over te zeggen.
@@ -4378,6 +4380,10 @@ function startVraagAutomaat() {
     check('een nieuw project toont geen git-onderhoud', $('#f-git-sectie').hidden)
     check('maar wel een veld om van git te downloaden', !$('#f-git-clone').hidden)
     check('met een adresveld', $('#f-git-url'))
+    check('algemeen staat open bij toevoegen', !$('#instel-inhoud-algemeen').hidden)
+    check('git staat open bij toevoegen', !$('#instel-inhoud-git').hidden)
+    check('knoppen blijft dicht bij toevoegen', $('#instel-inhoud-knoppen').hidden)
+    check('programmas blijft dicht bij toevoegen', $('#instel-inhoud-programmas').hidden)
 
     $('#modal-proj-cancel').click(); await tick()
 
@@ -4427,6 +4433,35 @@ function startVraagAutomaat() {
     $('#f-name').dispatchEvent(new window.Event('input'))
     $$('#f-git-repo-lijst .git-repo-rij')[1].click(); await tick()
     check('wat je zelf typt blijft staan', $('#f-name').value === 'Mijn App')
+
+    // Standaard projectmap: naam wordt de submap, git clone gaat daarheen.
+    $('#modal-proj-cancel').click(); await tick()
+    settings.projectMap = 'C:\\Projects'
+    $('#btn-settings').click(); await tick()
+    check('er is een veld voor de standaard projectmap', !!$('#set-project-map'))
+    check('en die toont de ingestelde map', $('#set-project-map').value === 'C:\\Projects')
+    $('#btn-settings').click(); await tick()
+    $('#btn-add-proj').click(); await tick(); await tick()
+    check('zonder naam nog geen pad', $$('#loc-list .field')[1].value === '')
+    $('#f-name').value = 'MijnApp'
+    $('#f-name').dispatchEvent(new window.Event('input')); await tick()
+    check('de naam wordt de submap', $$('#loc-list .field')[1].value === 'C:\\Projects\\MijnApp')
+    $$('#f-git-repo-lijst .git-repo-rij')[0].click(); await tick()
+    check('wat je zelf typte blijft de naam', $('#f-name').value === 'MijnApp')
+    check('clone gaat in die map, niet een map dieper',
+      ($('#f-git-clone-doel').textContent || '').includes('C:\\Projects\\MijnApp')
+      && !($('#f-git-clone-doel').textContent || '').includes('MijnApp\\DD-Music'))
+    $('#modal-proj-cancel').click(); await tick()
+    $('#btn-add-proj').click(); await tick(); await tick()
+    $$('#f-git-repo-lijst .git-repo-rij')[0].click(); await tick()
+    check('git vult de naam als die nog leeg is', $('#f-name').value === 'DD-Music')
+    check('en de map volgt de reponaam', $$('#loc-list .field')[1].value === 'C:\\Projects\\DD-Music')
+    pickedFolder = 'C:\\site'
+    $$('#loc-list .loc-browse')[0].click(); await tick(); await tick()
+    $('#f-name').value = 'IetsAnders'
+    $('#f-name').dispatchEvent(new window.Event('input')); await tick()
+    check('na zelf een map kiezen volgt het pad niet meer', $$('#loc-list .field')[1].value === 'C:\\site')
+    settings.projectMap = ''
 
     // Wat al aan een project hangt hoort er niet meer bij te staan. Het project
     // uit deze tests wijst naar DD-Music, dus die valt weg.
