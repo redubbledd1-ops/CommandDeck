@@ -80,9 +80,9 @@ Module._load = orig
     const cache = path.join(TMP, 'cache2')
     psAanroepen.length = 0
     const r = await DS.icoonBestandVoor({ ok: true, bron: pngBron, hash: 'abc123' }, cache)
-    t('png levert een ico-pad op', r === path.join(cache, 'abc123.ico'))
+    t('png levert een ico-pad op', r === path.join(cache, 'abc123-hq.ico'))
     t('en dat bestand bestaat echt', fs.existsSync(r))
-    t('daarvoor werd powershell gebruikt', psAanroepen.some(a => /GetHicon/.test(a)))
+    t('daarvoor werd powershell gebruikt', psAanroepen.some(a => /HighQualityBicubic/.test(a)))
 
     psAanroepen.length = 0
     const r2 = await DS.icoonBestandVoor({ ok: true, bron: pngBron, hash: 'abc123' }, cache)
