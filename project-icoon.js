@@ -77,6 +77,16 @@ const KANDIDATEN = [
 
   { rel: 'windows/runner/resources/app_icon.ico', soort: 'windows' },
 
+  // Browserextensies (Chrome/Firefox WebExtension): manifest.json wijst naar
+  // icons/icon128.png e.d, maar dat is de gangbare naamgeving zelf al genoeg
+  // om zonder het manifest te lezen te vinden. Grootste eerst.
+  { rel: 'icons/icon128.png', soort: 'webext' },
+  { rel: 'icons/icon-128.png', soort: 'webext' },
+  { rel: 'icons/icon48.png',  soort: 'webext' },
+  { rel: 'icons/icon32.png',  soort: 'webext' },
+  { rel: 'icons/icon16.png',  soort: 'webext' },
+  { rel: 'icon128.png',       soort: 'webext' },
+
   // Electron-projecten en gewone websites. CommandDeck zelf valt hieronder.
   { rel: 'assets/icon.png',    soort: 'app' },
   { rel: 'assets/icon.ico',    soort: 'app' },
@@ -461,6 +471,35 @@ function zoekViaAndroidManifest(projectWortel, flutterWortel, deps) {
   return sjabloonGezien ? { ok: false, reden: 'standaard' } : null
 }
 
+// ── Browserextensie-icoon via manifest.json ──────────────────────────────────
+// De vaste kandidaten hierboven dekken de gangbare naamgeving (icons/icon128.png),
+// maar het manifest zegt het zelf en wint als een extensie een eigen indeling
+// gebruikt (bijvoorbeeld img/logo-512.png). Grootste maat eerst, net als bij de
+// mipmaps: dit plaatje wordt klein getoond en een kleine bron rekt lelijk uit.
+function grootsteManifestIcoon(manifestJson) {
+  const icons = manifestJson && manifestJson.icons
+  if (!icons || typeof icons !== 'object') return null
+  const maten = Object.keys(icons)
+    .map(k => ({ k, n: parseInt(k, 10) }))
+    .filter(x => !isNaN(x.n))
+    .sort((a, b) => b.n - a.n)
+  if (!maten.length) return null
+  return icons[maten[0].k]
+}
+
+function zoekViaManifestJson(projectWortel, flutterWortel, deps) {
+  const bestand = deps.fs || fs
+  const manifestPad = path.join(projectWortel, 'manifest.json')
+  let txt
+  try { txt = bestand.readFileSync(manifestPad, 'utf8') } catch { return null }
+  let json
+  try { json = JSON.parse(txt) } catch { return null }
+  const ref = grootsteManifestIcoon(json)
+  if (!ref || typeof ref !== 'string') return null
+  const vol = path.join(projectWortel, ...ref.split('/'))
+  return leesBitmapKandidaat(vol, 'webext', flutterWortel, deps)
+}
+
 // Zoekt het icoon van één projectmap.
 //
 // Geeft altijd een object terug, ook als er niets is — de aanroeper wil het
@@ -494,7 +533,37 @@ function zoekProjectIcoon(projectPad, opties = {}) {
     if (viaManifest.reden === 'standaard') sjabloonGezien = true
   }
 
+  // Browserextensie met een eigen indeling: manifest.json zegt zelf waar het
+  // icoon staat.
+  const viaWebext = zoekViaManifestJson(wortel, flutterWortel, deps)
+  if (viaWebext && viaWebext.ok) return viaWebext
+
   return { ok: false, reden: sjabloonGezien ? 'standaard' : 'geen' }
+}
+
+// Leest één specifiek, door de gebruiker zelf gekozen icoonbestand — geen
+// zoektocht door kandidaten, geen sjabloonfilter (wie zelf een bestand
+// aanwijst, bedoelt dát bestand, ook al is het toevallig een standaardicoon).
+// Zelfde cache en dezelfde MAX_BYTES-grens als de rest: een paar honderd KB is
+// een icoon, een paar MB is iemands artwork-bestand.
+function leesEigenIcoon(pad, opties = {}) {
+  const bestand = opties.fs || fs
+  if (!pad) return { ok: false, reden: 'geenpad' }
+
+  let st
+  try { st = bestand.statSync(pad) } catch { return { ok: false, reden: 'geenbestand' } }
+  if (!st.isFile() || !st.size) return { ok: false, reden: 'geenbestand' }
+  if (st.size > MAX_BYTES) return { ok: false, reden: 'tegroot', bytes: st.size, max: MAX_BYTES }
+
+  const eerder = cache.get(pad)
+  if (eerder && eerder.mtimeMs === st.mtimeMs && eerder.size === st.size) return eerder.uitkomst
+
+  let buf
+  try { buf = bestand.readFileSync(pad) } catch { return { ok: false, reden: 'fout' } }
+
+  const uitkomst = bitmapUitkomst(pad, buf, st, 'eigen')
+  cache.set(pad, { mtimeMs: st.mtimeMs, size: st.size, uitkomst })
+  return uitkomst
 }
 
 module.exports = {
@@ -503,6 +572,7 @@ module.exports = {
   MAX_BYTES,
   MANIFEST_PADEN,
   zoekProjectIcoon,
+  leesEigenIcoon,
   isStandaardIcoon,
   sjabloonHashesVanSdk,
   vergeetSdkHashes,

@@ -1185,7 +1185,7 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
 }
 
 /* De iconenkeuze in het projectvenster: gevonden icoon of toch een emoji. */
-.icoon-keuze { display: flex; gap: 8px; margin-top: 5px; }
+.icoon-keuze { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 5px; }
 .icoon-optie {
   flex: 1; display: flex; align-items: center; gap: 9px; min-width: 0;
   padding: 8px 10px; border-radius: 8px; cursor: pointer; text-align: left;
@@ -1200,6 +1200,7 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
 .icoon-optie-titel { font-size: 12px; }
 .icoon-optie-sub { font-size: 11px; opacity: 0.6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .icoon-hint { font-size: 11px; opacity: 0.6; margin: 6px 0 0; }
+.icoon-optie-leeg { font-size: 18px; width: 28px; text-align: center; flex-shrink: 0; opacity: 0.7; }
 
 .emoji-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
 /* Wordt het gevonden icoon gebruikt, dan is de emoji-rij er nog wel maar doet

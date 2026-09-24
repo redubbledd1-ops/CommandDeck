@@ -199,6 +199,55 @@ t('een willekeurige hash geldt niet als standaard',
   t('na leegCache wordt er wel opnieuw gelezen', gelezen.length === 1)
 }
 
+// ── Browserextensie: standaardpad icons/icon128.png ─────────────────────────
+{
+  const wortel = maakProject({
+    'manifest.json': '{"name":"iets"}',
+    'icons/icon128.png': Buffer.from('extensie-icoon 128'),
+    'icons/icon16.png': Buffer.from('extensie-icoon 16'),
+  })
+  const r = Ico.zoekProjectIcoon(wortel)
+  t('webext-icoon via vaste kandidaat wordt gevonden', r.ok === true && r.soort === 'webext')
+  t('grootste variant wint', String(r.bron).endsWith('icon128.png'))
+}
+
+// ── Browserextensie: eigen indeling, alleen via manifest.json te vinden ─────
+{
+  const wortel = maakProject({
+    'manifest.json': JSON.stringify({ name: 'iets', icons: { '16': 'img/logo-16.png', '512': 'img/logo-512.png' } }),
+    'img/logo-512.png': Buffer.from('logo groot'),
+    'img/logo-16.png': Buffer.from('logo klein'),
+  })
+  const r = Ico.zoekProjectIcoon(wortel)
+  t('webext-icoon via manifest.json wordt gevonden', r.ok === true && r.soort === 'webext')
+  t('grootste maat uit het manifest wint', String(r.bron).endsWith('logo-512.png'))
+}
+
+// ── Browserextensie: kapot manifest.json struikelt niet ─────────────────────
+{
+  const wortel = maakProject({ 'manifest.json': '{ niet geldige json' })
+  const r = Ico.zoekProjectIcoon(wortel)
+  t('kapot manifest.json geeft gewoon geen icoon, geen crash', r.ok === false)
+}
+
+// ── leesEigenIcoon: een zelf gekozen bestand, geen sjabloonfilter ───────────
+{
+  const wortel = maakProject({ 'ergens/mijn-logo.png': SJABLOON_BYTES })
+  const vol = path.join(wortel, 'ergens', 'mijn-logo.png')
+  const r = Ico.leesEigenIcoon(vol)
+  t('eigen bestand wordt gelezen ook al is het toevallig het sjabloonicoon',
+    r.ok === true && r.soort === 'eigen')
+  t('eigen bestand geeft de bron mee', r.bron === vol)
+
+  t('ontbrekend bestand geeft geenbestand', Ico.leesEigenIcoon(path.join(wortel, 'x.png')).reden === 'geenbestand')
+  t('leeg pad geeft geenpad', Ico.leesEigenIcoon('').reden === 'geenpad')
+
+  const teGroot = path.join(wortel, 'te-groot.png')
+  fs.writeFileSync(teGroot, Buffer.alloc(Ico.MAX_BYTES + 1, 0x61))
+  const rGroot = Ico.leesEigenIcoon(teGroot)
+  t('te groot eigen bestand wordt geweigerd', rGroot.ok === false && rGroot.reden === 'tegroot')
+}
+
 try { fs.rmSync(TMP, { recursive: true, force: true }) } catch { /* tijdelijke map */ }
 
 console.log(ok ? '\nAlles goed' : '\nEr ging iets mis')

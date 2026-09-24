@@ -4506,6 +4506,43 @@ ipcMain.handle('projicoon:vergeet', (_, pad) => {
   return true
 })
 
+// Eigen icoon: de gebruiker wijst zelf een afbeelding aan. We kopiëren hem
+// naar userData zodat het project niet meer van het originele bestand
+// afhangt — verplaatst of verwijdert iemand die later, dan blijft het icoon
+// in CommandDeck gewoon staan.
+ipcMain.handle('projicoon:kiesEigen', async (_, projectId) => {
+  const r = await dialog.showOpenDialog(win, {
+    title: 'Kies een eigen icoon voor dit project',
+    properties: ['openFile'],
+    filters: [
+      { name: 'Afbeelding', extensions: ['png', 'ico', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] },
+    ],
+  })
+  if (r.canceled || !r.filePaths[0]) return { ok: false, reden: 'geannuleerd' }
+
+  const bronPad = r.filePaths[0]
+  let st
+  try { st = fs.statSync(bronPad) } catch { return { ok: false, reden: 'geenbestand' } }
+  if (st.size > ProjectIcoon.MAX_BYTES) {
+    return { ok: false, reden: 'tegroot', bytes: st.size, max: ProjectIcoon.MAX_BYTES }
+  }
+
+  const dir = path.join(app.getPath('userData'), 'eigen-icoonen')
+  try { fs.mkdirSync(dir, { recursive: true }) } catch { /* bestaat al */ }
+  const ext = path.extname(bronPad).toLowerCase() || '.png'
+  const doel = path.join(dir, `${projectId || 'nieuw'}_${Date.now()}${ext}`)
+  try { fs.copyFileSync(bronPad, doel) }
+  catch (e) { return { ok: false, reden: 'fout', fout: String(e && e.message || e) } }
+
+  const uit = ProjectIcoon.leesEigenIcoon(doel)
+  return uit && uit.ok ? { ...uit, pad: doel } : { ok: false, reden: 'fout' }
+})
+
+// De modal wil bij het openen een preview van een al opgeslagen eigen icoon.
+ipcMain.handle('projicoon:leesEigen', (_, pad) => {
+  try { return ProjectIcoon.leesEigenIcoon(pad) } catch (e) { return { ok: false, reden: 'fout' } }
+})
+
 // Zodra `flutter run -d windows` / `flutter build windows` meldt waar de exe
 // staat, zet (of ververst) hiermee een bureaubladsnelkoppeling — met het eigen
 // icoon van het project als dat er is. Draait alleen op Windows en blokkeert

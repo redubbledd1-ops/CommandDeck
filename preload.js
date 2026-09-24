@@ -167,6 +167,8 @@ contextBridge.exposeInMainWorld('api', {
   // Het eigen icoon van een projectmap (launcher-icoon, favicon, app_icon).
   zoekProjectIcoon:   (pad) => ipcRenderer.invoke('projicoon:zoek', pad),
   vergeetProjectIcoon:(pad) => ipcRenderer.invoke('projicoon:vergeet', pad),
+  kiesEigenIcoon:     (projectId) => ipcRenderer.invoke('projicoon:kiesEigen', projectId),
+  leesEigenIcoon:     (pad) => ipcRenderer.invoke('projicoon:leesEigen', pad),
 
   noteDefaultDir: ()     => ipcRenderer.invoke('note:defaultDir'),
   listNotes:     (cwd)   => ipcRenderer.invoke('note:list', cwd),

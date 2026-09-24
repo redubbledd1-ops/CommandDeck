@@ -30,8 +30,10 @@ let cmdSorteerModus = ''     // '' | 'run' — volgorde aanpassen in projectweer
 let cmdvisSorteerModus = ''  // '' | 'run' | 'run-flutter' | 'run-prog'
 let selEmoji    = '📱'
 // 'auto' = het eigen icoon van de projectmap als dat er is, 'emoji' = altijd de
-// gekozen emoji. Zie projIcoonInhoud() verderop.
+// gekozen emoji, 'custom' = een zelf gekozen bestand. Zie projIcoonInhoud() verderop.
 let selIcoonModus = 'auto'
+let selCustomIconPath = ''     // absoluut pad naar het gekopieerde eigen bestand
+let selCustomIconDataUrl = ''  // preview in de modal, zonder opnieuw te hoeven lezen
 const termOutput = {}
 // Wat je hebt getypt maar nog niet hebt verstuurd, per weergave (elk project,
 // de losse cmd-sectie). Zo blijft een half commando staan als je even naar een
@@ -911,22 +913,30 @@ const projIcoonPerPad = new Map()   // pad -> { ok, dataUrl, soort, reden }
 const projIcoonBezig  = new Set()
 
 // Geen iconMode op een project betekent 'auto': projecten die er al stonden
-// krijgen hun icoon vanzelf, en wie de emoji terug wil zet 'emoji'.
-function projIcoonAuto(p) { return (p && p.iconMode) !== 'emoji' }
+// krijgen hun icoon vanzelf, wie de emoji terug wil zet 'emoji', en wie zelf
+// een bestand koos zet 'custom'.
+function projIcoonModus(p) {
+  const m = p && p.iconMode
+  return (m === 'emoji' || m === 'custom') ? m : 'auto'
+}
+function projIcoonAuto(p) { return projIcoonModus(p) === 'auto' }
 
 function projIcoonVanPad(pad) {
   const uit = pad ? projIcoonPerPad.get(pad) : null
   return (uit && uit.ok) ? uit : null
 }
 
-async function ververesProjIcoonPad(pad) {
-  if (!pad || !window.api || !window.api.zoekProjectIcoon) return null
+// Gedeeld door de mapzoektocht (auto) en het rechtstreeks lezen van een zelf
+// gekozen bestand (custom): zelfde cache, zelfde "alleen hertekenen als er
+// iets te zien is"-regel, alleen de manier van opzoeken verschilt.
+async function ververesIcoonViaPad(pad, zoeker) {
+  if (!pad || !window.api || !window.api[zoeker]) return null
   if (projIcoonPerPad.has(pad)) return projIcoonPerPad.get(pad)
   if (projIcoonBezig.has(pad)) return null
 
   projIcoonBezig.add(pad)
   try {
-    const uit = await window.api.zoekProjectIcoon(pad)
+    const uit = await window.api[zoeker](pad)
     projIcoonPerPad.set(pad, uit || { ok: false, reden: 'geen' })
     // Alleen hertekenen als er ook echt iets te zien is. Anders zou elk
     // project zonder icoon een ronde tekenwerk kosten voor niets.
@@ -944,6 +954,8 @@ async function ververesProjIcoonPad(pad) {
     projIcoonBezig.delete(pad)
   }
 }
+function ververesProjIcoonPad(pad) { return ververesIcoonViaPad(pad, 'zoekProjectIcoon') }
+function ververesEigenIcoonPad(pad) { return ververesIcoonViaPad(pad, 'leesEigenIcoon') }
 
 // Alle mappen van een project, actieve eerst. Het icoon zit vaak in de
 // hoofmap (Resume), terwijl je ondertussen op een tweede locatie werkt
@@ -964,7 +976,14 @@ function projIcoonPaden(p) {
 // omhullende element blijft van de aanroeper, zodat de bestaande css-regels
 // (font-size per plek) de maat blijven bepalen.
 function projIcoonInhoud(p) {
-  if (!projIcoonAuto(p)) return p.icon
+  const modus = projIcoonModus(p)
+  if (modus === 'emoji') return p.icon
+  if (modus === 'custom') {
+    if (!p.customIconPath) return p.icon
+    ververesEigenIcoonPad(p.customIconPath)
+    const ico = projIcoonVanPad(p.customIconPath)
+    return ico ? `<img class="proj-icoon-img" src="${ico.dataUrl}" alt="" draggable="false" />` : p.icon
+  }
   const paden = projIcoonPaden(p)
   for (const pad of paden) ververesProjIcoonPad(pad)
   for (const pad of paden) {
@@ -19254,39 +19273,83 @@ function setupModalEvents() {
 }
 
 // ── De iconensectie in het projectvenster ───────────────────────────────────
-// Twee knoppen: het icoon dat in de projectmap gevonden is, of een emoji.
-// Vindt main niets, dan is er niets te kiezen en blijft alleen de emoji-rij
-// staan — een keuzeknop met een leeg vakje zou alleen maar vragen oproepen.
+// Drie knoppen: het icoon dat in de projectmap gevonden is, een emoji, of een
+// zelf gekozen bestand. De laatste twee staan er altijd — een eigen bestand
+// kiezen heeft niets nodig dat main al gevonden moet hebben. Alleen de eerste
+// knop verdwijnt als er niets in de projectmap zit: een keuzeknop met een leeg
+// vakje zou alleen maar vragen oproepen.
 let icoonKeuzeGebouwd = false
 let icoonKeuzeTimer = null
 let icoonKeuzePad = ''
 
 function bouwIcoonKeuze() {
   if (icoonKeuzeGebouwd) return
-  const auto = document.getElementById('f-icoon-auto')
-  const emo  = document.getElementById('f-icoon-emoji')
-  if (!auto || !emo) return
+  const auto  = document.getElementById('f-icoon-auto')
+  const emo   = document.getElementById('f-icoon-emoji')
+  const eigen = document.getElementById('f-icoon-eigen')
+  if (!auto || !emo || !eigen) return
   auto.onclick = () => { selIcoonModus = 'auto';  markeerIcoonKeuze() }
   emo.onclick  = () => { selIcoonModus = 'emoji'; markeerIcoonKeuze() }
+  eigen.onclick = async () => {
+    const uit = await window.api.kiesEigenIcoon(editingId || 'nieuw').catch(() => null)
+    if (!uit || uit.reden === 'geannuleerd') return
+    const hint = document.getElementById('f-icoon-hint')
+    if (!uit.ok) {
+      if (hint) {
+        hint.hidden = false
+        hint.textContent = uit.reden === 'tegroot'
+          ? I18N.t('modal.project.iconTeGroot', { size: toonBytes(uit.bytes) })
+          : I18N.t('modal.project.iconGeen')
+      }
+      return
+    }
+    if (hint) hint.hidden = true
+    selIcoonModus = 'custom'
+    selCustomIconPath = uit.pad
+    selCustomIconDataUrl = uit.dataUrl
+    projIcoonPerPad.set(uit.pad, uit)
+    markeerIcoonKeuze()
+  }
   icoonKeuzeGebouwd = true
 }
 
 function markeerIcoonKeuze() {
-  const blok = document.getElementById('f-icoon-keuze')
-  const auto = document.getElementById('f-icoon-auto')
-  const emo  = document.getElementById('f-icoon-emoji')
+  const blok  = document.getElementById('f-icoon-keuze')
+  const auto  = document.getElementById('f-icoon-auto')
+  const emo   = document.getElementById('f-icoon-emoji')
+  const eigen = document.getElementById('f-icoon-eigen')
+  const eigenImg  = document.getElementById('f-icoon-eigen-img')
+  const eigenLeeg = document.getElementById('f-icoon-eigen-leeg')
+  const eigenSub  = eigen ? eigen.querySelector('.icoon-optie-sub') : null
   const rij  = document.getElementById('emoji-row')
   const vb   = document.getElementById('f-icoon-emoji-vb')
-  if (!blok || !auto || !emo) return
+  if (!blok || !auto || !emo || !eigen) return
 
-  // Zonder gevonden icoon valt er niets te overschrijven: dan is de emoji het
-  // icoon, wat er ook op het project staat opgeslagen.
-  const gevonden = !blok.hidden
-  const autoAan = gevonden && selIcoonModus === 'auto'
-  auto.classList.toggle('sel', autoAan)
-  emo.classList.toggle('sel', !autoAan)
-  if (rij) rij.classList.toggle('gedimd', autoAan)
+  // Zonder gevonden icoon valt er niets te overschrijven met "auto"; zonder
+  // zelf gekozen bestand valt er niets te overschrijven met "custom". In
+  // beide gevallen zakt de keuze terug op emoji, wat er ook was opgeslagen.
+  const autoBeschikbaar = !auto.hidden
+  const customBeschikbaar = !!selCustomIconPath
+  const modus = selIcoonModus === 'custom' && customBeschikbaar ? 'custom'
+    : (selIcoonModus === 'auto' && autoBeschikbaar) ? 'auto'
+    : 'emoji'
+
+  auto.classList.toggle('sel', modus === 'auto')
+  emo.classList.toggle('sel', modus === 'emoji')
+  eigen.classList.toggle('sel', modus === 'custom')
+  if (rij) rij.classList.toggle('gedimd', modus !== 'emoji')
   if (vb) vb.textContent = selEmoji
+
+  if (eigenImg && eigenLeeg) {
+    if (customBeschikbaar && selCustomIconDataUrl) {
+      eigenImg.src = selCustomIconDataUrl; eigenImg.hidden = false; eigenLeeg.hidden = true
+    } else {
+      eigenImg.hidden = true; eigenLeeg.hidden = false
+    }
+  }
+  if (eigenSub) eigenSub.textContent = customBeschikbaar
+    ? I18N.t('modal.project.iconEigenGekozen')
+    : I18N.t('modal.project.iconEigenSub')
 }
 
 // Bij elke aanslag in het padveld opnieuw zoeken is zonde; even wachten tot
@@ -19318,9 +19381,13 @@ async function kijkFlutterVoorModal() {
 
 async function ververesIcoonKeuze() {
   const blok = document.getElementById('f-icoon-keuze')
+  const auto = document.getElementById('f-icoon-auto')
   const hint = document.getElementById('f-icoon-hint')
-  if (!blok || !hint) return
+  if (!blok || !auto || !hint) return
   bouwIcoonKeuze()
+  // De keuzerij zelf staat er altijd (emoji en eigen bestand hebben niets
+  // van main nodig); alleen de "gevonden in de map"-knop komt en gaat.
+  blok.hidden = false
 
   // Alle locaties met een pad, uniek. Het icoon kan in de hoofmap zitten
   // terwijl een tweede locatie leeg is — dan moeten we doorzoeken.
@@ -19344,7 +19411,7 @@ async function ververesIcoonKeuze() {
   }
 
   const gevonden = !!(uit && uit.ok)
-  blok.hidden = !gevonden
+  auto.hidden = !gevonden
   if (gevonden) {
     const img = document.getElementById('f-icoon-auto-img')
     const sub = document.getElementById('f-icoon-auto-sub')
@@ -19372,12 +19439,12 @@ function buildEmojiPicker() {
     span.onclick = () => {
       row.querySelectorAll('.emoji-opt').forEach(x => x.classList.remove('sel'))
       span.classList.add('sel'); selEmoji = e
-      // Wie hier klikt terwijl er een eigen icoon gevonden is, wil dat
-      // overschrijven. Is er niets gevonden, dan is de emoji sowieso het
+      // Wie hier klikt terwijl er een gevonden of eigen icoon is, wil dat
+      // overschrijven. Is er niets van beide, dan is de emoji sowieso het
       // icoon en laten we de modus op 'auto' staan: krijgt het project later
       // wél een eigen icoon, dan komt dat vanzelf tevoorschijn.
-      const keuze = document.getElementById('f-icoon-keuze')
-      if (keuze && !keuze.hidden) selIcoonModus = 'emoji'
+      const auto = document.getElementById('f-icoon-auto')
+      if ((auto && !auto.hidden) || selCustomIconPath) selIcoonModus = 'emoji'
       markeerIcoonKeuze()
     }
     row.appendChild(span)
@@ -19695,6 +19762,7 @@ function bindGitSectie(p, pad, staat, koppelProblemen = []) {
 
 function openNewModal() {
   editingId = null; selEmoji = '📱'; selIcoonModus = 'auto'
+  selCustomIconPath = ''; selCustomIconDataUrl = ''
   cloneNaamOvergenomen = false
   cloneNaamBron = ''
   document.getElementById('modal-title').textContent = I18N.t('modal.project.title')
@@ -19723,7 +19791,17 @@ function openEditModal(id) {
   const p = projects.find(x => x.id === id)
   if (!p) return
   editingId = id; selEmoji = p.icon
-  selIcoonModus = projIcoonAuto(p) ? 'auto' : 'emoji'
+  selIcoonModus = projIcoonModus(p)
+  selCustomIconPath = selIcoonModus === 'custom' ? (p.customIconPath || '') : ''
+  selCustomIconDataUrl = ''
+  if (selCustomIconPath) {
+    window.api.leesEigenIcoon(selCustomIconPath).then(uit => {
+      if (uit && uit.ok && selCustomIconPath === uit.bron) {
+        selCustomIconDataUrl = uit.dataUrl
+        markeerIcoonKeuze()
+      }
+    }).catch(() => {})
+  }
   document.getElementById('modal-title').textContent = I18N.t('modal.project.editTitle')
   document.getElementById('f-name').value   = p.name
   document.getElementById('f-device').value = p.device || ''
@@ -20103,7 +20181,11 @@ async function saveProjectModal() {
   if (editingId) {
     const p = projects.find(x => x.id === editingId)
     p.gitProfiel = profielId
-    p.name = name; p.icon = selEmoji; p.iconMode = selIcoonModus === 'emoji' ? 'emoji' : 'auto'
+    p.name = name; p.icon = selEmoji
+    p.iconMode = selIcoonModus === 'custom' && selCustomIconPath ? 'custom'
+      : selIcoonModus === 'emoji' ? 'emoji' : 'auto'
+    if (p.iconMode === 'custom') p.customIconPath = selCustomIconPath
+    else delete p.customIconPath
     p.device = device; p.locations = locs
     p.cmdVisibility = { ...pendingCmdVisibility }
     p.secties = { ...pendingSecties }
@@ -20118,7 +20200,10 @@ async function saveProjectModal() {
     p.website = !!document.getElementById('f-website').checked
     p.websiteHandmatig = true
   } else {
-    const vers = { id: 'proj_' + Date.now(), name, icon: selEmoji, iconMode: selIcoonModus === 'emoji' ? 'emoji' : 'auto', device, gitProfiel: profielId, locations: locs, activeLocation: 0, release: false, website: !!document.getElementById('f-website').checked, websiteHandmatig: true, cmdVisibility: { ...pendingCmdVisibility }, secties: { ...pendingSecties }, customCmds: pendingCustomCmds.map(c => ({ ...c })), cmdVolgorde: { run: [...(pendingCmdVolgorde.run || [])], tools: [...(pendingCmdVolgorde.tools || [])] } }
+    const nieuweIconMode = selIcoonModus === 'custom' && selCustomIconPath ? 'custom'
+      : selIcoonModus === 'emoji' ? 'emoji' : 'auto'
+    const vers = { id: 'proj_' + Date.now(), name, icon: selEmoji, iconMode: nieuweIconMode, device, gitProfiel: profielId, locations: locs, activeLocation: 0, release: false, website: !!document.getElementById('f-website').checked, websiteHandmatig: true, cmdVisibility: { ...pendingCmdVisibility }, secties: { ...pendingSecties }, customCmds: pendingCustomCmds.map(c => ({ ...c })), cmdVolgorde: { run: [...(pendingCmdVolgorde.run || [])], tools: [...(pendingCmdVolgorde.tools || [])] } }
+    if (nieuweIconMode === 'custom') vers.customIconPath = selCustomIconPath
     // Ook een vers project krijgt zijn mappen: dan staat elk project er
     // hetzelfde bij, ongeacht wanneer het is aangemaakt.
     migreerToolsNaarMap(vers)
