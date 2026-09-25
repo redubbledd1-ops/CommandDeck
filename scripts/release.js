@@ -2,14 +2,18 @@
 // Geïnstalleerde versies vergelijken hun eigen versie met die release, dus
 // wat hier online gaat moet exact een gepushte commit zijn: vandaar de checks.
 //
-// Gebruik, in de gewone projectmap (niet in een worktree), op main:
-//   npm version patch        ophogen + commit + tag
-//   git push --follow-tags
-//   npm run release
+// Gebruik, in de gewone projectmap (niet in een worktree), op main, met alles
+// gecommit:
+//   npm run uitbrengen       (= npm version patch)
 //
-// `npm version` draait dit script eerst met --voor-versie (zie "preversion" in
-// package.json). Sta je op de verkeerde plek, dan stopt het vóór het ophogen,
-// in plaats van versies te maken die nooit online komen.
+// Dat is alles. `npm version` draait eerst dit script met --voor-versie
+// ("preversion" in package.json): sta je op de verkeerde plek, dan stopt het
+// vóór het ophogen. Daarna hoogt het op, commit en tagt, en "postversion" pusht
+// en draait dit script voor het bouwen en publiceren. Losse stappen bleken
+// versies op te leveren die nooit online kwamen.
+//
+// Mislukt alleen het bouwen of uploaden, dan is de versie al gepusht: los het
+// probleem op en draai "npm run release" om dezelfde versie af te maken.
 const { execSync, execFileSync, spawnSync } = require('child_process')
 const fs = require('fs')
 const path = require('path')
