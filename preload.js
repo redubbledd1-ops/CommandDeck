@@ -209,6 +209,13 @@ contextBridge.exposeInMainWorld('api', {
   updateAndRestart: (o)  => ipcRenderer.invoke('app:updateAndRestart', o),
   findSourceDir: ()      => ipcRenderer.invoke('app:findSourceDir'),
   runtimeInfo:   ()      => ipcRenderer.invoke('app:runtimeInfo'),
+  updateStatus:  ()      => ipcRenderer.invoke('update:status'),
+  installUpdate: ()      => ipcRenderer.invoke('update:install'),
+  onUpdateStatus: (cb) => {
+    const h = (_, s) => cb(s)
+    ipcRenderer.on('update:status', h)
+    return () => ipcRenderer.removeListener('update:status', h)
+  },
 
   onOutput: (cb) => {
     const h = (_, d) => cb(d)

@@ -72,6 +72,9 @@ const ptyExit = (d) => ptyExitCbs.forEach(cb => cb(d))
 let editorStarts = []
 let projectSoorten = { 'C:\\a': { ok: true, flutter: true, dart: true, node: false } }
 let updateAntwoord = { ok: true }
+let onlineInstalls = 0
+const updateStatusCbs = []
+const updateStatusCb = (s) => updateStatusCbs.forEach(cb => cb(s))
 let archieven = {
   'C:\\a\\pakket.zip': ['leesmij.txt', 'map/', 'map/binnenin.txt', 'map/diep/dieper.txt'],
   'C:\\a\\oud.rar': 'geen-tool',
@@ -390,6 +393,9 @@ const api = {
   relaunch: () => {},
   updateAndRestart: async (o) => { updates.push(o || null); return updateAntwoord },
   runtimeInfo: async () => ({ packaged: false, version: '1.0.0' }),
+  updateStatus: async () => ({ staat: 'geen' }),
+  installUpdate: async () => { onlineInstalls++; return { ok: true } },
+  onUpdateStatus: (cb) => { updateStatusCbs.push(cb); return () => {} },
   onOutput: (cb) => { outputCbs.push(cb); return () => {} },
   aiProviders: async () => [{
     id: 'openai', label: 'OpenAI', merk: 'OpenAI',
@@ -2830,6 +2836,21 @@ function startVraagAutomaat() {
     updates.length === 2 && updates[1] && updates[1].force === true)
   updateAntwoord = { ok: true }
   kiesKnop('')
+
+  // ── nieuwe versie op GitHub ────────────────────────────────────────────────
+  const ub = $('#btn-update')
+  updates = []; onlineInstalls = 0; laatsteVraag = null
+  updateStatusCb({ staat: 'beschikbaar', versie: '1.0.1', portable: false })
+  check('bij een nieuwe release staat de knop er, met de versie', !ub.hidden && ub.title.includes('1.0.1'))
+  kiesKnop(['updaten & herstarten'])
+  ub.click(); for (let i = 0; i < 6; i++) await tick()
+  check('klikken installeert de release in plaats van te bouwen', onlineInstalls === 1 && updates.length === 0)
+  check('na eerst te vragen', !!laatsteVraag && laatsteVraag.alles.includes('1.0.1'))
+  kiesKnop('')
+  updateStatusCb({ staat: 'downloaden', procent: 42, versie: '1.0.1' })
+  check('tijdens downloaden niet klikbaar, met voortgang', ub.disabled && ub.title.includes('42%'))
+  updateStatusCb({ staat: 'geen' })
+  check('zonder release weer de gewone bouwknop', !ub.hidden && !ub.disabled)
 
   // ── volgorde van de zijbalk aanpassen ──────────────────────────────────────
   const projNamen = () => $$('.proj-item .proj-label').map(e => e.textContent)

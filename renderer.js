@@ -1902,6 +1902,9 @@ function setupTitlebar() {
   // Klikken mag niet wachten tot runtimeInfo (findSourceDir op schijf) klaar is.
   const updateBtn = document.getElementById('btn-update')
   updateBtn.onclick = async () => {
+    // Staat er een nieuwe release klaar, dan gaat de knop daarover; de
+    // bouw-vanuit-bron hieronder is alleen voor wie de broncode heeft.
+    if (onlineUpdate.staat !== 'geen') return installeerOnlineUpdate()
     if (!await vraagJaNee(I18N.t('update.confirmTitle'),
       I18N.t('update.confirmText'),
       I18N.t('update.confirmButton'))) return
@@ -1938,6 +1941,38 @@ function setupTitlebar() {
     showToast(I18N.t('update.startedToast'))
   }
   void toonUpdateKnop(updateBtn)
+  window.api.onUpdateStatus?.((s) => toonOnlineUpdate(updateBtn, s))
+  // Na een herlaad van het venster kan de melding al geweest zijn.
+  window.api.updateStatus?.().then((s) => s && toonOnlineUpdate(updateBtn, s)).catch(() => {})
+}
+
+// Nieuwe versie op GitHub (zie app-updater.js). Main zoekt pas na het
+// opstarten; de knop verschijnt dus pas als er echt iets te halen is.
+let onlineUpdate = { staat: 'geen' }
+let bronKnopZichtbaar = false
+
+function toonOnlineUpdate(btn, s) {
+  onlineUpdate = s
+  if (s.staat === 'geen') {
+    btn.hidden = !bronKnopZichtbaar
+    btn.disabled = false
+    btn.title = I18N.t('titlebar.updateTitle')
+    return
+  }
+  btn.hidden = false
+  btn.disabled = s.staat !== 'beschikbaar'
+  btn.title = s.staat === 'beschikbaar'
+    ? I18N.t('update.availableTitle', { versie: s.versie })
+    : I18N.t('update.downloadingTitle', { procent: s.procent ?? 100 })
+}
+
+async function installeerOnlineUpdate() {
+  const { versie, portable } = onlineUpdate
+  if (!await vraagJaNee(I18N.t('update.availableConfirmTitle', { versie }),
+    I18N.t(portable ? 'update.portableText' : 'update.availableConfirmText'),
+    I18N.t(portable ? 'update.portableButton' : 'update.availableConfirmButton'))) return
+  const r = await window.api.installUpdate()
+  if (r && r.ok === false && r.fout) showToast(I18N.t('update.downloadFailedToast'))
 }
 
 // De knop staat er zodra er een bronmap is om vanaf te bouwen — of je nu
@@ -1950,7 +1985,10 @@ function setupTitlebar() {
 async function toonUpdateKnop(updateBtn) {
   try {
     const info = await window.api.runtimeInfo?.()
-    if (info && (info.packaged === false || info.bronMap)) updateBtn.hidden = false
+    if (info && (info.packaged === false || info.bronMap)) {
+      bronKnopZichtbaar = true
+      updateBtn.hidden = false
+    }
   } catch {}
 }
 

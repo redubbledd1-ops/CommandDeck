@@ -1434,6 +1434,8 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
 #cmd-status.ended #cmd-status-label { color: var(--muted2); }
 .tbtn.build-btn { color: var(--accent); margin-right: 6px; }
 .tbtn.build-btn:hover { background: var(--accent-d); color: var(--accent); }
+/* Tijdens het downloaden van een update: zichtbaar maar niet klikbaar. */
+.tbtn.build-btn:disabled { opacity: .5; cursor: progress; }
 
 /* ── Sidebar navigatie (cmd / woordenboek) ── */
 .nav-list { display: flex; flex-direction: column; gap: 2px; padding: 0 6px 4px; min-height: 0; overflow-y: auto; }
