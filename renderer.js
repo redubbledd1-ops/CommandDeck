@@ -18598,13 +18598,32 @@ async function koppelAanBestaandeRepo(project, pad, staat, repo) {
   if (uit && uit.success) {
     await beschermMainNaAanmaken(pad)
   } else if (pushGeweigerdKlacht) {
-    // Er staat aan de andere kant al iets — meestal een README die bij het
-    // aanmaken meekwam. Samenvoegen is werk in bestanden en een keuze die de
-    // gebruiker moet maken, dus dat doet de app niet zelf; wel vertellen wat
-    // er aan de hand is, want "rejected" alleen zegt dat niet.
     pushGeweigerdKlacht = false
-    await meldKort(I18N.t('git.link.geweigerdTitle'),
-      I18N.t('git.link.geweigerdText', { naam: repo.volledig || repo.naam }))
+    if (!staat.commits) {
+      // Local is leeg (geen commits), remote heeft al inhoud (README e.d.).
+      // Trek de remote-geschiedenis eerst binnen, dan pushen. Geen conflict
+      // mogelijk: lokaal is er niets om mee te botsen.
+      const remote = (staat.heeftRemote && staat.remote) || 'origin'
+      const isHoofd = n => n === 'main' || n === 'master'
+      const hier = staat.branch || 'main'
+      const daar = repo.standaardBranch || 'main'
+      const effectieveBranch = (daar && daar !== hier && isHoofd(hier) && isHoofd(daar)) ? daar : hier
+      const pullUit = await executeCmd(project,
+        `git pull --allow-unrelated-histories ${remote} ${daar}`,
+        'git-koppelen')
+      if (pullUit && pullUit.success) {
+        await executeCmd(project, `git push -u ${remote} ${effectieveBranch}`, 'git-koppelen')
+        await beschermMainNaAanmaken(pad)
+      } else {
+        await meldKort(I18N.t('git.link.geweigerdTitle'),
+          I18N.t('git.link.geweigerdText', { naam: repo.volledig || repo.naam }))
+      }
+    } else {
+      // Local heeft commits maar geen gedeelde geschiedenis met de remote.
+      // Gebruiker moet zelf samenvoegen.
+      await meldKort(I18N.t('git.link.geweigerdTitle'),
+        I18N.t('git.link.geweigerdText', { naam: repo.volledig || repo.naam }))
+    }
   }
   await controleerKoppeling(pad, true)
   await ververesGitStaat(project, true)

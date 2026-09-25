@@ -47,6 +47,22 @@ npm run build:installer
 npm run build:portable
 ```
 
+## Nieuwe versie uitbrengen
+
+Geïnstalleerde CommandDecks vergelijken hun versie met de nieuwste
+[GitHub Release](https://github.com/redubbledd1-ops/CommandDeck/releases).
+Een nieuwe versie is dus pas zichtbaar voor gebruikers als hij daar staat.
+
+1. Hoog `version` in `package.json` op (`1.0.0` → `1.0.1` voor fixes, `1.1.0` voor nieuwe functies)
+2. Commit en push naar `main`
+3. `npm run release`
+
+Het script weigert als er niet-gecommitte wijzigingen zijn, als `main` niet
+gelijk loopt met GitHub of als de tag `v<versie>` al bestaat. Het gebruikt het
+token van je `gh`-login (of `GH_TOKEN` als die gezet is), bouwt de Setup en
+portable, maakt de release + tag `v<versie>` aan en uploadt ook `latest.yml`,
+het bestand waar de updater naar kijkt.
+
 ## Features
 
 - Projecten met meerdere **locaties** (switchbaar via dropdown)
