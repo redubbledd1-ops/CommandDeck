@@ -946,7 +946,7 @@ t('de koppelknop vraagt eerst of GitHub klaarstaat',
   /const ghKlaar = await zorgVoorGithub\(\)/.test(rendererBron2))
 t('en stopt netjes als je afbreekt', /ghKlaar === 'gestopt'/.test(rendererBron2))
 
-t('er is een uitweg voor ontbrekende gh', /installeerGh\(\)/.test(zorgBlok))
+t('er is een uitweg voor ontbrekende gh', /installeerGh\(\{ alGevraagd: true \}\)/.test(zorgBlok))
 t('een uitweg voor niet ingelogd', /githubInloggen\(\{ stil: true \}\)/.test(zorgBlok))
 t('en een uitweg voor wie nog helemaal geen GitHub heeft',
   /github\.com\/signup/.test(zorgBlok))
@@ -1367,8 +1367,9 @@ for (const sleutel of ['git.afsluit.titel', 'git.afsluit.commitPush', 'git.afslu
   t('en komt er tijdens het afsluiten niet meer tussen',
     /async function vraagAchtergrond\(opties\) \{\s*if \(onveiligWerkBezig\) return ''[\s\S]{0,120}if \(onveiligWerkBezig\) return ''/.test(ren))
   t('de meldingen bij het opstarten zijn zulke vragen',
-    ['git.opstart.titel', 'git.achter.titel', 'git.stashMelding.titel', 'git.startRonde.titel']
-      .every(k => new RegExp("vraagAchtergrond\\(\\{\\s*titel: I18N\\.t\\('" + k.replace(/\./g, '\\.')).test(ren)))
+    ['git.opstart.titel', 'git.stashMelding.titel']
+      .every(k => new RegExp("vraagAchtergrond\\(\\{\\s*titel: I18N\\.t\\('" + k.replace(/\./g, '\\.')).test(ren))
+    && /async function biedAchterstandAan[\s\S]{0,1800}await vraagAchtergrond\(\{\s*titel,/.test(ren))
   t('de renderer luistert al vóór de eerste await',
     /window\.addEventListener\('DOMContentLoaded', async \(\) => \{[\s\S]{0,500}opAfsluitControle[\s\S]{0,120}gitAfsluitLuistert\(\)[\s\S]{0,40}\} catch \{\}\s*try \{\s*\[projects, settings, history\] = await/.test(ren)
     && /gitAfsluitLuistert/.test(pre))
@@ -1681,22 +1682,56 @@ t('bij opstarten komt er een tweede kans na de netwerkronden',
     && /function alleGitPaden\(\)[\s\S]{0,250}projectLocaties\(p\)/.test(rendererAchter))
   t('niet alles tegelijk: hoogstens twee fetches naast elkaar',
     /metHoogstens\(paden, 2,/.test(rendererAchter))
-  t('het overzicht noemt achterstand én werk dat alleen hier staat',
-    /GitTools\.achterstandKeuzes\(staat\)[\s\S]{0,200}GitTools\.onveiligeRedenen\(staat\)/.test(rendererAchter)
-    && /git\.startRonde\.achter/.test(rendererAchter))
-  t('bij langslopen eerst binnenhalen, dan pas vastleggen en pushen',
-    /async function loopGitAandachtLangs[\s\S]*?biedAchterstandAan[\s\S]*?vraagOverProject\([\s\S]{0,200}reden: 'opstart'/.test(rendererAchter))
+  // Minder meldingen: geen overzicht met "nu langslopen" ervoor, maar meteen
+  // per project de pull-vraag. En bij het opstarten geen commit/push-vragen:
+  // dat doet de afsluitcontrole.
+  t('na het opstarten meteen per project de pull-vraag, zonder overzicht',
+    /await biedPullsAan\(nogActueel\)/.test(ronde)
+    && /async function biedPullsAan[\s\S]{0,700}GitTools\.achterstandKeuzes\(gitStaten\[pad\]\)[\s\S]{0,200}biedAchterstandAan\(p, pad, plan, \{ naam: locNaam\(p, loc\), loc \}\)/.test(rendererAchter)
+    && !/meldGitUpdatesBijStart|loopGitAandachtLangs|git\.startRonde/.test(rendererAchter))
+  t('bij het opstarten geen commit/push-vragen',
+    !/reden: 'opstart'/.test(rendererAchter) && !/onveiligeRedenen/.test(ronde))
+  t('de pull-vraag noemt het project, en opent het pas als je kiest',
+    /git\.achter\.titelProject/.test(rendererAchter)
+    && /if \(!wijze\) return\s*\n\s*if \(opties\.loc[\s\S]{0,200}selectProject\(p\.id\)/.test(rendererAchter))
   t('bij het opstarten zelf vraagt het open project niet nog eens apart',
     !/setTimeout\(async \(\) => \{[\s\S]{0,300}startGitPolling\(\)[\s\S]{0,200}controleerAchterstand\(\)/.test(rendererAchter)
     && /if \(gitRondeLoopt \|\| onveiligWerkBezig\) return/.test(rendererAchter))
   t('afsluiten of wisselen stopt een lopende ronde',
     /stopGitRonde\(\)/.test(rendererAchter) && /nr === gitRondeNr && account === actiefAccount && !onveiligWerkBezig/.test(rendererAchter))
-  for (const sleutel of ['git.startRonde.titel', 'git.startRonde.tekst', 'git.startRonde.regel',
-                         'git.startRonde.achter', 'git.startRonde.bekijken', 'git.startRonde.later',
-                         'git.startWerk.titel', 'git.startWerk.tekst', 'git.startWerk.tochAf',
-                         'git.startWerk.stoppen', 'git.startWerk.misluktTekst']) {
-    t('start-tekst ' + sleutel + ' bestaat in nl en en', !!nl[sleutel] && !!en[sleutel])
+  for (const sleutel of ['git.achter.titelProject', 'git.afsluit.berichtPlaceholder',
+                         'conflict.taakbeheerOpnieuw', 'conflict.nogSteedsRegel',
+                         'accounts.gitOpgehaaldToast', 'git.inlog.klaarToast']) {
+    t('tekst ' + sleutel + ' bestaat in nl en en', !!nl[sleutel] && !!en[sleutel])
   }
+}
+
+// ── Eén venster per situatie ────────────────────────────────────────────────
+// Meerdere vensters achter elkaar met bijna dezelfde vraag was te veel. Elke
+// situatie krijgt er nu één, eventueel met een paar knoppen extra.
+{
+  const ren = rendererAchter
+  const overProject = (ren.match(/async function vraagOverProject\([\s\S]*?\n\}/) || [''])[0]
+  t('afsluiten: het commitbericht staat in hetzelfde venster',
+    /invoer,/.test(overProject) && !/vraagTekst\(/.test(overProject)
+    && /commitCommando\(\(invoer && invoer\.tekst\) \|\| automatisch\)/.test(overProject))
+  t('een keuzevenster kan een tekstveld bevatten',
+    /function vraagKeuze\(\{ titel, tekst, regels = \[\], knoppen, invoer = null \}\)/.test(ren)
+    && /if \(veld\) invoer\.tekst = veld\.value\.trim\(\)/.test(ren))
+  const conflict = (ren.match(/async function regelProcesConflict\([\s\S]*?\n\}/) || [''])[0]
+  t('processen stoppen vraagt niet nog eens "weet je het zeker"',
+    conflict.length > 500 && !/conflict\.killTitel/.test(conflict) && !/vraagJaNee\(/.test(conflict))
+  t('taakbeheer opent zonder vervolgvraag',
+    /keuze === 'taakbeheer'[\s\S]{0,300}return false/.test(conflict) && !/conflict\.naTaakbeheer/.test(conflict))
+  t('na een mislukte run niet nog eens hetzelfde conflictvenster',
+    /result\.conflict && conflictGevraagd\) \{\s*appendLine\('warn', I18N\.t\('conflict\.nogSteedsRegel'\)\)/.test(ren))
+  t('gh installeren wordt niet twee keer gevraagd',
+    /async function installeerGh\(opties = \{\}\)[\s\S]{0,700}\(opties\.alGevraagd && winget\) \? 'winget'/.test(ren)
+    && (ren.match(/installeerGh\(\{ alGevraagd:/g) || []).length >= 3)
+  t('opgehaalde GitHub-gegevens: melding in plaats van nog een vraag',
+    /accounts\.gitOpgehaaldToast/.test(ren) && !/accounts\.gitGevondenTitel/.test(ren))
+  t('inloggen via de knop begint meteen, en "gelukt" is een melding',
+    !/git\.inlog\.starten/.test(ren) && /git\.inlog\.klaarToast/.test(ren))
 }
 t('git van overige projecten komt in idle-plakken',
   /function wanneerIdle\(/.test(rendererAchter)

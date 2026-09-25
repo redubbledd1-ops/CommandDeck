@@ -2318,7 +2318,11 @@ function verplaatsBrowserFocus(stap, metShift = false) {
 // knoppen. Dit venster past bij de rest en kan er zoveel als nodig.
 let vraagKlaar = null
 
-function vraagKeuze({ titel, tekst, regels = [], knoppen }) {
+// `invoer` ({ placeholder, waarde }) zet een tekstveld in hetzelfde venster,
+// zodat een keuze plus een stukje tekst één venster blijft in plaats van twee
+// na elkaar. Wat er getypt is, staat na de klik in `invoer.tekst`; Enter in het
+// veld kiest de aanbevolen knop.
+function vraagKeuze({ titel, tekst, regels = [], knoppen, invoer = null }) {
   return new Promise(resolve => {
     vraagKlaar = resolve
     document.getElementById('vraag-titel').textContent = titel
@@ -2327,9 +2331,12 @@ function vraagKeuze({ titel, tekst, regels = [], knoppen }) {
     uitleg.hidden = !tekst
 
     const lijst = document.getElementById('vraag-lijst')
-    lijst.hidden = !regels.length
+    lijst.hidden = !regels.length && !invoer
     lijst.innerHTML = regels.slice(0, 40).map(r => `<div class="vraag-regel">${esc(r)}</div>`).join('')
       + (regels.length > 40 ? `<div class="vraag-regel">… en nog ${regels.length - 40}</div>` : '')
+      + (invoer ? `<input type="text" class="vraag-invoer" id="vraag-keuze-invoer" placeholder="${esc(invoer.placeholder || '')}" />` : '')
+    const veld = invoer ? lijst.querySelector('#vraag-keuze-invoer') : null
+    if (veld) veld.value = invoer.waarde || ''
 
     const vak = document.getElementById('vraag-knoppen')
     // Twee keuzes passen naast elkaar; meer niet — dan breken de labels
@@ -2338,7 +2345,15 @@ function vraagKeuze({ titel, tekst, regels = [], knoppen }) {
     vak.innerHTML = knoppen.map((k, i) =>
       `<button class="${k.soort === 'gevaar' ? 'btn-danger' : k.soort === 'primair' ? 'btn-primary' : 'btn-ghost'}" data-v="${i}">${esc(k.label)}</button>`).join('')
     vak.querySelectorAll('[data-v]').forEach(el =>
-      el.onclick = () => sluitVraag(knoppen[parseInt(el.dataset.v)].waarde))
+      el.onclick = () => {
+        if (veld) invoer.tekst = veld.value.trim()
+        sluitVraag(knoppen[parseInt(el.dataset.v)].waarde)
+      })
+    if (veld) veld.onkeydown = (e) => {
+      if (e.key !== 'Enter') return
+      e.preventDefault()
+      vak.querySelector('.btn-primary')?.click()
+    }
 
     document.getElementById('modal-vraag').hidden = false
     requestAnimationFrame(() => vak.querySelector('.btn-primary, .btn-danger, button')?.focus())
@@ -11794,7 +11809,7 @@ async function zorgVoorGithub() {
   if (keuze === 'zelf') return false
 
   if (!st.geinstalleerd) {
-    const gelukt = await installeerGh()
+    const gelukt = await installeerGh({ alGevraagd: true })
     if (!gelukt) return false
   }
 
@@ -11888,11 +11903,15 @@ async function kopieer(tekst, melding) {
   return gelukt
 }
 
-async function installeerGh() {
+// `alGevraagd`: de vraag ervoor had al een knop "installeren en inloggen".
+// Dan niet nog een keer vragen of het mag — dat was drie keer bijna dezelfde
+// vraag. Zonder winget valt er niets automatisch te installeren en komt de
+// uitleg met de downloadpagina alsnog.
+async function installeerGh(opties = {}) {
   let winget = false
   try { winget = await window.api.gitWinget() } catch {}
 
-  const keuze = await vraagKeuze({
+  const keuze = (opties.alGevraagd && winget) ? 'winget' : await vraagKeuze({
     titel: I18N.t('git.inlog.geenGhTitel'),
     tekst: I18N.t(winget ? 'git.inlog.geenGhTekst' : 'git.inlog.geenWingetTekst'),
     knoppen: [
@@ -11986,7 +12005,7 @@ async function herstelVerkeerdeGithub(project, info = {}) {
   if (keuze === 'uitleg') { await toonGhZelfDoen(); return false }
 
   if (keuze === 'installeren') {
-    const gelukt = await installeerGh()
+    const gelukt = await installeerGh({ alGevraagd: true })
     if (!gelukt) return false
     try { st = await window.api.gitGhStatus() } catch {}
   }
@@ -12086,7 +12105,9 @@ async function haalGitIdentiteitOp(accountNaam) {
   const tekst = !st.geinstalleerd ? 'accounts.gitHaalTekstGeenGh'
     : !st.ingelogd ? 'accounts.gitHaalTekstNietIngelogd'
     : 'accounts.gitHaalTekstExtra'
-  const knopLabel = st.ingelogd ? 'accounts.gitOphalen' : 'accounts.gitInloggenEnOphalen'
+  const knopLabel = st.ingelogd ? 'accounts.gitOphalen'
+    : st.geinstalleerd ? 'accounts.gitInloggenEnOphalen'
+    : 'git.zorg.installerenEnInloggen'
 
   const keuze = await vraagKeuze({
     titel: I18N.t('accounts.gitTitel', { naam: accountNaam }),
@@ -12102,7 +12123,7 @@ async function haalGitIdentiteitOp(accountNaam) {
   if (keuze === 'zelf') return null // null = zelf invullen
 
   if (!st.geinstalleerd) {
-    const gelukt = await installeerGh()
+    const gelukt = await installeerGh({ alGevraagd: keuze === 'github' })
     if (!gelukt) return null
   }
 
@@ -12153,12 +12174,11 @@ async function haalGitIdentiteitOp(accountNaam) {
     return null
   }
 
+  // Geen "zo instellen?" meer: je vroeg er net zelf om, en wat er gevonden is
+  // staat in de melding en daarna gewoon in je profiel, waar je het kunt wijzigen.
   const ident = r.identiteit
-  const ja = await vraagJaNee(I18N.t('accounts.gitGevondenTitel'),
-    I18N.t(r.viaStatus ? 'accounts.gitGevondenViaStatus' : 'accounts.gitGevondenTekst', {
-      naam: ident.gitNaam, email: ident.gitEmail, gh: ident.ghGebruiker,
-    }), I18N.t('common.save'), 'primair')
-  return ja ? ident : null
+  showToast(I18N.t('accounts.gitOpgehaaldToast', { naam: ident.gitNaam, email: ident.gitEmail }))
+  return ident
 }
 
 async function githubInloggen(opties = {}) {
@@ -12169,11 +12189,8 @@ async function githubInloggen(opties = {}) {
     if (!gelukt) return false
   }
 
-  if (!opties.stil) {
-    const ja = await vraagJaNee(I18N.t('settings.git.inlogKnop'), I18N.t('git.inlog.uitleg'),
-      I18N.t('git.inlog.starten'), 'primair')
-    if (!ja) return false
-  }
+  // Geen extra "zal ik starten?": je drukte net zelf op inloggen, en het
+  // codevenster hieronder legt uit wat er gebeurt.
 
   // De app voert de dialoog met gh. Jij krijgt alleen de code te zien, in een
   // venster waar je hem kunt kopiëren — in de terminal kan dat niet, en dáár
@@ -12192,10 +12209,7 @@ async function githubInloggen(opties = {}) {
   }
   const namen = r.accounts || []
 
-  if (!opties.stil) {
-    await meldKort(I18N.t('git.inlog.klaarTitel'),
-      I18N.t('git.inlog.klaarTekst', { namen: namen.join(', ') }), namen)
-  }
+  if (!opties.stil) showToast(I18N.t('git.inlog.klaarToast', { namen: namen.join(', ') }))
   return true
 }
 
@@ -16585,8 +16599,9 @@ async function executeCmd(project, cmd, cmdKey = null, opties = {}) {
   // Flutter run/build/install: eerst checken of Gradle/Dart/Android Studio
   // (ook van buiten CommandDeck) in de weg zit — met risico's, vóór er iets
   // gebeurt. Zie regelProcesConflict.
+  let conflictGevraagd = !!opties.geenConflictHerstel
   if (!opties.geenConflictCheck && isConflictCheckEligible(cmdKey, cmd)) {
-    const door = await regelProcesConflict(werkmap, cmdKey, cmd)
+    const door = await regelProcesConflict(werkmap, cmdKey, cmd, { gevraagd: () => { conflictGevraagd = true } })
     if (!door) {
       setStatus('ended', I18N.t('conflict.geannuleerdStatus'))
       return { success: false, cancelled: true }
@@ -16672,7 +16687,12 @@ async function executeCmd(project, cmd, cmdKey = null, opties = {}) {
 
     // Autofix zag een flutter-lock / file-lock: zelfde dialoog als vooraf.
     // force: ook tonen zonder harde dader — met tips (VS Code/Cursor e.d.).
-    if (result && result.conflict && !opties.geenConflictHerstel) {
+    // Maar niet als je die vraag bij dit commando al kreeg: dan hetzelfde
+    // venster nog eens is precies de stapel meldingen die we niet willen. Dan
+    // alleen een regel in de uitvoer.
+    if (result && result.conflict && conflictGevraagd) {
+      appendLine('warn', I18N.t('conflict.nogSteedsRegel'))
+    } else if (result && result.conflict && !opties.geenConflictHerstel) {
       const door = await regelProcesConflict(werkmap, cmdKey, cmd, { force: true })
       if (door) {
         return await executeCmd(project, cmd, cmdKey, {
@@ -16867,6 +16887,7 @@ async function regelProcesConflict(cwd, cmdKey, cmd, opties = {}) {
     knoppen[knoppen.length - 1].soort = 'primair'
   }
 
+  if (opties.gevraagd) opties.gevraagd()
   const keuze = await vraagKeuze({
     titel: I18N.t(onbekend ? 'conflict.titelOnbekend' : 'conflict.titel'),
     tekst: I18N.t(tekstKey),
@@ -16877,35 +16898,21 @@ async function regelProcesConflict(cwd, cmdKey, cmd, opties = {}) {
   if (!keuze) return false
   if (keuze === 'door') return true
 
+  // Eén venster, en daarna niet nog een. Het venster hierboven noemt al wat er
+  // draait en hoe riskant stoppen is (rode knop); een tweede "weet je het
+  // zeker?" vroeg hetzelfde nog eens. Taakbeheer opent en het commando stopt:
+  // start het opnieuw als je klaar bent, in plaats van een vraag die blijft
+  // wachten tot je terug bent.
   if (keuze === 'taakbeheer') {
     const ok = await window.api.openTaskManager().catch(() => false)
-    if (!ok) {
-      await meldKort(I18N.t('conflict.titel'), I18N.t('conflict.taakbeheerMislukt'))
-    } else {
-      appendLine('info', I18N.t('conflict.taakbeheerGeopend'))
-    }
-    return await vraagJaNee(
-      I18N.t('conflict.titel'),
-      I18N.t('conflict.naTaakbeheer'),
-      I18N.t('conflict.door'),
-    )
+    appendLine(ok ? 'info' : 'err', I18N.t(ok ? 'conflict.taakbeheerOpnieuw' : 'conflict.taakbeheerMislukt'))
+    return false
   }
 
   if (keuze === 'stop') {
-    if (max !== 'laag') {
-      const heeftHoog = (info.processes || []).some(p => p.danger === 'hoog' || !p.killable)
-      const zeker = await vraagJaNee(
-        I18N.t('conflict.killTitel'),
-        I18N.t(heeftHoog ? 'conflict.killTekstHoog' : 'conflict.killTekstMiddel'),
-        I18N.t('conflict.stop'),
-        'gevaar',
-        regels.slice(0, 12),
-      )
-      if (!zeker) return false
-    }
     const r = await window.api.conflictKill({ pids: info.killablePids || [] }).catch(() => null)
     if (!r || (!r.ok && !(r.gestopt && r.gestopt.length))) {
-      await meldKort(I18N.t('conflict.titel'), I18N.t('conflict.stopMislukt'))
+      appendLine('err', I18N.t('conflict.stopMislukt'))
       return false
     }
     const n = (r.gestopt || []).length
@@ -17018,7 +17025,12 @@ async function controleerAchterstand() {
 // kan alleen als jij zelf niets extra's hebt, en niet-vastgelegd werk moet eerst
 // opzij. Eén knop "ophalen" die in de helft van de gevallen een foutmelding
 // geeft is geen keuze, dus staan de echte mogelijkheden er gewoon.
-async function biedAchterstandAan(p, pad, plan) {
+//
+// `opties.naam` en `opties.loc`: de vraag gaat over een project dat misschien
+// niet openstaat (na het opstarten). Dan staat de naam in de titel, en pas als
+// je kiest om binnen te halen wordt het project geopend — zodat je de uitvoer
+// ziet en het commando in de goede map draait.
+async function biedAchterstandAan(p, pad, plan, opties = {}) {
   const regels = []
   if (plan.uitEenLopend) regels.push(I18N.t('git.achter.uitEenLopend', { aantal: plan.ahead || 0 }))
   if (plan.vuil) regels.push(I18N.t('git.achter.vuil', { aantal: plan.vuil }))
@@ -17034,8 +17046,11 @@ async function biedAchterstandAan(p, pad, plan) {
     })
   }
 
+  const titel = opties.naam
+    ? I18N.t('git.achter.titelProject', { project: opties.naam, aantal: plan.behind, branch: plan.branch })
+    : I18N.t('git.achter.titel', { aantal: plan.behind, branch: plan.branch })
   const wijze = await vraagAchtergrond({
-    titel: I18N.t('git.achter.titel', { aantal: plan.behind, branch: plan.branch }),
+    titel,
     tekst: I18N.t(plan.uitEenLopend ? 'git.achter.tekstUitEen'
                 : plan.vuil        ? 'git.achter.tekstVuil'
                 :                    'git.achter.tekst'),
@@ -17044,16 +17059,19 @@ async function biedAchterstandAan(p, pad, plan) {
   })
   if (!wijze) return
 
+  if (opties.loc && p.activeLocation !== opties.loc.index) { p.activeLocation = opties.loc.index; saveProjects() }
+  if (activeId !== p.id) await selectProject(p.id)
+
   // Eerst het eigen werk opzij. Lukt dat niet, dan stoppen we: doorgaan zou
   // betekenen dat git over aangepaste bestanden heen wil, en dat weigert hij
-  // toch — of erger, halverwege.
+  // toch — of erger, halverwege. Geen extra venster: de uitvoer staat in beeld.
   let weggezet = false
   if (plan.stashNodig) {
     await executeCmd(p, GitTools.stashCommando(), 'git-stash')
     const naStash = await ververesGitPad(pad, true)
     if (naStash && naStash.vuil) {
-      await meldKort(I18N.t('git.achter.titel', { aantal: plan.behind, branch: plan.branch }),
-        I18N.t('git.achter.stashMislukt'))
+      appendLine('err', I18N.t('git.achter.stashMislukt'))
+      showToast(I18N.t('git.achter.stashMislukt'))
       return
     }
     weggezet = true
@@ -17074,8 +17092,8 @@ async function biedAchterstandAan(p, pad, plan) {
   }
 
   if (naPull && naPull.behind) {
-    await meldKort(I18N.t('git.achter.titel', { aantal: naPull.behind, branch: naPull.branch || plan.branch }),
-      I18N.t('git.achter.mislukt'))
+    appendLine('err', I18N.t('git.achter.mislukt'))
+    showToast(I18N.t('git.achter.mislukt'))
   }
   vraagProjectHertekenen()
 }
@@ -17086,11 +17104,11 @@ async function biedAchterstandAan(p, pad, plan) {
 //
 //   1. elke map van elk project vers bekijken, ook wat niet openstaat;
 //   2. alles met een remote stil ophalen, twee tegelijk;
-//   3. één overzicht: waar staat nieuw werk klaar, en waar staat werk dat
-//      alleen op deze pc bestaat — met één knop om ze langs te lopen.
+//   3. per project waar nieuw werk klaarstaat meteen de pull-vraag. Geen
+//      overzicht vooraf: dat was een extra venster met dezelfde boodschap.
 //
-// Voorheen keek de start alleen naar het project dat toevallig openstond. De rest
-// merkte je pas als je het aanklikte, of niet.
+// Werk dat alleen op deze pc staat, komt hier niet ter sprake: daar is de
+// afsluitcontrole voor. Bij het opstarten wil je bij zijn, niet ondervraagd.
 let gitRondeNr = 0
 let gitRondeLoopt = false
 // Geen netwerk bij het opstarten (wifi of VPN nog niet klaar): dan na deze tijd
@@ -17130,7 +17148,7 @@ async function gitRondeNaOpstart() {
 
     await meldOnafgemaakteKoppelingen()
     if (!nogActueel()) return
-    await meldGitUpdatesBijStart(nogActueel)
+    await biedPullsAan(nogActueel)
 
     if (!mislukt.length || !nogActueel()) return
     // Tijdens het wachten mag het openen van een project gewoon zelf kijken.
@@ -17141,7 +17159,7 @@ async function gitRondeNaOpstart() {
     for (const pad of mislukt) delete gitLaatsteFetch[pad]
     await haalAlleProjectenOp(nogActueel, mislukt)
     if (!nogActueel()) return
-    await meldGitUpdatesBijStart(nogActueel, { alleenAchter: true, paden: mislukt })
+    await biedPullsAan(nogActueel, mislukt)
   } catch {
     // Een fout hier mag nooit het opstarten of het afsluiten in de weg zitten.
   } finally {
@@ -17167,77 +17185,20 @@ async function haalAlleProjectenOp(nogActueel, alleen = null) {
   return mislukt
 }
 
-// Welke mappen vragen aandacht? Nieuw werk op de remote, en — tenzij de
-// afsluitcontrole uit staat — werk dat alleen hier staat.
-function gitAandachtLijst(opties = {}) {
-  const lokaalOok = !opties.alleenAchter
-    && GitTools.afsluitInstelling((settings.git || {}).afsluiten) !== 'uit'
+// Per project waar de remote vóórloopt: meteen de pull-vraag, één venster per
+// project, in de volgorde van de zijbalk.
+async function biedPullsAan(nogActueel, alleen = null) {
   const gezien = new Set()
-  const uit = []
-  for (const p of projects) {
+  for (const p of [...projects]) {
     for (const loc of projectLocaties(p)) {
+      if (!nogActueel()) return
       const pad = loc.pad
-      if (!pad || gezien.has(pad)) continue
-      if (opties.paden && !opties.paden.includes(pad)) continue
+      if (!pad || gezien.has(pad) || (alleen && !alleen.includes(pad))) continue
       gezien.add(pad)
-      const staat = gitStaten[pad]
-      if (!staat || !staat.isRepo) continue
-      const plan = GitTools.achterstandKeuzes(staat)
-      const redenen = lokaalOok ? GitTools.onveiligeRedenen(staat) : []
-      if (!plan && !redenen.length) continue
-      uit.push({ project: p, loc, pad, naam: locNaam(p, loc), plan, redenen, lokaalOok })
+      const plan = GitTools.achterstandKeuzes(gitStaten[pad])
+      if (!plan) continue
+      await biedAchterstandAan(p, pad, plan, { naam: locNaam(p, loc), loc })
     }
-  }
-  return uit
-}
-
-async function meldGitUpdatesBijStart(nogActueel, opties = {}) {
-  const lijst = gitAandachtLijst(opties)
-  if (!lijst.length) return
-
-  const regels = lijst.map(x => {
-    const delen = []
-    if (x.plan) delen.push(I18N.t('git.startRonde.achter', { aantal: x.plan.behind }))
-    for (const r of x.redenen) delen.push(I18N.t('git.afsluit.reden.' + r.soort, { aantal: r.aantal }))
-    return I18N.t('git.startRonde.regel', { project: x.naam, detail: delen.join(', ') })
-  })
-  const keuze = await vraagAchtergrond({
-    titel: I18N.t('git.startRonde.titel', { aantal: lijst.length }),
-    tekst: I18N.t('git.startRonde.tekst'),
-    regels,
-    knoppen: [
-      { label: I18N.t('git.startRonde.later'), waarde: '' },
-      { label: I18N.t('git.startRonde.bekijken'), waarde: 'kijk', soort: 'primair' },
-    ],
-  })
-  if (keuze !== 'kijk') return
-  await loopGitAandachtLangs(lijst, nogActueel)
-}
-
-// Eén voor één, in de volgorde van het overzicht. Eerst binnenhalen wat aan de
-// andere kant klaarstaat — pushen lukt toch pas als je bij bent — en daarna het
-// eigen werk vastleggen en pushen.
-async function loopGitAandachtLangs(lijst, nogActueel) {
-  for (let i = 0; i < lijst.length; i++) {
-    if (!nogActueel()) return
-    const x = lijst[i]
-    const p = projects.find(q => q.id === x.project.id)
-    if (!p) continue
-    if (p.activeLocation !== x.loc.index) { p.activeLocation = x.loc.index; saveProjects() }
-    await selectProject(p.id)
-
-    const staat = await ververesGitPad(x.pad, true)
-    const plan = GitTools.achterstandKeuzes(staat)
-    if (plan) await biedAchterstandAan(p, x.pad, plan)
-    if (!nogActueel()) return
-
-    if (!x.lokaalOok) continue
-    const na = await ververesGitPad(x.pad, true)
-    if (!GitTools.onveiligeRedenen(na).length) continue
-    const antwoord = await vraagOverProject(
-      { id: p.id, naam: x.naam, pad: x.pad, locIndex: x.loc.index, staat: na },
-      { reden: 'opstart', nr: i + 1, totaal: lijst.length })
-    if (antwoord === 'blijven') return
   }
 }
 
@@ -17322,12 +17283,11 @@ async function controleerVoorAfsluiten(info = {}) {
 
 // Geeft 'door' (volgende project) of 'blijven' (afsluiten/wisselen afbreken).
 //
-// Bij het opstarten ('opstart') is het dezelfde vraag, maar zonder haast: niets
-// gaat dicht, dus "overslaan" is geen gevaarlijke knop en "blijven" heet daar
-// "stoppen" (niet verder langs de rest).
+// Eén venster per project. Het commitbericht staat als veld in datzelfde
+// venster: leeg laten is prima, dan maken we er zelf een. Voorheen kwam na
+// "commit & push" nog een tweede venster om het bericht te vragen.
 async function vraagOverProject(project, opties = {}) {
-  const opstart = opties.reden === 'opstart'
-  const prefix = opties.reden === 'wisselen' ? 'git.wissel' : opstart ? 'git.startWerk' : 'git.afsluit'
+  const prefix = opties.reden === 'wisselen' ? 'git.wissel' : 'git.afsluit'
   const nr = opties.nr || 1
   const totaal = opties.totaal || 1
   const redenen = GitTools.onveiligeRedenen(project.staat)
@@ -17339,15 +17299,20 @@ async function vraagOverProject(project, opties = {}) {
   let tekst = I18N.t(prefix + '.tekst')
   if (totaal > 1) tekst += ' ' + I18N.t('git.afsluit.teller', { n: nr, totaal })
 
-  const keuze = await (opstart ? vraagAchtergrond : vraagKeuze)({
+  const automatisch = GitTools.automatischCommitBericht(project.staat)
+  const invoer = project.staat.vuil > 0
+    ? { placeholder: I18N.t('git.afsluit.berichtPlaceholder', { bericht: automatisch }) }
+    : null
+  const keuze = await vraagKeuze({
     titel: I18N.t(prefix + '.titel', { project: project.naam }),
     tekst,
     regels,
+    invoer,
     // Onder elkaar (vier keuzes), dus achterste eerst: commit & push bovenaan,
     // blijven onderaan, en de rode knop niet direct onder de aanbevolen.
     knoppen: [
-      { label: I18N.t(opstart ? 'git.startWerk.stoppen' : 'git.afsluit.blijven'), waarde: 'blijven' },
-      { label: I18N.t(prefix + '.tochAf'), waarde: 'door', soort: opstart ? '' : 'gevaar' },
+      { label: I18N.t('git.afsluit.blijven'), waarde: 'blijven' },
+      { label: I18N.t(prefix + '.tochAf'), waarde: 'door', soort: 'gevaar' },
       { label: I18N.t('git.afsluit.terminal'), waarde: 'terminal' },
       { label: I18N.t('git.afsluit.commitPush'), waarde: 'commitpush', soort: 'primair' },
     ],
@@ -17376,20 +17341,11 @@ async function vraagOverProject(project, opties = {}) {
     p.activeLocation = project.locIndex
     saveProjects()
   }
+  selectProject(p.id)
 
   if (project.staat.vuil > 0) {
-    const bericht = await vraagTekst({
-      titel: I18N.t('git.commit.title'),
-      tekst: I18N.t('git.commit.text', { aantal: project.staat.vuil }),
-      placeholder: GitTools.automatischCommitBericht(project.staat),
-      okLabel: I18N.t('git.afsluit.commitPush'),
-    })
-    // null = geannuleerd. Leeg = wel doorgaan, maar zonder eigen bericht;
-    // dan vullen we er zelf een in op basis van wat er verandert.
-    if (bericht === null) return 'blijven'
-    selectProject(p.id)
     hartslagAfsluiten(180 * 1000)
-    await executeCmd(p, GitTools.commitCommando(bericht || GitTools.automatischCommitBericht(project.staat)), 'git-commit')
+    await executeCmd(p, GitTools.commitCommando((invoer && invoer.tekst) || automatisch), 'git-commit')
   }
 
   const na = await ververesGitStaat(p, true)
@@ -17414,7 +17370,7 @@ async function vraagOverProject(project, opties = {}) {
     const toch = await vraagJaNee(
       I18N.t('git.afsluit.misluktTitel'),
       I18N.t(prefix + '.misluktTekst', { project: project.naam }),
-      I18N.t(prefix + '.tochAf'), opstart ? 'primair' : 'gevaar')
+      I18N.t(prefix + '.tochAf'), 'gevaar')
     return toch ? 'door' : 'blijven'
   }
   return 'door'
