@@ -1975,17 +1975,14 @@ async function installeerOnlineUpdate() {
   if (r && r.ok === false && r.fout) showToast(I18N.t('update.downloadFailedToast'))
 }
 
-// De knop staat er zodra er een bronmap is om vanaf te bouwen — of je nu
-// vanuit de broncode draait of vanuit een gebouwde exe die naast zijn bron
-// staat. Eerder stond hier `packaged === false`, en dat klopte niet: de
-// update werkt juist óók vanuit een portable of uitgepakte build, en dat is
-// waar hij gebruikt wordt. Dat het al die tijd goed ging kwam doordat het
-// `hidden`-attribuut niets deed zolang `.tbtn` zelf een display zette; toen
-// dat werd rechtgezet viel de knop weg. Dus staat de voorwaarde nu goed.
+// De bouw-vanuit-bron-knop is alleen voor development (npm start). Een
+// gebouwde exe krijgt zijn updates van GitHub (toonOnlineUpdate), ook als
+// hij de bronmap nog kent uit de gedeelde instellingen: anders startte de
+// knop daar alsnog npm install + build in plaats van de nieuwe release.
 async function toonUpdateKnop(updateBtn) {
   try {
     const info = await window.api.runtimeInfo?.()
-    if (info && (info.packaged === false || info.bronMap)) {
+    if (info && info.packaged === false) {
       bronKnopZichtbaar = true
       updateBtn.hidden = false
     }
