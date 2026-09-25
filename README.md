@@ -58,10 +58,11 @@ Een nieuwe versie is dus pas zichtbaar voor gebruikers als hij daar staat.
 3. `npm run release`
 
 Het script weigert als er niet-gecommitte wijzigingen zijn, als `main` niet
-gelijk loopt met GitHub of als de tag `v<versie>` al bestaat. Het gebruikt het
-token van je `gh`-login (of `GH_TOKEN` als die gezet is), bouwt de Setup en
-portable, maakt de release + tag `v<versie>` aan en uploadt ook `latest.yml`,
-het bestand waar de updater naar kijkt.
+gelijk loopt met GitHub of als `v<versie>` al gepubliceerd is. Het gebruikt het
+token van je `gh`-login (of `GH_TOKEN` als die gezet is), zet en pusht de tag
+`v<versie>`, bouwt de Setup en portable, maakt de release aan en uploadt ook
+`latest.yml`, het bestand waar de updater naar kijkt. Brak een eerdere poging
+halverwege af (release zonder `latest.yml`), dan maakt hij die gewoon af.
 
 ## Features
 
