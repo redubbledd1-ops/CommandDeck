@@ -3,12 +3,13 @@ const { maakUpdater, RELEASES_URL } = require('../app-updater')
 let ok = true; const check = (l, c) => { console.log((c ? 'PASS  ' : 'FAIL  ') + l); if (!c) ok = false }
 const wacht = (ms) => new Promise(r => setTimeout(r, ms))
 
-function opzet({ packaged = true, portable = false, checkFout = null } = {}) {
+function opzet({ packaged = true, portable = false, checkFout = null, herkansing } = {}) {
   const handlers = {}, verzonden = [], geopend = []
   let geladen = 0, gezocht = 0, geinstalleerd = null, voor = 0
   const au = new EventEmitter()
   au.setFeedURL = (c) => { au.feed = c }
-  au.checkForUpdates = async () => { gezocht++; if (checkFout) throw new Error(checkFout) }
+  au.checkForUpdates = async () => { gezocht++; if (au.checkFout) throw new Error(au.checkFout) }
+  au.checkFout = checkFout
   au.downloadUpdate = async () => { au.emit('download-progress', { percent: 42.4 }); au.emit('update-downloaded', {}) }
   au.quitAndInstall = (s, r) => { geinstalleerd = [s, r] }
   const win = { isDestroyed: () => false, webContents: { send: (k, v) => verzonden.push([k, v]) } }
@@ -19,7 +20,7 @@ function opzet({ packaged = true, portable = false, checkFout = null } = {}) {
     getWin: () => win,
     voorInstalleren: () => voor++,
     laadAutoUpdater: () => { geladen++; return au },
-    vertraging: 20, portable,
+    vertraging: 20, portable, herkansing: herkansing || [5000],
     log: { warn: () => {} },
   })
   return { u, au, handlers, verzonden, geopend,
@@ -56,6 +57,17 @@ function opzet({ packaged = true, portable = false, checkFout = null } = {}) {
   t.u.planCheck(); await wacht(50)
   t.au.emit('error', new Error('offline'))
   check('offline: geen crash, status blijft "geen"', (await t.handlers['update:status']()).staat === 'geen')
+
+  // Mislukt de eerste poging (netwerk nog niet klaar na het opstarten), dan
+  // niet pas na het interval opnieuw — anders geen update-knop die hele dag.
+  t = opzet({ checkFout: 'net::ERR_NETWORK_CHANGED', herkansing: [30, 30] })
+  t.u.planCheck(); await wacht(50)
+  check('eerste poging mislukt', t.gezocht === 1)
+  t.au.checkFout = null
+  await wacht(60)
+  check('kort daarna opnieuw geprobeerd', t.gezocht === 2)
+  await wacht(80)
+  check('en na een geslaagde poging geen extra herkansingen', t.gezocht === 2)
 
   // Mislukte download: knop terug naar 'beschikbaar'.
   t = opzet()

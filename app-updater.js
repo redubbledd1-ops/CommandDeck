@@ -22,7 +22,11 @@ function maakUpdater({
   voorInstalleren = () => {},
   laadAutoUpdater = () => require('electron-updater').autoUpdater,
   vertraging = 10e3,
-  interval = 4 * 3600e3,
+  // Elk uur: wie CommandDeck de hele dag open heeft, hoort het dan dezelfde dag.
+  interval = 3600e3,
+  // Mislukt het zoeken (vlak na het opstarten is het netwerk er vaak nog niet),
+  // dan niet een uur wachten maar na deze pauzes opnieuw proberen.
+  herkansing = [60e3, 5 * 60e3, 15 * 60e3],
   portable = !!process.env.PORTABLE_EXECUTABLE_DIR,
   log = console,
 }) {
@@ -64,9 +68,22 @@ function maakUpdater({
     return updater
   }
 
+  let mislukt = 0
+  let herkansKlok = null
+
   async function check() {
-    try { await initUpdater().checkForUpdates() }
-    catch (err) { log.warn('[update] zoeken mislukt:', err && err.message || err) }
+    try {
+      await initUpdater().checkForUpdates()
+      mislukt = 0
+    } catch (err) {
+      log.warn('[update] zoeken mislukt:', err && err.message || err)
+      // Eén mislukte poging bij het opstarten betekende: de rest van de dag
+      // geen update-knop. Nu een paar herkansingen, daarna gewoon het interval.
+      if (!herkansKlok && mislukt < herkansing.length) {
+        herkansKlok = setTimeout(() => { herkansKlok = null; check() }, herkansing[mislukt++])
+        herkansKlok.unref?.()
+      }
+    }
   }
 
   function planCheck() {
