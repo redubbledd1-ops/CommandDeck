@@ -1343,6 +1343,35 @@ for (const sleutel of ['git.afsluit.titel', 'git.afsluit.commitPush', 'git.afslu
   t('Windows-afsluiten start dezelfde vragen',
     /win\.on\('query-session-end'/.test(main)
     && main.slice(main.indexOf("app.on('session-end'")).includes("startAfsluitControle('windows')"))
+
+  // Waarom er soms projecten ontbraken bij het afsluiten, en wat daartegen staat.
+  const controle = (ren.match(/async function controleerOnveiligWerk\([\s\S]*?\n\}/) || [''])[0]
+  t('het afsluiten wacht niet op de netwerkcontrole van alle projecten',
+    /await ververesAlleGitStatenNu\(\(\) => hartslagAfsluiten\(\)\)/.test(controle)
+    && !/ververesAlleGitStaten\(true\)/.test(controle))
+  t('elke map van elk project, een paar tegelijk, met hartslag erbij',
+    /async function ververesAlleGitStatenNu[\s\S]{0,300}metHoogstens\(alleGitPaden\(\), 3,/.test(ren)
+    && /metHoogstens\(alleGitPaden\(\), 3,[\s\S]{0,120}if \(tik\) tik\(\)/.test(ren))
+  t('een verversing die al liep wordt afgewacht, niet overgeslagen',
+    /const gitBezig = new Map\(\)/.test(ren)
+    && /if \(gitBezig\.has\(pad\)\) \{[\s\S]{0,200}await lopend/.test(ren))
+  t('en een git die geen antwoord gaf laat het oude antwoord staan',
+    /if \(!staat\) return gitStaten\[pad\] \|\| null/.test(ren))
+  const info = main.slice(main.indexOf("ipcMain.handle('git:info'"))
+    .slice(0, main.slice(main.indexOf("ipcMain.handle('git:info'")).indexOf('\n})'))
+  t('git:info zegt "weet ik niet" als git te traag was',
+    /if \(binnen\.fout && binnen\.fout\.killed\) return null/.test(info)
+    && /if \(status\.fout\) return null/.test(info))
+  t('een vraag van de app zelf gaat dicht zodra het afsluiten begint',
+    /async function controleerVoorAfsluiten[\s\S]{0,900}stopGitRonde\(\)\s*sluitAchtergrondVraag\(\)/.test(ren))
+  t('en komt er tijdens het afsluiten niet meer tussen',
+    /async function vraagAchtergrond\(opties\) \{\s*if \(onveiligWerkBezig\) return ''[\s\S]{0,120}if \(onveiligWerkBezig\) return ''/.test(ren))
+  t('de meldingen bij het opstarten zijn zulke vragen',
+    ['git.opstart.titel', 'git.achter.titel', 'git.stashMelding.titel', 'git.startRonde.titel']
+      .every(k => new RegExp("vraagAchtergrond\\(\\{\\s*titel: I18N\\.t\\('" + k.replace(/\./g, '\\.')).test(ren)))
+  t('de renderer luistert al vóór de eerste await',
+    /window\.addEventListener\('DOMContentLoaded', async \(\) => \{[\s\S]{0,500}opAfsluitControle[\s\S]{0,120}gitAfsluitLuistert\(\)[\s\S]{0,40}\} catch \{\}\s*try \{\s*\[projects, settings, history\] = await/.test(ren)
+    && /gitAfsluitLuistert/.test(pre))
 }
 
 for (const sleutel of ['git.btn.diff', 'git.diff.leegTitel', 'git.diff.nieuweKop',
@@ -1563,7 +1592,12 @@ t('het venster komt naar voren, want wij houden het op',
 t('de oude berichtenhaak is vervangen, niet verdubbeld',
   !/hookWindowMessage\(0x0011/.test(mainAf))
 t('de aanleiding gaat mee naar het venster',
-  /send\('git:controleerVoorAfsluiten', \{ aanleiding: aanleiding \|\| 'venster' \}\)/.test(mainAf))
+  /const info = \{ aanleiding: aanleiding \|\| 'venster' \}[\s\S]{0,500}send\('git:controleerVoorAfsluiten', info\)/.test(mainAf))
+// Vlak na het opstarten luistert de renderer nog niet. Dan ging de vraag
+// verloren en sloot de noodrem het venster zonder één melding.
+t('een afsluitvraag van vóór de renderer luisterde, wordt bewaard',
+  /if \(afsluitLuistert\) win\.webContents\.send\('git:controleerVoorAfsluiten', info\)\s*else afsluitWachtend = info/.test(mainAf)
+  && /ipcMain\.on\('git:afsluitLuistert'[\s\S]{0,400}send\('git:controleerVoorAfsluiten', info\)/.test(mainAf))
 
 const rendererAf = fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8')
 t('en het venster zegt achteraf dat Windows is gestopt met afsluiten',
@@ -1621,10 +1655,49 @@ t('de vraag komt nooit over het inlogscherm heen',
   && /if \(!await wachtOpVrijVenster\(\)\) return/.test(rendererAchter))
 t('en kijkt pas ná het inloggen welk project openstaat',
   /await wachtOpVrijVenster\(\)\) return[\s\S]{0,400}const p = projects\.find\(x => x\.id === activeId\)/.test(rendererAchter))
-t('na het wisselen van account wordt er opnieuw gekeken',
-  /await ververesAlleGitStaten\(true\)[\s\S]{0,220}controleerAchterstand\(\)/.test(rendererAchter))
+t('na het wisselen van account wordt er opnieuw gekeken, in alle projecten',
+  /activeerGitVoorAccount\(\)\.then\(\(\) => gitRondeNaOpstart\(\)\)/.test(rendererAchter))
 t('bij opstarten komt er een tweede kans na de netwerkronden',
-  /meldOnafgemaakteKoppelingen\(\)[\s\S]{0,900}ok === false[\s\S]{0,200}controleerAchterstand\(\)/.test(rendererAchter))
+  /for \(const pad of mislukt\) delete gitLaatsteFetch\[pad\][\s\S]{0,200}haalAlleProjectenOp\(nogActueel, mislukt\)/.test(rendererAchter)
+  && /await new Promise\(r => setTimeout\(r, GIT_RONDE_HERKANS_MS\)\)/.test(rendererAchter))
+
+// ── Na het opstarten: alle projecten, niet alleen het open project ──────────
+{
+  const ronde = (rendererAchter.match(/async function gitRondeNaOpstart\(\)[\s\S]*?\n\}/) || [''])[0]
+  t('er is één ronde na het opstarten', ronde.length > 200
+    && /setTimeout\(\(\) => gitRondeNaOpstart\(\), \d+\)/.test(rendererAchter))
+  t('die wacht tot het account gekozen en het scherm vrij is',
+    /if \(!await wachtOpVrijVenster\(30 \* 60 \* 1000\)\) return/.test(ronde)
+    && /await wanneerIdle\(\d+\)/.test(ronde))
+  t('eerst alles lokaal, daarna koppelingen en ophalen naast elkaar',
+    ronde.indexOf('await ververesAlleGitStatenNu()') > 0
+    && /await Promise\.all\(\[\s*controleerAlleKoppelingen\(\),\s*haalAlleProjectenOp\(nogActueel\),\s*\]\)/.test(ronde)
+    && ronde.indexOf('await ververesAlleGitStatenNu()') < ronde.indexOf('controleerAlleKoppelingen()'))
+  t('koppelingen worden een paar tegelijk nagekeken, niet één voor één',
+    /function controleerAlleKoppelingen\(\)[\s\S]{0,500}metHoogstens\(paden, 3,/.test(rendererAchter)
+    && /if \(gitControleBezig\) return gitControleBezig/.test(rendererAchter))
+  t('het ophalen gaat over elke map van elk project',
+    /async function haalAlleProjectenOp[\s\S]{0,300}alleGitPaden\(\)/.test(rendererAchter)
+    && /function alleGitPaden\(\)[\s\S]{0,250}projectLocaties\(p\)/.test(rendererAchter))
+  t('niet alles tegelijk: hoogstens twee fetches naast elkaar',
+    /metHoogstens\(paden, 2,/.test(rendererAchter))
+  t('het overzicht noemt achterstand én werk dat alleen hier staat',
+    /GitTools\.achterstandKeuzes\(staat\)[\s\S]{0,200}GitTools\.onveiligeRedenen\(staat\)/.test(rendererAchter)
+    && /git\.startRonde\.achter/.test(rendererAchter))
+  t('bij langslopen eerst binnenhalen, dan pas vastleggen en pushen',
+    /async function loopGitAandachtLangs[\s\S]*?biedAchterstandAan[\s\S]*?vraagOverProject\([\s\S]{0,200}reden: 'opstart'/.test(rendererAchter))
+  t('bij het opstarten zelf vraagt het open project niet nog eens apart',
+    !/setTimeout\(async \(\) => \{[\s\S]{0,300}startGitPolling\(\)[\s\S]{0,200}controleerAchterstand\(\)/.test(rendererAchter)
+    && /if \(gitRondeLoopt \|\| onveiligWerkBezig\) return/.test(rendererAchter))
+  t('afsluiten of wisselen stopt een lopende ronde',
+    /stopGitRonde\(\)/.test(rendererAchter) && /nr === gitRondeNr && account === actiefAccount && !onveiligWerkBezig/.test(rendererAchter))
+  for (const sleutel of ['git.startRonde.titel', 'git.startRonde.tekst', 'git.startRonde.regel',
+                         'git.startRonde.achter', 'git.startRonde.bekijken', 'git.startRonde.later',
+                         'git.startWerk.titel', 'git.startWerk.tekst', 'git.startWerk.tochAf',
+                         'git.startWerk.stoppen', 'git.startWerk.misluktTekst']) {
+    t('start-tekst ' + sleutel + ' bestaat in nl en en', !!nl[sleutel] && !!en[sleutel])
+  }
+}
 t('git van overige projecten komt in idle-plakken',
   /function wanneerIdle\(/.test(rendererAchter)
   && /async function ververesAlleGitStaten[\s\S]{0,500}await wanneerIdle\(\)/.test(rendererAchter)
@@ -1675,7 +1748,10 @@ t('er is een opruimronde voor blijven staan sloten', !!opruimBlok)
 t('die niets doet zolang de app zelf een commando draait',
   /if \(activeProc\) return uit/.test(opruimBlok))
 t('en niets doet zolang er ergens een git draait',
-  /if \(gitProcessenOpDezePc\(\)\) return uit/.test(opruimBlok))
+  /if \(await gitProcessenOpDezePc\(\)\) return uit/.test(opruimBlok))
+t('tasklist zet het venster niet stil bij het opstarten',
+  /async function gitProcessenOpDezePc\(\)[\s\S]{0,200}await execFileAsync\('tasklist'/.test(mainSlot)
+  && !/execFileSync\('tasklist'/.test(mainSlot))
 t('alleen mappen die bij dit account horen', /padToegestaan\(dir\)/.test(opruimBlok))
 t('een vers slot blijft staan', /slotVerlopen\(slot, GIT_SLOT_VERLOPEN_MS\)/.test(opruimBlok))
 t('het slot van de updateflow gaat in hetzelfde rondje mee',

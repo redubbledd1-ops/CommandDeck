@@ -889,7 +889,7 @@ async function keurProjectenNa() {
 // git-aanroepen, dus we onthouden het antwoord per pad en tekenen opnieuw
 // zodra het binnen is.
 let gitStaten = {}        // pad -> staat uit git-tools
-const gitBezig = new Set()
+const gitBezig = new Map()   // pad -> lopende verversing (belofte)
 
 function actieveLocPad(p) {
   const loc = p && p.locations ? (p.locations[p.activeLocation] || p.locations[0]) : null
@@ -1009,27 +1009,48 @@ function gitStaatVan(p) {
 // Zonder `forceer` gebeurt er niets als we het antwoord al hebben. Dat is wat
 // het opnieuw tekenen laat stoppen: de eerste ronde haalt op en tekent, de
 // tweede vindt de cache en doet niets meer.
+//
+// Loopt er al een verversing voor dit pad, dan wachten we die af in plaats van
+// het oude antwoord (of niets) terug te geven. Juist dat liet de afsluitcontrole
+// projecten overslaan: een poll die net liep, en het project telde niet mee.
+// Met `forceer` komt er daarna nog een verse ronde achteraan, want wat al liep
+// kan van vóór een commit zijn.
 async function ververesGitPad(pad, forceer = false) {
   if (!pad || !window.api || !window.api.gitInfo) return null
   if (!forceer && gitStaten[pad]) return gitStaten[pad]
-  if (gitBezig.has(pad)) return gitStaten[pad] || null
-
-  gitBezig.add(pad)
-  try {
-    const staat = await window.api.gitInfo(pad)
-    if (!staat) return null
-    const oud = gitStaten[pad]
-    gitStaten[pad] = staat
-    if (!GitTools.zelfdeGitWeergave(oud, staat)) {
-      meldGitProjectenAanMain()
-      vraagProjectHertekenen()
-    }
-    return staat
-  } catch {
-    return null
-  } finally {
-    gitBezig.delete(pad)
+  if (gitBezig.has(pad)) {
+    const lopend = gitBezig.get(pad)
+    if (!forceer) return lopend
+    await lopend
+    // Intussen kan iemand anders al een verse ronde begonnen zijn; die is van
+    // ná onze vraag, dus die is goed genoeg.
+    if (gitBezig.has(pad)) return gitBezig.get(pad)
   }
+
+  const klus = (async () => {
+    // Eerst een tik wachten, zodat de belofte al in gitBezig staat voordat de
+    // finally hieronder hem er weer uit haalt.
+    await null
+    try {
+      const staat = await window.api.gitInfo(pad)
+      // null = main wist het nu niet (git te traag). Dan blijft staan wat we
+      // al wisten, in plaats van het project te laten verdwijnen.
+      if (!staat) return gitStaten[pad] || null
+      const oud = gitStaten[pad]
+      gitStaten[pad] = staat
+      if (!GitTools.zelfdeGitWeergave(oud, staat)) {
+        meldGitProjectenAanMain()
+        vraagProjectHertekenen()
+      }
+      return staat
+    } catch {
+      return gitStaten[pad] || null
+    } finally {
+      if (gitBezig.get(pad) === klus) gitBezig.delete(pad)
+    }
+  })()
+  gitBezig.set(pad, klus)
+  return klus
 }
 
 async function ververesGitStaat(p, forceer = false) {
@@ -1060,6 +1081,45 @@ async function ververesAlleGitStaten(forceer = false) {
   return controleerAlleKoppelingen()
 }
 
+// Elke map van elk project, één keer. Ook de locaties die nu niet actief zijn:
+// werk dat daar openstaat, raak je net zo goed kwijt.
+function alleGitPaden() {
+  const paden = []
+  for (const p of projects) {
+    for (const loc of projectLocaties(p)) {
+      if (loc.pad && !paden.includes(loc.pad)) paden.push(loc.pad)
+    }
+  }
+  return paden
+}
+
+// Een lijst afwerken met hoogstens `max` tegelijk.
+async function metHoogstens(lijst, max, werk) {
+  let i = 0
+  const werker = async () => {
+    while (i < lijst.length) {
+      const item = lijst[i++]
+      try { await werk(item) } catch {}
+    }
+  }
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(max, lijst.length)) }, werker))
+}
+
+// Voor de afsluitcontrole: alle mappen vers, zonder netwerk en zonder op elkaar
+// te wachten. De gewone ronde hierboven gaat één voor één en wacht daarna op de
+// koppelingscontrole — over het netwerk, tot vijftien seconden per project. Dat
+// is te lang voor iemand die op het kruisje drukte: de noodrem in main sloot het
+// venster dan voordat de eerste vraag er stond. `tik` houdt die noodrem open.
+async function ververesAlleGitStatenNu(tik) {
+  meldGitPadenAanMain()
+  if (tik) tik()
+  await metHoogstens(alleGitPaden(), 3, async (pad) => {
+    await ververesGitPad(pad, true)
+    if (tik) tik()
+  })
+  meldGitProjectenAanMain()
+}
+
 // ── Klopt de koppeling nog? ─────────────────────────────────────────────────
 // git:info kijkt alleen in .git/config. Daar kan een adres staan van een repo
 // die nooit is aangemaakt, hernoemd is, of van een account waar je niet meer
@@ -1071,7 +1131,7 @@ async function ververesAlleGitStaten(forceer = false) {
 // is, en verder alleen als er iets misgaat of iets verandert. Main onthoudt de
 // uitslag een half uur, dus een tweede ronde kost meestal niets.
 const gitRemoteGedaan = new Set()
-let gitControleBezig = false
+let gitControleBezig = null   // lopende ronde (belofte)
 
 async function controleerKoppeling(pad, opnieuw = false) {
   if (!pad || !window.api || !window.api.gitRemoteCheck) return null
@@ -1090,25 +1150,21 @@ async function controleerKoppeling(pad, opnieuw = false) {
   }
 }
 
-// Eén voor één, en alleen waar er iets te controleren valt. Tien projecten
-// tegelijk zijn tien netwerkaanroepen, en dat is precies het moment waarop de
-// app traag aanvoelt bij het opstarten.
-async function controleerAlleKoppelingen() {
-  if (gitControleBezig) return
-  gitControleBezig = true
-  try {
-    for (const p of projects) {
-      for (const loc of projectLocaties(p)) {
-        const staat = gitStaten[loc.pad]
-        if (!staat || !staat.isRepo || !staat.heeftRemote) continue
-        if (gitRemoteGedaan.has(loc.pad)) continue
-        await controleerKoppeling(loc.pad)
-        await wanneerIdle()
-      }
-    }
-  } finally {
-    gitControleBezig = false
-  }
+// Alleen waar er iets te controleren valt, en hoogstens drie tegelijk. Eén voor
+// één duurde bij zeven projecten een halve minuut — en de melding na het
+// opstarten wachtte daarop. Het venster merkt er niets van: main doet dit
+// inmiddels zonder de hoofdthread vast te zetten.
+//
+// Loopt er al een ronde, dan krijg je die terug om op te wachten.
+function controleerAlleKoppelingen() {
+  if (gitControleBezig) return gitControleBezig
+  const paden = alleGitPaden().filter((pad) => {
+    const staat = gitStaten[pad]
+    return staat && staat.isRepo && staat.heeftRemote && !gitRemoteGedaan.has(pad)
+  })
+  gitControleBezig = metHoogstens(paden, 3, (pad) => controleerKoppeling(pad))
+    .finally(() => { gitControleBezig = null })
+  return gitControleBezig
 }
 
 // Eén keer per sessie, bij het opstarten: welke projecten hebben op deze pc wel
@@ -1163,7 +1219,7 @@ async function meldOnafgemaakteKoppelingen() {
   }
   if (!verdacht.length) return
 
-  const keuze = await vraagKeuze({
+  const keuze = await vraagAchtergrond({
     titel: I18N.t('git.opstart.titel'),
     tekst: I18N.t('git.opstart.tekst'),
     regels: verdacht.map(v => v.regel),
@@ -1697,7 +1753,18 @@ function isConflictCheckEligible(cmdKey, cmd) {
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
+// Staan de projecten en de taal klaar? De afsluitcontrole wacht daarop.
+let initKlaar = false
+
 window.addEventListener('DOMContentLoaded', async () => {
+  // Als allereerste: luisteren naar de afsluitvraag. Wie vlak na het opstarten
+  // op het kruisje drukt, kreeg anders geen enkele vraag — het bericht van main
+  // kwam binnen voordat hier iemand luisterde. Main bewaart het tot deze melding.
+  try {
+    window.api.opAfsluitControle((info) => controleerVoorAfsluiten(info))
+    window.api.gitAfsluitLuistert()
+  } catch {}
+
   try {
     [projects, settings, history] = await Promise.all([
       window.api.loadProjects(),
@@ -1752,6 +1819,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   restoreLastView()
   herstelWerkSplitNaStart()
   bedraadZijbalkBreedte()
+  initKlaar = true
 
   // Bij een ander vensterformaat past er een ander stuk pad in
   window.addEventListener('resize', () => {
@@ -1772,50 +1840,24 @@ window.addEventListener('DOMContentLoaded', async () => {
   // een update waarin deze controle erbij kwam) alsnog beoordelen.
   setTimeout(() => keurProjectenNa(), 1200)
 
-  // Git-toestand: eerst het open project, zodat het venster reageert. De rest
-  // en de netwerkcontrole komen daarna, anders staan zes git-processen per
-  // project in de weg van de eerste klik.
+  // Git-toestand: eerst het open project, zodat de kop meteen klopt. Lokaal en
+  // zonder vragen; al het andere wacht op de ronde hieronder.
   setTimeout(async () => {
     meldGitPadenAanMain()
     activeerGitVoorAccount()
     const open = projects.find(x => x.id === activeId)
     if (open) await ververesGitStaat(open, true)
     startGitPolling()
-    // Wacht vanzelf tot het inloggen klaar is; zie wachtOpVrijVenster.
-    controleerAchterstand()
   }, 800)
-
-  setTimeout(async () => {
-    // ververesAlleGitStaten geeft de netwerkcontrole terug; die vult "remote is
-    // leeg" en de default-branch, en daar hangt de oude-kopie-herkenning van af.
-    try { await ververesAlleGitStaten(true) } catch {}
-    // Nog een ronde git:info zodat de zojuist opgehaalde uitslag in de staat zit.
-    for (const p of [...projects]) {
-      try { await ververesGitStaat(p, true) } catch {}
-      await wanneerIdle()
-    }
-    meldOnafgemaakteKoppelingen()
-    // Tweede kans op de pull-melding: de eerste fetch (t+800) faalt vaak omdat
-    // WiFi/VPN nog niet klaar is, en kan hier nóg lopen (timeout 15s). Wacht
-    // die af, wis mislukte pogingen, en probeer opnieuw — anders blijft de
-    // ochtend stil ondanks dat "ophalen bij openen" aan staat.
-    const eind = Date.now() + 20000
-    while (achterstandBezig && Date.now() < eind) {
-      await new Promise(r => setTimeout(r, 200))
-    }
-    for (const [pad, l] of Object.entries(gitLaatsteFetch)) {
-      if (l && typeof l === 'object' && l.ok === false) delete gitLaatsteFetch[pad]
-    }
-    controleerAchterstand()
-  }, 3500)
-
-  // Het main-proces houdt het sluiten tegen en vraagt ons na te kijken.
-  try { window.api.opAfsluitControle((info) => controleerVoorAfsluiten(info)) } catch {}
 
   // Zijn er meerdere accounts, dan eerst vragen wie er achter de pc zit. Bij
   // één account is er niets te kiezen en vragen we dus ook niets.
   setTimeout(() => kiesAccountBijStart(), 300)
-  setTimeout(() => toonStashMeldingBijStart(), 2000)
+
+  // Daarna, als alles staat, alle projecten langs: ophalen, en één overzicht van
+  // wat er binnen te halen of weg te zetten valt. De ronde wacht zelf tot de
+  // accountkeuze klaar is en het scherm vrij is — zie gitRondeNaOpstart.
+  setTimeout(() => gitRondeNaOpstart(), 2500)
 
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return
@@ -12251,12 +12293,10 @@ async function wisselAccount(id, pin = null, opties = {}) {
   }
   showToast(I18N.t('accounts.gewisseld', { naam: (huidigAccount() || {}).naam || '' }))
   startGitPolling()
-  activeerGitVoorAccount().then(async () => {
-    await ververesAlleGitStaten(true)
-    // Net ingelogd: dit is hét moment om te horen dat er op de andere pc iets
-    // is gebeurd in het project dat nu opengaat.
-    controleerAchterstand()
-  })
+  // Net ingelogd: dit is hét moment om te horen dat er op de andere pc iets is
+  // gebeurd — in álle projecten van dit account, niet alleen het open project.
+  // Dezelfde ronde als na het opstarten; een ronde van het vorige account stopt.
+  activeerGitVoorAccount().then(() => gitRondeNaOpstart())
   return true
 }
 
@@ -16872,12 +16912,42 @@ async function wachtOpVrijVenster(maxMs = 3 * 60 * 1000) {
   return true
 }
 
+// Een vraag waar niemand om vroeg: iets wat de app zelf opmerkte (updates bij het
+// opstarten, een project dat achterloopt). Zo'n vraag
+//
+//   - wacht tot het scherm vrij is, en komt dus nooit over een andere vraag heen;
+//   - komt er niet meer bij zodra het afsluiten loopt;
+//   - en gaat vanzelf dicht als het afsluiten begint (zie sluitAchtergrondVraag).
+//
+// Het venster heeft één antwoordplek. Kwam zo'n vraag tijdens het afsluiten
+// binnen, dan nam hij die plek over, bleef de afsluitronde op een antwoord
+// wachten dat nooit kwam, en sloot de noodrem het venster zonder de rest van de
+// projecten te vragen.
+let achtergrondVraag = null
+
+async function vraagAchtergrond(opties) {
+  if (onveiligWerkBezig) return ''
+  if (!await wachtOpVrijVenster()) return ''
+  if (onveiligWerkBezig) return ''
+  const antwoord = vraagKeuze(opties)
+  const mijn = vraagKlaar
+  achtergrondVraag = mijn
+  try { return await antwoord } finally { if (achtergrondVraag === mijn) achtergrondVraag = null }
+}
+
+function sluitAchtergrondVraag() {
+  if (achtergrondVraag && vraagKlaar === achtergrondVraag) sluitVraag('')
+  achtergrondVraag = null
+}
+
 // Kijkt of de remote iets heeft wat deze pc niet heeft, en biedt aan het op te
 // halen. Draait bij het openen van een project, en na het inloggen voor het
 // project dat dan openstaat — dat is precies het moment waarop je wil weten dat
 // je gisteren op de andere pc verder bent gegaan.
 async function controleerAchterstand() {
   if (achterstandBezig) return
+  // De ronde na het opstarten loopt de projecten zelf al langs.
+  if (gitRondeLoopt || onveiligWerkBezig) return
   if ((settings.git || {}).fetchBijOpenen === false) return
   if (!await wachtOpVrijVenster()) return
 
@@ -16937,7 +17007,7 @@ async function biedAchterstandAan(p, pad, plan) {
     })
   }
 
-  const wijze = await vraagKeuze({
+  const wijze = await vraagAchtergrond({
     titel: I18N.t('git.achter.titel', { aantal: plan.behind, branch: plan.branch }),
     tekst: I18N.t(plan.uitEenLopend ? 'git.achter.tekstUitEen'
                 : plan.vuil        ? 'git.achter.tekstVuil'
@@ -16983,6 +17053,167 @@ async function biedAchterstandAan(p, pad, plan) {
   vraagProjectHertekenen()
 }
 
+// ── Na het opstarten: alle projecten langs ───────────────────────────────────
+// Eén ronde, pas als CommandDeck helemaal klaar is: account gekozen, geen vraag
+// meer op het scherm, en de eerste drukte van het tekenen voorbij. Dan:
+//
+//   1. elke map van elk project vers bekijken, ook wat niet openstaat;
+//   2. alles met een remote stil ophalen, twee tegelijk;
+//   3. één overzicht: waar staat nieuw werk klaar, en waar staat werk dat
+//      alleen op deze pc bestaat — met één knop om ze langs te lopen.
+//
+// Voorheen keek de start alleen naar het project dat toevallig openstond. De rest
+// merkte je pas als je het aanklikte, of niet.
+let gitRondeNr = 0
+let gitRondeLoopt = false
+// Geen netwerk bij het opstarten (wifi of VPN nog niet klaar): dan na deze tijd
+// nog één keer, voor alleen de mappen waar het ophalen mislukte.
+const GIT_RONDE_HERKANS_MS = 45 * 1000
+
+// Afsluiten of wisselen neemt het over; een ronde die nog loopt, stopt dan.
+function stopGitRonde() {
+  gitRondeNr++
+  gitRondeLoopt = false
+}
+
+async function gitRondeNaOpstart() {
+  const nr = ++gitRondeNr
+  const account = actiefAccount
+  const nogActueel = () => nr === gitRondeNr && account === actiefAccount && !onveiligWerkBezig
+  gitRondeLoopt = true
+  try {
+    if (!await wachtOpVrijVenster(30 * 60 * 1000)) return
+    await wanneerIdle(2000)
+    if (!nogActueel()) return
+
+    await toonStashMeldingBijStart()
+    if (!nogActueel()) return
+
+    // Eerst lokaal, een paar tegelijk: dat is in een paar tellen klaar.
+    await ververesAlleGitStatenNu()
+    if (!nogActueel()) return
+
+    // Dan het netwerk, naast elkaar: de koppelingen nakijken (één keer per
+    // sessie) en alles ophalen. Na elkaar kwam de melding pas na een halve minuut.
+    const [, mislukt] = await Promise.all([
+      controleerAlleKoppelingen(),
+      haalAlleProjectenOp(nogActueel),
+    ])
+    if (!nogActueel()) return
+
+    await meldOnafgemaakteKoppelingen()
+    if (!nogActueel()) return
+    await meldGitUpdatesBijStart(nogActueel)
+
+    if (!mislukt.length || !nogActueel()) return
+    // Tijdens het wachten mag het openen van een project gewoon zelf kijken.
+    gitRondeLoopt = false
+    await new Promise(r => setTimeout(r, GIT_RONDE_HERKANS_MS))
+    if (!nogActueel()) return
+    gitRondeLoopt = true
+    for (const pad of mislukt) delete gitLaatsteFetch[pad]
+    await haalAlleProjectenOp(nogActueel, mislukt)
+    if (!nogActueel()) return
+    await meldGitUpdatesBijStart(nogActueel, { alleenAchter: true, paden: mislukt })
+  } catch {
+    // Een fout hier mag nooit het opstarten of het afsluiten in de weg zitten.
+  } finally {
+    if (nr === gitRondeNr) gitRondeLoopt = false
+  }
+}
+
+// Alles met een remote ophalen. Stil: een mislukking wordt niet gemeld, alleen
+// onthouden. Geeft de mappen terug waar het niet lukte.
+async function haalAlleProjectenOp(nogActueel, alleen = null) {
+  if ((settings.git || {}).fetchBijOpenen === false) return []
+  const paden = (alleen || alleGitPaden())
+    .filter(pad => GitTools.magFetchen(gitStaten[pad], gitLaatsteFetch[pad]))
+  const mislukt = []
+  await metHoogstens(paden, 2, async (pad) => {
+    if (!nogActueel()) return
+    let r = null
+    try { r = await window.api.gitFetch(pad) } catch {}
+    gitLaatsteFetch[pad] = { t: Date.now(), ok: !!(r && r.ok) }
+    if (r && r.ok) await ververesGitPad(pad, true)
+    else mislukt.push(pad)
+  })
+  return mislukt
+}
+
+// Welke mappen vragen aandacht? Nieuw werk op de remote, en — tenzij de
+// afsluitcontrole uit staat — werk dat alleen hier staat.
+function gitAandachtLijst(opties = {}) {
+  const lokaalOok = !opties.alleenAchter
+    && GitTools.afsluitInstelling((settings.git || {}).afsluiten) !== 'uit'
+  const gezien = new Set()
+  const uit = []
+  for (const p of projects) {
+    for (const loc of projectLocaties(p)) {
+      const pad = loc.pad
+      if (!pad || gezien.has(pad)) continue
+      if (opties.paden && !opties.paden.includes(pad)) continue
+      gezien.add(pad)
+      const staat = gitStaten[pad]
+      if (!staat || !staat.isRepo) continue
+      const plan = GitTools.achterstandKeuzes(staat)
+      const redenen = lokaalOok ? GitTools.onveiligeRedenen(staat) : []
+      if (!plan && !redenen.length) continue
+      uit.push({ project: p, loc, pad, naam: locNaam(p, loc), plan, redenen, lokaalOok })
+    }
+  }
+  return uit
+}
+
+async function meldGitUpdatesBijStart(nogActueel, opties = {}) {
+  const lijst = gitAandachtLijst(opties)
+  if (!lijst.length) return
+
+  const regels = lijst.map(x => {
+    const delen = []
+    if (x.plan) delen.push(I18N.t('git.startRonde.achter', { aantal: x.plan.behind }))
+    for (const r of x.redenen) delen.push(I18N.t('git.afsluit.reden.' + r.soort, { aantal: r.aantal }))
+    return I18N.t('git.startRonde.regel', { project: x.naam, detail: delen.join(', ') })
+  })
+  const keuze = await vraagAchtergrond({
+    titel: I18N.t('git.startRonde.titel', { aantal: lijst.length }),
+    tekst: I18N.t('git.startRonde.tekst'),
+    regels,
+    knoppen: [
+      { label: I18N.t('git.startRonde.later'), waarde: '' },
+      { label: I18N.t('git.startRonde.bekijken'), waarde: 'kijk', soort: 'primair' },
+    ],
+  })
+  if (keuze !== 'kijk') return
+  await loopGitAandachtLangs(lijst, nogActueel)
+}
+
+// Eén voor één, in de volgorde van het overzicht. Eerst binnenhalen wat aan de
+// andere kant klaarstaat — pushen lukt toch pas als je bij bent — en daarna het
+// eigen werk vastleggen en pushen.
+async function loopGitAandachtLangs(lijst, nogActueel) {
+  for (let i = 0; i < lijst.length; i++) {
+    if (!nogActueel()) return
+    const x = lijst[i]
+    const p = projects.find(q => q.id === x.project.id)
+    if (!p) continue
+    if (p.activeLocation !== x.loc.index) { p.activeLocation = x.loc.index; saveProjects() }
+    await selectProject(p.id)
+
+    const staat = await ververesGitPad(x.pad, true)
+    const plan = GitTools.achterstandKeuzes(staat)
+    if (plan) await biedAchterstandAan(p, x.pad, plan)
+    if (!nogActueel()) return
+
+    if (!x.lokaalOok) continue
+    const na = await ververesGitPad(x.pad, true)
+    if (!GitTools.onveiligeRedenen(na).length) continue
+    const antwoord = await vraagOverProject(
+      { id: p.id, naam: x.naam, pad: x.pad, locIndex: x.loc.index, staat: na },
+      { reden: 'opstart', nr: i + 1, totaal: lijst.length })
+    if (antwoord === 'blijven') return
+  }
+}
+
 // ── Onveilig git-werk: afsluiten én accountwisselen ──────────────────────────
 // Het main-proces houdt het sluiten tegen en vraagt ons om te kijken. Dezelfde
 // ronde draait bij het wisselen van account: per project een eigen vraag, zodat
@@ -17011,7 +17242,9 @@ async function controleerOnveiligWerk(reden) {
   // vorige moment, en bij "niet opslaan" stond er nog vuile tekst in beeld.
   if ((reden === 'wisselen' || reden === 'afsluiten') && lezerStaat.tabs.length) sluitLezerStil()
 
-  await ververesAlleGitStaten(true)
+  // Alle projecten, alle locaties, vers — en zonder op het netwerk te wachten.
+  // Wat hier niet in de lijst komt, wordt ook niet gevraagd.
+  await ververesAlleGitStatenNu(() => hartslagAfsluiten())
 
   const instelling = GitTools.afsluitInstelling((settings.git || {}).afsluiten)
   const teVragen = GitTools.teVragenProjecten(gitProjectenLijst(), instelling)
@@ -17027,8 +17260,19 @@ async function controleerOnveiligWerk(reden) {
 
 async function controleerVoorAfsluiten(info = {}) {
   hartslagAfsluiten()
+  // Vlak na het opstarten kan het afsluiten er eerder zijn dan de projecten.
+  // Even wachten (met hartslag); lukt het opstarten nooit, dan toch door.
+  const initTot = Date.now() + 8000
+  while (!initKlaar && Date.now() < initTot) {
+    hartslagAfsluiten()
+    await new Promise(r => setTimeout(r, 150))
+  }
   await wachtOpOnveiligWerk()
   onveiligWerkBezig = true
+  // De ronde van na het opstarten stopt hier, en een vraag die die nog open had
+  // staan gaat dicht: vanaf nu is het venster van de afsluitcontrole.
+  stopGitRonde()
+  sluitAchtergrondVraag()
   try {
     const uitkomst = await controleerOnveiligWerk('afsluiten')
     if (uitkomst === 'blijven') { window.api.gitAfsluitenAf(); return }
@@ -17050,8 +17294,13 @@ async function controleerVoorAfsluiten(info = {}) {
 }
 
 // Geeft 'door' (volgende project) of 'blijven' (afsluiten/wisselen afbreken).
+//
+// Bij het opstarten ('opstart') is het dezelfde vraag, maar zonder haast: niets
+// gaat dicht, dus "overslaan" is geen gevaarlijke knop en "blijven" heet daar
+// "stoppen" (niet verder langs de rest).
 async function vraagOverProject(project, opties = {}) {
-  const prefix = opties.reden === 'wisselen' ? 'git.wissel' : 'git.afsluit'
+  const opstart = opties.reden === 'opstart'
+  const prefix = opties.reden === 'wisselen' ? 'git.wissel' : opstart ? 'git.startWerk' : 'git.afsluit'
   const nr = opties.nr || 1
   const totaal = opties.totaal || 1
   const redenen = GitTools.onveiligeRedenen(project.staat)
@@ -17063,15 +17312,15 @@ async function vraagOverProject(project, opties = {}) {
   let tekst = I18N.t(prefix + '.tekst')
   if (totaal > 1) tekst += ' ' + I18N.t('git.afsluit.teller', { n: nr, totaal })
 
-  const keuze = await vraagKeuze({
+  const keuze = await (opstart ? vraagAchtergrond : vraagKeuze)({
     titel: I18N.t(prefix + '.titel', { project: project.naam }),
     tekst,
     regels,
     // Onder elkaar (vier keuzes), dus achterste eerst: commit & push bovenaan,
     // blijven onderaan, en de rode knop niet direct onder de aanbevolen.
     knoppen: [
-      { label: I18N.t('git.afsluit.blijven'), waarde: 'blijven' },
-      { label: I18N.t(prefix + '.tochAf'), waarde: 'door', soort: 'gevaar' },
+      { label: I18N.t(opstart ? 'git.startWerk.stoppen' : 'git.afsluit.blijven'), waarde: 'blijven' },
+      { label: I18N.t(prefix + '.tochAf'), waarde: 'door', soort: opstart ? '' : 'gevaar' },
       { label: I18N.t('git.afsluit.terminal'), waarde: 'terminal' },
       { label: I18N.t('git.afsluit.commitPush'), waarde: 'commitpush', soort: 'primair' },
     ],
@@ -17138,7 +17387,7 @@ async function vraagOverProject(project, opties = {}) {
     const toch = await vraagJaNee(
       I18N.t('git.afsluit.misluktTitel'),
       I18N.t(prefix + '.misluktTekst', { project: project.naam }),
-      I18N.t(prefix + '.tochAf'), 'gevaar')
+      I18N.t(prefix + '.tochAf'), opstart ? 'primair' : 'gevaar')
     return toch ? 'door' : 'blijven'
   }
   return 'door'
@@ -17170,7 +17419,7 @@ async function toonStashMeldingBijStart() {
       }
     }
 
-    const keuze = await vraagKeuze({
+    const keuze = await vraagAchtergrond({
       titel: I18N.t('git.stashMelding.titel'),
       tekst: I18N.t('git.stashMelding.tekst'),
       regels: m.projecten.map(p => p.naam),

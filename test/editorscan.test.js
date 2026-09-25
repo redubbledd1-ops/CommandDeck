@@ -88,14 +88,23 @@ const echteExists = fs.existsSync
 fs.existsSync = (p) => { const n = naarNep(p); return echteExists(n === null ? p : n) }
 const echteReaddir = fs.readdirSync
 fs.readdirSync = (p, o) => { const n = naarNep(p); return echteReaddir(n === null ? p : n, o) }
+// De scan draait async (anders staat het venster seconden stil), dus ook de
+// beloofde varianten omleiden.
+const echteAccess = fs.promises.access
+fs.promises.access = (p, m) => { const n = naarNep(p); return echteAccess(n === null ? p : n, m) }
+const echteReaddirP = fs.promises.readdir
+fs.promises.readdir = (p, o) => { const n = naarNep(p); return echteReaddirP(n === null ? p : n, o) }
 
 require(path.join(REAL, 'main.js'))
 Module._load = orig
 const call = (n, a) => handlers[n](null, a)
 
-const gevonden = call('app:scanEditors')
+;(async () => {
+const gevonden = await call('app:scanEditors')
 fs.existsSync = echteExists
 fs.readdirSync = echteReaddir
+fs.promises.access = echteAccess
+fs.promises.readdir = echteReaddirP
 process.env.PATH = echtePath
 if (echteLocal) process.env.LOCALAPPDATA = echteLocal
 
@@ -133,6 +142,25 @@ t('handmatig zoeken vraagt Store-apps, automatisch niet',
   /scanEditors\(\{ storeApps: !automatisch \}\)/.test(rendererBron)
   && /zoekEditors\(\{ stil: true, automatisch: true \}\)/.test(rendererBron))
 
+// De scan draait vlak na het opstarten. Synchroon hield hij het venster bij een
+// koude schijf ruim vier seconden vast: niet eens te verslepen.
+{
+  const scanBlok = mainBron.slice(
+    mainBron.indexOf('// ── Bekende editors opsporen'),
+    mainBron.indexOf("ipcMain.handle('dialog:pickExe'"))
+  t('de editorscan blokkeert de hoofdthread niet',
+    scanBlok.length > 500
+    && !/existsSync|readdirSync|statSync/.test(scanBlok)
+    && /ipcMain\.handle\('app:scanEditors', async/.test(scanBlok)
+    && /await scanEditorsOpSchijf\(\)/.test(scanBlok))
+  const menuBlok = (mainBron.match(/async function scanStartMenu\([\s\S]*?\n\}/) || [''])[0]
+  t('het startmenu wordt async gelezen, met adempauzes',
+    /fs\.promises\.readdir/.test(menuBlok) && /setImmediate/.test(menuBlok) && !/existsSync/.test(menuBlok))
+  t('een netwerkletter die niet antwoordt houdt de scan niet op',
+    /async function programmaWortels[\s\S]{0,300}bestaatAsync\(s, 2000\)/.test(mainBron))
+}
+
 console.log('\n  gevonden: ' + gevonden.map(g => `${g.label} (${g.bron})`).join(', '))
 console.log(ok ? '\nALLE TESTS GESLAAGD' : '\nER ZIJN TESTS GEFAALD')
 process.exit(ok ? 0 : 1)
+})()

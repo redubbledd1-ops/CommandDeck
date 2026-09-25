@@ -115,6 +115,12 @@ function createWindow() {
   win.loadFile('index.html')
   // Pas zoeken naar een update als het venster er staat; de start zelf merkt er niets van.
   win.webContents.once('did-finish-load', () => updater.planCheck())
+  // Een nieuwe pagina moet zich opnieuw melden voor de afsluitcontrole.
+  win.webContents.on('did-start-navigation', (d, _url, inPlace, hoofdframe) => {
+    const hoofd = d && typeof d.isMainFrame === 'boolean' ? d.isMainFrame : hoofdframe
+    const zelfde = d && typeof d.isSameDocument === 'boolean' ? d.isSameDocument : inPlace
+    if (hoofd && !zelfde) afsluitLuistert = false
+  })
 
   // Chromium LNA/permissions-policy mag loopback stil blokkeren. Deze app is
   // lokaal en vertrouwd: lokale netwerktoegang (site-preview) mag altijd.
@@ -214,9 +220,27 @@ function startAfsluitControle(aanleiding) {
   afsluitenGevraagd = true
   // De aanleiding gaat mee: bij een Windows-afsluiten dat wij hebben stilgezet
   // hoort er achteraf iets anders te gebeuren dan bij het kruisje.
-  win.webContents.send('git:controleerVoorAfsluiten', { aanleiding: aanleiding || 'venster' })
+  const info = { aanleiding: aanleiding || 'venster' }
+  // Luistert de renderer nog niet (vlak na het opstarten), dan zou dit bericht
+  // in het niets verdwijnen en sloot de noodrem later zonder één vraag. Dan
+  // bewaren we het tot hij zich meldt.
+  if (afsluitLuistert) win.webContents.send('git:controleerVoorAfsluiten', info)
+  else afsluitWachtend = info
   startAfsluitNoodrem(AFSLUIT_NOODREM_MS)
 }
+
+let afsluitLuistert = false
+let afsluitWachtend = null
+
+ipcMain.on('git:afsluitLuistert', () => {
+  afsluitLuistert = true
+  const info = afsluitWachtend
+  afsluitWachtend = null
+  if (!info || !afsluitenGevraagd || afsluitenBevestigd) return
+  if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return
+  win.webContents.send('git:controleerVoorAfsluiten', info)
+  startAfsluitNoodrem(AFSLUIT_NOODREM_MS)
+})
 
 ipcMain.on('git:afsluitenMag', () => {
   if (afsluitNoodrem) { clearTimeout(afsluitNoodrem); afsluitNoodrem = null }
@@ -264,6 +288,9 @@ app.whenReady().then(() => {
   if (process.platform === 'win32') {
     try { ververWindowsPath() } catch {}
   }
+  // Alvast weten of git er is, zonder te blokkeren. Anders doet de eerste
+  // git-vraag van de renderer dat synchroon, midden in het opstarten.
+  heeftGitAsync().catch(() => {})
 })
 
 // De AI-kant registreert zijn eigen ipc-handlers. Alles wat dienst-specifiek is
@@ -1060,14 +1087,22 @@ function losSnelkoppelingOp(p) {
 // bestanden zijn. Het startmenu bevat wél echte snelkoppelingen, en die wijzen
 // naar de programma's zelf. Store-apps (Claude, …) zetten vaak géén .lnk in
 // Start Menu\Programs — die komen via Get-StartApps / WindowsApps erbij.
-function scanStartMenu(dir, uit, diepte = 0) {
+// Async, met af en toe een adempauze. readShortcutLink bestaat alleen
+// synchroon; één snelkoppeling kost weinig, honderd achter elkaar bij een koude
+// schijf kostten samen seconden — en in die tijd kon je het venster niet eens
+// verslepen. Vandaar: na elke paar milliseconden de hoofdthread even vrijgeven.
+async function scanStartMenu(dir, uit, diepte = 0, klok = { sinds: Date.now() }) {
   if (diepte > 4 || uit.length > 800) return
   let items = []
-  try { items = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
+  try { items = await fs.promises.readdir(dir, { withFileTypes: true }) } catch { return }
 
   for (const it of items) {
+    if (Date.now() - klok.sinds > 12) {
+      await new Promise(r => setImmediate(r))
+      klok.sinds = Date.now()
+    }
     const vol = path.join(dir, it.name)
-    if (it.isDirectory()) { scanStartMenu(vol, uit, diepte + 1); continue }
+    if (it.isDirectory()) { await scanStartMenu(vol, uit, diepte + 1, klok); continue }
     if (!/\.lnk$/i.test(it.name)) continue
 
     const naam = it.name.replace(/\.lnk$/i, '')
@@ -1076,7 +1111,7 @@ function scanStartMenu(dir, uit, diepte = 0) {
     try {
       const link = shell.readShortcutLink(vol)
       if (!link.target || !/\.exe$/i.test(link.target)) continue
-      const bestaat = fs.existsSync(link.target)
+      const bestaat = await bestaatAsync(link.target)
       const storeApp = /\\WindowsApps\\/i.test(link.target)
       // Store-installaties: bestaatSync faalt soms door ACL terwijl de exe wél
       // startbaar is. Die houden we; klassieke paden zonder bestand skippen we.
@@ -1227,14 +1262,19 @@ function lijstStartAppsAsync() {
   })
 }
 
-ipcMain.handle('app:listPrograms', async () => {
+// De twee startmenu's die bestaan (alle gebruikers, en deze gebruiker).
+async function startMenuMappen() {
   const mappen = [
     path.join(process.env.ProgramData || 'C:\\ProgramData', 'Microsoft', 'Windows', 'Start Menu', 'Programs'),
     path.join(process.env.APPDATA || '', 'Microsoft', 'Windows', 'Start Menu', 'Programs'),
-  ].filter(d => d && fs.existsSync(d))
+  ]
+  const er = await Promise.all(mappen.map(d => bestaatAsync(d)))
+  return mappen.filter((d, i) => d && er[i])
+}
 
+ipcMain.handle('app:listPrograms', async () => {
   const gevonden = []
-  mappen.forEach(d => scanStartMenu(d, gevonden))
+  for (const d of await startMenuMappen()) await scanStartMenu(d, gevonden)
   // Store-apps zonder .lnk (Claude Desktop e.d.)
   for (const p of await lijstStartAppsAsync()) gevonden.push(p)
 
@@ -1248,28 +1288,32 @@ ipcMain.handle('app:listPrograms', async () => {
 // ── Bekende editors opsporen ──────────────────────────────────────────────────
 // Drie wegen, van goedkoop naar grondig: het startmenu (dekt de meeste
 // installaties), de gebruikelijke installatiemappen op élke schijf, en PATH.
-function programmaWortels() {
+//
+// Alles async. Dit draait vlak na het opstarten, en synchroon kostte het bij een
+// koude schijf ruim vier seconden waarin het venster nergens op reageerde — ook
+// niet op slepen. Elke controle heeft daarbij een limiet waar een netwerkletter
+// in het spel kan zijn: een server die weg is, mag de scan niet ophouden.
+async function programmaWortels() {
+  const schijven = Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i) + ':\\')
+  const er = await Promise.all(schijven.map(s => bestaatAsync(s, 2000)))
   const wortels = []
-  for (let i = 65; i <= 90; i++) {
-    const schijf = String.fromCharCode(i) + ':\\'
-    try { if (!fs.existsSync(schijf)) continue } catch { continue }
-    for (const naam of ['Program Files', 'Program Files (x86)', 'Programs', 'Apps']) {
-      const p = path.join(schijf, naam)
-      try { if (fs.existsSync(p)) wortels.push(p) } catch {}
-    }
+  for (const schijf of schijven.filter((s, i) => er[i])) {
+    const kandidaten = ['Program Files', 'Program Files (x86)', 'Programs', 'Apps'].map(n => path.join(schijf, n))
+    const ook = await Promise.all(kandidaten.map(p => bestaatAsync(p, 2000)))
+    kandidaten.forEach((p, i) => { if (ook[i]) wortels.push(p) })
   }
   // Veel editors installeren zichzelf tegenwoordig zonder beheerdersrechten
   for (const env of ['LOCALAPPDATA', 'APPDATA', 'ProgramW6432']) {
     const p = process.env[env]
-    try { if (p && fs.existsSync(p)) wortels.push(p) } catch {}
+    if (p && await bestaatAsync(p)) wortels.push(p)
   }
   return wortels
 }
 
 // Nieuwste eerst, zodat "IntelliJ IDEA 2024.3" boven "2023.2" komt
-function nieuwsteMap(basis, patroon) {
+async function nieuwsteMap(basis, patroon) {
   try {
-    const kandidaten = fs.readdirSync(basis, { withFileTypes: true })
+    const kandidaten = (await fs.promises.readdir(basis, { withFileTypes: true }))
       .filter(d => d.isDirectory() && patroon.test(d.name))
       .map(d => d.name)
       .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
@@ -1277,69 +1321,62 @@ function nieuwsteMap(basis, patroon) {
   } catch { return null }
 }
 
-function zoekEditorOpSchijf(ed, wortels) {
+// Alle plekken tegelijk bekijken, maar de volgorde laten winnen: de eerste
+// wortel (en daarbinnen het eerste pad) die raak is, net als voorheen.
+async function zoekEditorOpSchijf(ed, wortels) {
+  const pogingen = []
   for (const wortel of wortels) {
-    for (const rel of (ed.paden || [])) {
+    for (const rel of [...(ed.paden || []), ...(ed.gebruiker || [])]) {
       const p = path.join(wortel, rel)
-      try { if (fs.existsSync(p)) return p } catch {}
-    }
-    for (const rel of (ed.gebruiker || [])) {
-      const p = path.join(wortel, rel)
-      try { if (fs.existsSync(p)) return p } catch {}
+      pogingen.push(bestaatAsync(p).then(ja => (ja ? p : null)))
     }
     if (ed.versieMap) {
       const basis = ed.versieMap.onder ? path.join(wortel, ed.versieMap.onder) : wortel
-      const map = nieuwsteMap(basis, ed.versieMap.patroon)
-      if (map) {
+      pogingen.push(nieuwsteMap(basis, ed.versieMap.patroon).then(async (map) => {
+        if (!map) return null
         const p = path.join(map, ed.versieMap.exe)
-        try { if (fs.existsSync(p)) return p } catch {}
-      }
+        return (await bestaatAsync(p)) ? p : null
+      }))
     }
   }
-  return null
+  return (await Promise.all(pogingen)).find(Boolean) || null
 }
 
-function zoekInPad(naam) {
+async function zoekInPad(naam) {
   const padWaarde = process.platform === 'win32' ? windowsMergedPath() : (process.env.PATH || '')
+  const kandidaten = []
   for (const d of padWaarde.split(path.delimiter)) {
-    for (const ext of ['.exe', '.cmd', '.bat']) {
-      try {
-        const p = path.join(d, naam + ext)
-        if (fs.existsSync(p)) return p
-      } catch {}
-    }
+    if (!d) continue
+    for (const ext of ['.exe', '.cmd', '.bat']) kandidaten.push(path.join(d, naam + ext))
   }
-  return null
+  const er = await Promise.all(kandidaten.map(p => bestaatAsync(p, 2000)))
+  return kandidaten.find((p, i) => er[i]) || null
 }
 
 // npm-global `claude.cmd` roept bin\claude.exe aan. Ontbreekt die stub (mislukte
 // update), dan faalt starten met "…\bin\claude.exe is not recognized".
-function claudeCmdDoelOntbreekt(pad) {
+async function claudeCmdDoelOntbreekt(pad) {
   if (!pad || !/claude\.cmd$/i.test(pad)) return false
   const exe = path.join(path.dirname(pad), 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe')
-  try { return !fs.existsSync(exe) } catch { return true }
+  return !(await bestaatAsync(exe))
 }
 
-function herstelClaudeCodePad(pad) {
+async function herstelClaudeCodePad(pad) {
   if (!pad) return null
-  if (claudeCmdDoelOntbreekt(pad)) {
+  if (await claudeCmdDoelOntbreekt(pad)) {
     const arch = process.arch === 'arm64' ? 'arm64' : 'x64'
     const native = path.join(
       path.dirname(pad), 'node_modules', '@anthropic-ai', 'claude-code',
       'node_modules', `@anthropic-ai/claude-code-win32-${arch}`, 'claude.exe')
-    try { if (fs.existsSync(native)) return native } catch {}
-    return null
+    return (await bestaatAsync(native)) ? native : null
   }
   // Vast .exe-pad dat weg is: probeer native sibling of laat caller PATH proberen.
-  if (/\.exe$/i.test(pad)) {
-    try { if (fs.existsSync(pad)) return pad } catch {}
-    return null
-  }
+  if (/\.exe$/i.test(pad)) return (await bestaatAsync(pad)) ? pad : null
   return pad
 }
 
-function scanEditorsOpSchijf() {
-  const wortels = programmaWortels()
+async function scanEditorsOpSchijf() {
+  const wortels = await programmaWortels()
 
   // Schijf eerst: Get-StartApps (powershell) kan op een verse pc 20s hangen.
   // Cursor/VS Code staan meestal gewoon onder LocalAppData; die mogen niet
@@ -1352,16 +1389,13 @@ function scanEditorsOpSchijf() {
     gevonden.push({ id: ed.id, label: ed.label, path: pad, bron })
   }
 
-  for (const ed of EDITORS) zet(ed, zoekEditorOpSchijf(ed, wortels), 'installatiemap')
+  const opSchijf = await Promise.all(EDITORS.map(ed => zoekEditorOpSchijf(ed, wortels)))
+  EDITORS.forEach((ed, i) => zet(ed, opSchijf[i], 'installatiemap'))
 
   // Het startmenu levert naam + pad; dat vangt installaties op onbekende plekken
   let startMenu = []
   try {
-    const mappen = [
-      path.join(process.env.ProgramData || 'C:\\ProgramData', 'Microsoft', 'Windows', 'Start Menu', 'Programs'),
-      path.join(process.env.APPDATA || '', 'Microsoft', 'Windows', 'Start Menu', 'Programs'),
-    ].filter(d => d && fs.existsSync(d))
-    mappen.forEach(d => scanStartMenu(d, startMenu))
+    for (const d of await startMenuMappen()) await scanStartMenu(d, startMenu)
   } catch {}
   for (const ed of EDITORS) {
     if (gezien.has(ed.id) || !ed.startMenu) continue
@@ -1371,7 +1405,7 @@ function scanEditorsOpSchijf() {
 
   for (const ed of EDITORS) {
     if (!gezien.has(ed.id) && ed.cli) {
-      const p = zoekInPad(ed.cli)
+      const p = await zoekInPad(ed.cli)
       if (p) zet(ed, p, 'PATH')
     }
   }
@@ -1383,11 +1417,11 @@ function scanEditorsOpSchijf() {
   if (claudeIdx >= 0) {
     const ed = EDITORS.find(e => e.id === 'claudeCode')
     const pad = gevonden[claudeIdx].path
-    const hersteld = herstelClaudeCodePad(pad)
+    const hersteld = await herstelClaudeCodePad(pad)
     if (hersteld) gevonden[claudeIdx].path = hersteld
-    else if (!fs.existsSync(pad) || claudeCmdDoelOntbreekt(pad)) {
-      const viaPad = ed && ed.cli && zoekInPad(ed.cli)
-      if (viaPad && !claudeCmdDoelOntbreekt(viaPad)) {
+    else if (!(await bestaatAsync(pad)) || await claudeCmdDoelOntbreekt(pad)) {
+      const viaPad = ed && ed.cli && await zoekInPad(ed.cli)
+      if (viaPad && !(await claudeCmdDoelOntbreekt(viaPad))) {
         gevonden[claudeIdx].path = viaPad
         gevonden[claudeIdx].bron = 'PATH'
       } else {
@@ -1418,8 +1452,8 @@ async function voegStoreAppsAanScan(gevonden) {
   return gevonden
 }
 
-ipcMain.handle('app:scanEditors', (e, opties = {}) => {
-  const gevonden = scanEditorsOpSchijf()
+ipcMain.handle('app:scanEditors', async (e, opties = {}) => {
+  const gevonden = await scanEditorsOpSchijf()
   if (!(opties && opties.storeApps)) return gevonden
   return voegStoreAppsAanScan(gevonden)
 })
@@ -1901,22 +1935,67 @@ function gitUit(dir, args) {
 // Zelfde als gitUit, maar zonder de hoofdthread te blokkeren. git:info draait
 // tijdens het tekenen; execFileSync daar laat het hele venster stilstaan.
 function gitUitAsync(dir, args, env) {
+  return gitAsync(dir, args, { env }).then(({ uit, fout }) => {
+    if (fout && fout.code === 'ENOENT') return null
+    return fout ? '' : uit
+  })
+}
+
+// Met de fout erbij. Nodig waar "git zei nee" (geen repo) iets anders betekent
+// dan "git gaf geen antwoord" (te traag, afgebroken): het tweede mag nooit als
+// "niets aan de hand" doorgaan, anders valt een project stil uit de controle.
+function gitAsync(dir, args, opties = {}) {
+  return execFileAsync('git', args, {
+    cwd: dir, timeout: opties.timeout || 4000, env: opties.env || childEnv(),
+  })
+}
+
+// execFile als belofte. Voor alles wat anders met execFileSync de hoofdthread
+// stilzet: zolang die vastzit reageert het venster nergens op — ook slepen niet.
+// De fout krijgt stderr mee, net als bij execFileSync.
+function execFileAsync(prog, args, opties = {}) {
   return new Promise((resolve) => {
-    execFile('git', args, {
-      cwd: dir, encoding: 'utf8', timeout: 4000, windowsHide: true,
-      env: env || childEnv(),
-    }, (err, stdout) => {
-      if (err && err.code === 'ENOENT') resolve(null)
-      else if (err) resolve('')
-      else resolve(stdout)
+    execFile(prog, args, { encoding: 'utf8', windowsHide: true, ...opties }, (fout, uit, err) => {
+      if (fout) fout.stderr = String(err || '')
+      resolve({ fout: fout || null, uit: String(uit || ''), stderr: String(err || '') })
     })
   })
+}
+
+// Bestaat dit pad? Zonder de hoofdthread vast te zetten: een koude schijf of een
+// netwerkletter die niet antwoordt kost synchroon zo seconden. Met `maxMs` komt
+// er null terug als het antwoord niet op tijd is — "weet ik niet", geen nee.
+function bestaatAsync(p, maxMs = 0) {
+  const vraag = fs.promises.access(p).then(() => true, () => false)
+  return maxMs ? metTijdslimiet(vraag, maxMs, null) : vraag
+}
+
+function metTijdslimiet(belofte, ms, anders) {
+  let klok
+  return Promise.race([belofte, new Promise(r => { klok = setTimeout(() => r(anders), ms) })])
+    .finally(() => clearTimeout(klok))
 }
 
 let gitAanwezig = null
 function heeftGit() {
   if (gitAanwezig === null) gitAanwezig = gitUit(os.homedir(), ['--version']) !== null
   return gitAanwezig
+}
+
+// Hetzelfde antwoord zonder te blokkeren. Wordt bij de start meteen gevuld, zodat
+// heeftGit() daarna alleen nog het onthouden antwoord teruggeeft.
+let gitAanwezigBezig = null
+function heeftGitAsync() {
+  if (gitAanwezig !== null) return Promise.resolve(gitAanwezig)
+  if (!gitAanwezigBezig) {
+    gitAanwezigBezig = gitAsync(os.homedir(), ['--version']).then(({ fout }) => {
+      // Zelfde regel als gitUit: alleen ENOENT betekent "geen git".
+      gitAanwezig = !(fout && fout.code === 'ENOENT')
+      gitAanwezigBezig = null
+      return gitAanwezig
+    })
+  }
+  return gitAanwezigBezig
 }
 
 // ── Werkt de koppeling ook echt? ─────────────────────────────────────────────
@@ -1974,12 +2053,14 @@ function controleerRemote(dir, remote) {
 // de poll-lus. Antwoord is dezelfde vorm als wat git:info meestuurt.
 ipcMain.handle('git:remoteCheck', async (_, dir) => {
   if (!padToegestaan(dir)) return { ok: null, reden: 'onbekend' }
-  if (!dir || !fs.existsSync(dir) || !heeftGit()) return { ok: null, reden: 'onbekend' }
+  if (!dir || !fs.existsSync(dir) || !(await heeftGitAsync())) return { ok: null, reden: 'onbekend' }
 
-  const remoteLijst = GitTools.parseRemoteRegels(gitUit(dir, ['remote', '-v']))
+  // Async: deze ronde loopt bij het opstarten over álle projecten, en twee
+  // synchrone git-aanroepen per project zetten het venster telkens even vast.
+  const remoteLijst = GitTools.parseRemoteRegels(await gitUitAsync(dir, ['remote', '-v']))
   if (!remoteLijst.length) return { ok: null, reden: '', geen: true }
 
-  const st = GitTools.parseStatusV2(gitUit(dir, ['status', '--porcelain=v2', '--branch']))
+  const st = GitTools.parseStatusV2(await gitUitAsync(dir, ['status', '--porcelain=v2', '--branch']))
   const staat = GitTools.maakStaat({ beschikbaar: true, isRepo: true, remoteLijst, upstream: st.upstream })
   const remote = staat.remote
   const url = staat.remoteUrl
@@ -2118,26 +2199,36 @@ function padToegestaan(dir) {
 }
 
 ipcMain.handle('git:info', async (_, dir) => {
-  if (!padToegestaan(dir)) return GitTools.maakStaat({ beschikbaar: heeftGit(), isRepo: false })
-  if (!dir || !fs.existsSync(dir)) return GitTools.maakStaat({ beschikbaar: heeftGit(), isRepo: false })
-  if (!heeftGit()) return GitTools.maakStaat({ beschikbaar: false })
+  const gitEr = await heeftGitAsync()
+  if (!padToegestaan(dir)) return GitTools.maakStaat({ beschikbaar: gitEr, isRepo: false })
+  if (!dir || !fs.existsSync(dir)) return GitTools.maakStaat({ beschikbaar: gitEr, isRepo: false })
+  if (!gitEr) return GitTools.maakStaat({ beschikbaar: false })
 
-  const binnen = String(await gitUitAsync(dir, ['rev-parse', '--is-inside-work-tree']) || '').trim()
-  if (binnen !== 'true') return GitTools.maakStaat({ beschikbaar: true, isRepo: false })
+  // null = "weet ik nu niet". De renderer houdt dan vast wat hij al wist. Een
+  // git die te traag is (drukke start, vlak voor het afsluiten) is geen bewijs
+  // dat hier geen repo staat of dat alles schoon is — en precies dat liet
+  // projecten stil uit de afsluitcontrole vallen.
+  const binnen = await gitAsync(dir, ['rev-parse', '--is-inside-work-tree'])
+  if (binnen.fout && binnen.fout.killed) return null
+  if (binnen.uit.trim() !== 'true') return GitTools.maakStaat({ beschikbaar: true, isRepo: false })
 
   // Los van elkaar: vijf korte git-aanroepen naast elkaar in plaats van zes
-  // keer achter elkaar de hoofdthread vastzetten.
+  // keer achter elkaar de hoofdthread vastzetten. Status mag langer duren: in
+  // een grote map is vier seconden bij een koude schijf zo op.
   const env = childEnv()
-  const [remoteUit, statusUit, stashUit, identUit, langeUit] = await Promise.all([
+  const [remoteUit, status, stashUit, identUit, langeUit] = await Promise.all([
     gitUitAsync(dir, ['remote', '-v'], env),
-    gitUitAsync(dir, ['status', '--porcelain=v2', '--branch'], env),
+    gitAsync(dir, ['status', '--porcelain=v2', '--branch'], { env, timeout: 20000 }),
     gitUitAsync(dir, ['stash', 'list'], env),
     gitUitAsync(dir, ['config', '--get-regexp', '^user\\.(name|email)$'], env),
     gitUitAsync(dir, ['config', '--get', 'core.longpaths'], env),
   ])
+  // Zonder status weten we niet of er werk openstaat. Een lege uitslag zou
+  // hier "schoon" betekenen, en dan vraagt het afsluiten nergens meer naar.
+  if (status.fout) return null
 
   const remoteLijst = GitTools.parseRemoteRegels(remoteUit)
-  const st = GitTools.parseStatusV2(statusUit)
+  const st = GitTools.parseStatusV2(status.uit)
   const stashes = GitTools.parseStashAantal(stashUit)
   const ident = GitTools.parseIdentiteit(identUit)
   const gitignore = fs.existsSync(path.join(dir, '.gitignore'))
@@ -2261,17 +2352,16 @@ const UPDATE_SLOT_VERLOPEN_MS = 10 * 60e3
 // Draait er nog een git op deze pc? Niet te zeggen bij wélke map hij hoort —
 // Windows geeft geen werkmap prijs — dus dit is een aanwijzing, geen bewijs.
 // Daarom staat het aantal in de vraag en beslist de gebruiker.
-function gitProcessenOpDezePc() {
+// Async: tasklist kost al snel een tiende seconde, en de opruimronde draait
+// bij het opstarten — precies wanneer je het venster wilt verslepen.
+async function gitProcessenOpDezePc() {
   if (process.platform !== 'win32') return null
-  try {
-    const uit = execFileSync('tasklist', ['/FI', 'IMAGENAME eq git.exe', '/NH', '/FO', 'CSV'], {
-      encoding: 'utf8', timeout: 4000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'],
-    })
-    return (String(uit).match(/^"git\.exe"/gmi) || []).length
-  } catch { return null }
+  const { fout, uit } = await execFileAsync('tasklist', ['/FI', 'IMAGENAME eq git.exe', '/NH', '/FO', 'CSV'], { timeout: 4000 })
+  if (fout) return null
+  return (uit.match(/^"git\.exe"/gmi) || []).length
 }
 
-ipcMain.handle('git:slotInfo', (_, dir) => {
+ipcMain.handle('git:slotInfo', async (_, dir) => {
   if (!padToegestaan(dir) || !dir) return { bestaat: false }
   const slot = gitSlotPad(dir)
   let stat = null
@@ -2283,7 +2373,7 @@ ipcMain.handle('git:slotInfo', (_, dir) => {
     // Draait CommandDeck zélf nog iets? Dan is het slot van ons en mag het
     // niet weg: dat is de enige zekerheid die we hier hebben.
     eigenCommandoDraait: !!activeProc,
-    gitProcessen: gitProcessenOpDezePc(),
+    gitProcessen: await gitProcessenOpDezePc(),
   }
 })
 
@@ -2291,10 +2381,12 @@ ipcMain.handle('git:slotInfo', (_, dir) => {
 // zijn. Alleen als er zeker niets meer draait: geen eigen commando, en nergens
 // op deze pc een git. Dat is streng, en dat hoort ook: een slot van iets dat
 // nog wél bezig is weghalen levert een halve index op.
-ipcMain.handle('git:slotenOpruimen', (_, dirs) => {
+ipcMain.handle('git:slotenOpruimen', async (_, dirs) => {
   const uit = { opgeruimd: [], overgeslagen: [] }
   if (activeProc) return uit
-  if (gitProcessenOpDezePc()) return uit
+  if (await gitProcessenOpDezePc()) return uit
+  // Tijdens het tellen kan er een eigen commando gestart zijn.
+  if (activeProc) return uit
 
   for (const dir of (Array.isArray(dirs) ? dirs : [])) {
     if (!dir || !padToegestaan(dir)) continue
@@ -2455,27 +2547,22 @@ ipcMain.handle('git:stashMelding', () => {
 //             manager op non-interactief. Anders blijft er een onzichtbaar
 //             proces staan wachten op invoer die niemand ziet
 //   tijdslimiet zodat een trage of onbereikbare remote niet blijft hangen
-ipcMain.handle('git:fetch', (_, dir) => new Promise((resolve) => {
-  if (!padToegestaan(dir)) { resolve({ ok: false, reden: 'ander-account' }); return }
-  if (!dir || !fs.existsSync(dir) || !heeftGit()) { resolve({ ok: false, reden: 'geen-repo' }); return }
+ipcMain.handle('git:fetch', async (_, dir) => {
+  if (!padToegestaan(dir)) return { ok: false, reden: 'ander-account' }
+  if (!dir || !fs.existsSync(dir) || !(await heeftGitAsync())) return { ok: false, reden: 'geen-repo' }
 
-  execFile('git', ['fetch', '--prune'], {
-    cwd: dir,
-    windowsHide: true,
-    timeout: 15000,
-    env: childEnv({
-      GIT_TERMINAL_PROMPT: '0',
-      GCM_INTERACTIVE: 'never',
-      GIT_ASKPASS: '',
-      SSH_ASKPASS: '',
-    }),
-  }, (fout) => {
-    // Een mislukte fetch is geen ramp: de indicator blijft dan gewoon staan op
-    // wat hij al wist. Niets melden, niets blokkeren.
-    if (fout) { resolve({ ok: false, reden: fout.killed ? 'te-traag' : 'mislukt' }); return }
-    resolve({ ok: true })
-  })
-}))
+  // Na het opstarten draait dit voor álle projecten, dus nog strenger op
+  // "nooit iets vragen" dan bij één klik. Leegmaken van de ASKPASS-variabelen is
+  // niet genoeg (zie controleerRemote): ze moeten wég.
+  const env = childEnv({ GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' })
+  delete env.GIT_ASKPASS
+  delete env.SSH_ASKPASS
+  const { fout } = await execFileAsync('git', ['fetch', '--prune'], { cwd: dir, timeout: 15000, env })
+  // Een mislukte fetch is geen ramp: de indicator blijft dan gewoon staan op
+  // wat hij al wist. Niets melden, niets blokkeren.
+  if (fout) return { ok: false, reden: fout.killed ? 'te-traag' : 'mislukt' }
+  return { ok: true }
+})
 
 // Is de GitHub-CLI beschikbaar? Zo ja, dan kan de koppelknop de repo zelf
 // aanmaken; zo nee, dan vragen we de gebruiker om de url.
@@ -2490,17 +2577,37 @@ function ghBeschikbaar() {
   return ghAanwezig
 }
 
+// Zelfde vraag zonder te blokkeren; vult hetzelfde onthouden antwoord.
+async function ghBeschikbaarAsync() {
+  if (ghAanwezig !== null) return ghAanwezig
+  const { fout } = await execFileAsync('gh', ['--version'], { timeout: 4000, env: childEnv() })
+  if (ghAanwezig === null) ghAanwezig = !fout
+  return ghAanwezig
+}
+
 // Het git-account laten meeschakelen met het app-account. Stil en globaal: je
 // bent nú deze persoon, dus elke repo zonder eigen instelling volgt dat. Elke
 // stap apart, want ze kunnen los van elkaar mislukken — gh hoeft niet te
 // bestaan om je naam wel goed te zetten.
+//
+// Async, want dit draait bij elke start: vijf git- en gh-aanroepen achter elkaar
+// hielden het venster een halve seconde vast. En in de rij, want twee rondes
+// tegelijk (start en direct een accountwissel) schrijven anders door elkaar
+// heen in dezelfde globale config.
+let accountActiveerRij = Promise.resolve()
 ipcMain.handle('git:accountActiveren', (_, profiel) => {
-  if (!heeftGit()) return { ok: false, reden: 'geen-git', gedaan: [], mislukt: [], fouten: {} }
+  const klus = accountActiveerRij.then(() => activeerGitAccount(profiel))
+  accountActiveerRij = klus.catch(() => {})
+  return klus
+})
+
+async function activeerGitAccount(profiel) {
+  if (!(await heeftGitAsync())) return { ok: false, reden: 'geen-git', gedaan: [], mislukt: [], fouten: {} }
 
   const gedaan = []
   const mislukt = []
   const fouten = {}
-  for (const stap of GitTools.accountActiveerStappen(profiel, ghBeschikbaar())) {
+  for (const stap of GitTools.accountActiveerStappen(profiel, await ghBeschikbaarAsync())) {
     // Rechtstreeks, zonder shell ertussen. Ging dit als commandoregel door
     // cmd.exe, dan werden de aanhalingstekens onderdeel van de sleutel of viel
     // een naam met een spatie uit elkaar -- zie accountActiveerStappen.
@@ -2508,10 +2615,8 @@ ipcMain.handle('git:accountActiveren', (_, profiel) => {
     // In de thuismap draaien: dit is globale config en hoort bij geen enkele repo.
     try {
       for (const o of stap.opdrachten) {
-        execFileSync(o.prog, o.args, {
-          cwd: os.homedir(), encoding: 'utf8', timeout: 8000, windowsHide: true,
-          env: childEnv(), stdio: ['ignore', 'pipe', 'pipe'],
-        })
+        const { fout } = await execFileAsync(o.prog, o.args, { cwd: os.homedir(), timeout: 8000, env: childEnv() })
+        if (fout) throw fout
       }
       gedaan.push(stap.soort)
       logSchrijf('git', 'account activeren: ' + stap.soort + ' gelukt',
@@ -2529,7 +2634,7 @@ ipcMain.handle('git:accountActiveren', (_, profiel) => {
     }
   }
   return { ok: !!gedaan.length, gedaan, mislukt, fouten }
-})
+}
 
 // ── Klopt wat de app zegt met wat git doet? ──────────────────────────────────
 // Drie vragen die het paneel niet stelde en die alle drie fout stonden:
@@ -2842,33 +2947,25 @@ ipcMain.handle('git:ghLogin', (_, opties = {}) => new Promise((resolve) => {
 // Geïnstalleerd én ingelogd zijn twee verschillende dingen. Alleen kijken of
 // gh bestaat is precies waarom het ophalen doodliep bij iemand die hem wél had
 // maar nooit had ingelogd.
-ipcMain.handle('git:ghStatus', () => {
-  if (!ghBeschikbaar()) return { geinstalleerd: false, ingelogd: false, accounts: [] }
-  let uit = ''
-  try {
-    uit = execFileSync('gh', ['auth', 'status'], {
-      encoding: 'utf8', timeout: 6000, windowsHide: true, env: childEnv(),
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-  } catch (e) { uit = String((e && (e.stdout || e.stderr)) || '') }
+// Async: dit draait vóór elke push, ook die van de afsluitcontrole, en gh kost
+// al snel een halve tot hele seconde waarin het venster anders stilstaat.
+async function ghAuthStatusTekst() {
+  const { fout, uit, stderr } = await execFileAsync('gh', ['auth', 'status'], { timeout: 6000, env: childEnv() })
+  // gh schrijft de status naar stderr als je niet ingelogd bent; die tekst
+  // bevat soms alsnog de accounts die wél bekend zijn.
+  return fout ? (uit || stderr) : uit
+}
 
-  const accounts = GitTools.parseGhAccounts(uit)
+ipcMain.handle('git:ghStatus', async () => {
+  if (!(await ghBeschikbaarAsync())) return { geinstalleerd: false, ingelogd: false, accounts: [] }
+  const accounts = GitTools.parseGhAccounts(await ghAuthStatusTekst())
   return { geinstalleerd: true, ingelogd: accounts.length > 0, accounts }
 })
 
 // Welke GitHub-accounts staan al klaar op deze pc?
-ipcMain.handle('git:ghAccounts', () => {
-  if (!ghBeschikbaar()) return []
-  try {
-    const uit = execFileSync('gh', ['auth', 'status'], {
-      encoding: 'utf8', timeout: 6000, windowsHide: true, env: childEnv(), stdio: ['ignore', 'pipe', 'pipe'],
-    })
-    return GitTools.parseGhAccounts(uit)
-  } catch (e) {
-    // gh schrijft de status naar stderr als je niet ingelogd bent; die tekst
-    // bevat soms alsnog de accounts die wél bekend zijn.
-    return GitTools.parseGhAccounts((e && (e.stdout || e.stderr)) || '')
-  }
+ipcMain.handle('git:ghAccounts', async () => {
+  if (!(await ghBeschikbaarAsync())) return []
+  return GitTools.parseGhAccounts(await ghAuthStatusTekst())
 })
 
 // De repositories van het GitHub-account, zodat je bij "project toevoegen" uit
@@ -3196,51 +3293,60 @@ function netwerkWortels() {
 // wél binnen een minuut zichtbaar wordt.
 let netwerkLetterCache = { letters: null, tot: 0 }
 
-function netwerkSchijfLetters() {
+// Async: PowerShell opstarten kost al snel een derde seconde, en de boom vraagt
+// dit meteen bij het opstarten op. Synchroon stond het venster dan zo lang stil.
+async function netwerkSchijfLetters() {
   if (process.platform !== 'win32') return new Set()
   if (netwerkLetterCache.letters && Date.now() < netwerkLetterCache.tot) {
     return netwerkLetterCache.letters
   }
   const letters = new Set()
-  try {
-    // DriveType Network = gekoppelde share. Lokaal (Fixed/Removable/CDRom) blijft
-    // erbuiten; UNC-wortels gaan apart mee via netwerkWortels().
-    const uit = execFileSync('powershell.exe', [
-      '-NoProfile', '-Command',
-      "[IO.DriveInfo]::GetDrives() | Where-Object { $_.DriveType -eq 'Network' } | ForEach-Object { $_.Name.Substring(0,1) }",
-    ], { encoding: 'utf8', timeout: 5000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] })
-    for (const regel of String(uit).split(/\r?\n/)) {
+  // DriveType Network = gekoppelde share. Lokaal (Fixed/Removable/CDRom) blijft
+  // erbuiten; UNC-wortels gaan apart mee via netwerkWortels().
+  const { fout, uit } = await execFileAsync('powershell.exe', [
+    '-NoProfile', '-Command',
+    "[IO.DriveInfo]::GetDrives() | Where-Object { $_.DriveType -eq 'Network' } | ForEach-Object { $_.Name.Substring(0,1) }",
+  ], { timeout: 5000 })
+  if (!fout) {
+    for (const regel of uit.split(/\r?\n/)) {
       const l = regel.trim().toUpperCase()
       if (/^[A-Z]$/.test(l)) letters.add(l)
     }
-  } catch {}
+  }
   netwerkLetterCache = { letters, tot: Date.now() + 60_000 }
   return letters
 }
 
 ipcMain.handle('fs:listDrives', async () => {
-  const uit = []
-  const netwerkLetters = netwerkSchijfLetters()
-  for (let i = 65; i <= 90; i++) {
-    const letter = String.fromCharCode(i)
+  const netwerkLetters = await netwerkSchijfLetters()
+  // Alle letters tegelijk en zonder de hoofdthread: een gekoppelde letter
+  // waarvan de server weg is, laat een synchrone controle seconden hangen.
+  // Antwoordt zo'n netwerkletter niet op tijd, dan staat hij er wel, zonder
+  // ruimte — net als de netwerkwortels hieronder.
+  const letters = Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i))
+  const schijven = await Promise.all(letters.map(async (letter) => {
     const d = letter + ':\\'
+    const netwerk = netwerkLetters.has(letter)
+    const er = await bestaatAsync(d, netwerk ? 2000 : 0)
+    if (er === null) return { path: d, free: 0, total: 0, netwerk }
+    if (!er) return null
+    let free = 0, total = 0
+    // statfs bestaat pas vanaf nieuwere Node-versies; zonder is het geen ramp.
     try {
-      if (!fs.existsSync(d)) continue
-      let free = 0, total = 0
-      // statfs bestaat pas vanaf nieuwere Node-versies; zonder is het geen ramp.
-      try {
-        const st = fs.statfsSync(d)
+      const st = await metTijdslimiet(fs.promises.statfs(d), 2000, null)
+      if (st) {
         free  = st.bsize * st.bfree
         total = st.bsize * st.blocks
-      } catch {}
-      uit.push({
-        path: d, free, total,
-        // cmd heeft op een letter geen UNC-probleem, maar git-begeleiding wél:
-        // werkkopie op SMB is afgeraden. Vandaar deze markering.
-        netwerk: netwerkLetters.has(letter),
-      })
+      }
     } catch {}
-  }
+    return {
+      path: d, free, total,
+      // cmd heeft op een letter geen UNC-probleem, maar git-begeleiding wél:
+      // werkkopie op SMB is afgeraden. Vandaar deze markering.
+      netwerk: netwerkLetters.has(letter),
+    }
+  }))
+  const uit = schijven.filter(Boolean)
 
   // De netwerkmappen erachteraan. Hier wordt bewust niet op een probe gewacht:
   // de boom moet meteen kunnen tekenen, ook als een server er niet is. Wat we al
