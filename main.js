@@ -18,6 +18,7 @@ const NoteTools = require('./note-tools')
 const ProjectIcoon = require('./project-icoon')
 const DesktopSnelkoppeling = require('./desktop-snelkoppeling')
 const Accounts = require('./accounts')
+const { maakUpdater } = require('./app-updater')
 const { maakAi } = require('./ai-runtime')
 const { SUPPORTED_LANGUAGES } = require('./locales/languages')
 const { isArchief, isZipArchief, leesZip, pakZipUit,
@@ -112,6 +113,8 @@ function createWindow() {
     if (Menu && typeof Menu.setApplicationMenu === 'function') Menu.setApplicationMenu(null)
   } catch {}
   win.loadFile('index.html')
+  // Pas zoeken naar een update als het venster er staat; de start zelf merkt er niets van.
+  win.webContents.once('did-finish-load', () => updater.planCheck())
 
   // Chromium LNA/permissions-policy mag loopback stil blokkeren. Deze app is
   // lokaal en vertrouwd: lokale netwerktoegang (site-preview) mag altijd.
@@ -271,6 +274,13 @@ maakAi({
   getWin: () => win,
   userDataDir: app.getPath('userData'),
   safeStorage,
+})
+const updater = maakUpdater({
+  app, ipcMain, shell,
+  getWin: () => win,
+  // De installer sluit ons af; lopende flutter-processen moeten dan mee weg,
+  // net als bij de oude bouw-update (zie before-quit).
+  voorInstalleren: () => { isQuittingForUpdate = true },
 })
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
 
@@ -5041,7 +5051,7 @@ ipcMain.handle('app:relaunch', () => {
 
 // Dev vs geïnstalleerde exe: de "Update & herstart"-knop bouwt vanuit broncode
 // en hoort alleen in development zichtbaar te zijn. Online updates voor de
-// geïnstalleerde Setup komen later via electron-updater.
+// geïnstalleerde Setup lopen via app-updater.js.
 ipcMain.handle('app:runtimeInfo', () => ({
   packaged: app.isPackaged,
   version: app.getVersion(),
