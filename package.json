@@ -13,6 +13,7 @@
     "build:installer": "set CSC_IDENTITY_AUTO_DISCOVERY=false&& electron-builder --win nsis --x64",
     "build:portable": "set CSC_IDENTITY_AUTO_DISCOVERY=false&& electron-builder --win portable --x64",
     "build:dir": "set CSC_IDENTITY_AUTO_DISCOVERY=false&& electron-builder --win dir --x64",
+    "preversion": "node scripts/release.js --voor-versie",
     "release": "node scripts/release.js",
     "test": "node test/run-all.js",
     "test:ui": "node test/ui.test.js",
