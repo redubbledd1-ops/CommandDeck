@@ -5,12 +5,23 @@
 // Gebruik: eerst "version" in package.json ophogen, committen, pushen, dan
 //   npm run release
 const { execSync, spawnSync } = require('child_process')
-const { version } = require('../package.json')
+const fs = require('fs')
+const path = require('path')
+const { version, dependencies = {} } = require('../package.json')
 
 const run = (cmd) => execSync(cmd, { encoding: 'utf8' }).trim()
 const stop = (msg) => { console.error('\nRelease afgebroken: ' + msg + '\n'); process.exit(1) }
 
 if (run('git status --porcelain')) stop('er staan nog niet-gecommitte wijzigingen.')
+
+// electron-builder pakt alleen in wat in node_modules staat. Een dependency die
+// in package.json staat maar nooit geïnstalleerd is, gaat stil niet mee — zo
+// ging 1.0.2 de deur uit zonder electron-updater, en kon die versie zelf nooit
+// meer een update vinden.
+const wortel = path.join(__dirname, '..')
+const ontbreekt = Object.keys(dependencies)
+  .filter((naam) => !fs.existsSync(path.join(wortel, 'node_modules', naam, 'package.json')))
+if (ontbreekt.length) stop('niet geïnstalleerd: ' + ontbreekt.join(', ') + '. Draai eerst "npm install".')
 
 run('git fetch origin --tags --quiet')
 if (run('git rev-parse HEAD') !== run('git rev-parse @{u}')) stop('lokale branch loopt niet gelijk met origin; eerst pushen/pullen.')

@@ -1,6 +1,6 @@
 {
   "name": "commanddeck",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "CommandDeck — Flutter & terminal command launcher",
   "author": "CommandDeck",
   "main": "main.js",
@@ -89,7 +89,9 @@
       "!**/*.md",
       "!**/*.map",
       "!build/**",
-      "!scripts/**"
+      "!scripts/**",
+      "!.claude/**",
+      "!.cursor/**"
     ],
     "asarUnpack": [
       "**/node_modules/@lydell/**"
