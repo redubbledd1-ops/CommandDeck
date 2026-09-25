@@ -38,6 +38,11 @@ if (!remoteTag) {
   stop(`tag ${tag} staat op een andere commit; hoog "version" in package.json op.`)
 }
 
+// Setup en portable publiceren tegelijk; bestaat de release nog niet, dan
+// maken ze hem allebei aan en faalt er één (422) vóór latest.yml geschreven
+// is. Vooraf aanmaken, dan uploaden ze alleen.
+if (!assets) run(`gh release create ${tag} --verify-tag --title ${version} --notes ""`)
+
 console.log(`Release ${tag} bouwen en publiceren…`)
 const r = spawnSync('npx', ['electron-builder', '--win', '--x64', '--publish', 'always'], {
   stdio: 'inherit',
