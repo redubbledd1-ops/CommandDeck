@@ -453,6 +453,12 @@ window.eval(fs.readFileSync(path.join(APP, 'lezer-aanvul.js'), 'utf8'))
 window.eval(fs.readFileSync(path.join(APP, 'code-kleuren.js'), 'utf8'))
 window.eval(fs.readFileSync(path.join(APP, 'knoppenrij.js'), 'utf8'))
 window.eval(fs.readFileSync(path.join(APP, 'accounts.js'), 'utf8'))
+// De git-ronde na het opstarten loopt hier niet mee. Hij start 2,5 s na de
+// start, en de vraag-automaat hieronder klikt elke vraag weg — dan liep de
+// ronde via "nu langslopen" en "commit & push" dwars door andere tests heen,
+// afhankelijk van hoe snel de suite op dat moment was. Hij heeft zijn eigen
+// tests in git.test.js.
+const GEEN_GIT_RONDE = '\ngitRondeNaOpstart = async () => {}'
 // Een handvat om iets in de projecten van de renderer te zetten. Elke
 // window.eval krijgt in jsdom zijn eigen scope, dus zonder dit komen we niet
 // bij zijn `projects` — en dan is niet te testen of opslaan iets laat staan.
@@ -472,7 +478,8 @@ window.eval(fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8')
   + '\n  vergeetProjIcoon, projIcoonAuto,'
   + '\n  splitSlotIds: () => (werkSplit.slots || []).map(s => s.projectId),'
   + '\n  zetKnopWis: (v) => { knopWisModus = v }, knopWis: () => knopWisModus,'
-  + '\n  renderMain };')
+  + '\n  renderMain };'
+  + GEEN_GIT_RONDE)
 startVraagAutomaat()
 const W = window
 const inBevrorenPaneel = (el) => {
@@ -2840,8 +2847,19 @@ function startVraagAutomaat() {
   // ── nieuwe versie op GitHub ────────────────────────────────────────────────
   const ub = $('#btn-update')
   updates = []; onlineInstalls = 0; laatsteVraag = null
+  kiesKnop(['later'])
   updateStatusCb({ staat: 'beschikbaar', versie: '1.0.1', portable: false })
   check('bij een nieuwe release staat de knop er, met de versie', !ub.hidden && ub.title.includes('1.0.1'))
+  check('en valt hij op', ub.classList.contains('update-klaar'))
+  for (let i = 0; i < 6; i++) await tick()
+  // Alleen een icoon was te makkelijk te missen: er komt een echte melding.
+  check('er komt een melding dat de nieuwe versie klaarstaat',
+    !!laatsteVraag && laatsteVraag.titel.includes('1.0.1') && /beschikbaar/.test(laatsteVraag.titel))
+  check('"later" installeert niets', onlineInstalls === 0)
+  laatsteVraag = null
+  updateStatusCb({ staat: 'beschikbaar', versie: '1.0.1', portable: false })
+  for (let i = 0; i < 6; i++) await tick()
+  check('en de melding komt maar één keer per versie', laatsteVraag === null)
   kiesKnop(['updaten & herstarten'])
   ub.click(); for (let i = 0; i < 6; i++) await tick()
   check('klikken installeert de release in plaats van te bouwen', onlineInstalls === 1 && updates.length === 0)
@@ -4174,7 +4192,7 @@ function startVraagAutomaat() {
     w.eval(fs.readFileSync(path.join(APP, 'code-kleuren.js'), 'utf8'))
     w.eval(fs.readFileSync(path.join(APP, 'knoppenrij.js'), 'utf8'))
     w.eval(fs.readFileSync(path.join(APP, 'accounts.js'), 'utf8'))
-    w.eval(fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8'))
+    w.eval(fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8') + GEEN_GIT_RONDE)
     w.document.dispatchEvent(new w.Event('DOMContentLoaded'))
     await new Promise(r => setTimeout(r, 0)); await new Promise(r => setTimeout(r, 0))
     return w

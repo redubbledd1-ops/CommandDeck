@@ -1995,6 +1995,7 @@ let bronKnopZichtbaar = false
 
 function toonOnlineUpdate(btn, s) {
   onlineUpdate = s
+  btn.classList.toggle('update-klaar', s.staat !== 'geen')
   if (s.staat === 'geen') {
     btn.hidden = !bronKnopZichtbaar
     btn.disabled = false
@@ -2006,6 +2007,32 @@ function toonOnlineUpdate(btn, s) {
   btn.title = s.staat === 'beschikbaar'
     ? I18N.t('update.availableTitle', { versie: s.versie })
     : I18N.t('update.downloadingTitle', { procent: s.procent ?? 100 })
+  if (s.staat === 'beschikbaar') void meldOnlineUpdate(s)
+}
+
+// Alleen een icoontje in de titelbalk was te makkelijk te missen: gebruikers
+// wisten niet dat er een nieuwe versie klaarstond. Dus één echte melding per
+// versie per sessie. "Later" laat de knop gewoon staan; bij de volgende start
+// komt de melding terug. Als achtergrondvraag, zodat hij nooit over de
+// git-vragen van het opstarten of afsluiten heen komt.
+const updateGemeld = new Set()
+
+async function meldOnlineUpdate(s) {
+  if (!s.versie || updateGemeld.has(s.versie)) return
+  updateGemeld.add(s.versie)
+  const keuze = await vraagAchtergrond({
+    titel: I18N.t('update.meldingTitel', { versie: s.versie }),
+    tekst: I18N.t(s.portable ? 'update.portableText' : 'update.availableConfirmText'),
+    knoppen: [
+      { label: I18N.t('common.later'), waarde: '' },
+      { label: I18N.t(s.portable ? 'update.portableButton' : 'update.availableConfirmButton'),
+        waarde: 'nu', soort: 'primair' },
+    ],
+  })
+  // Intussen al via de knop begonnen, of de release is weer weg: niets doen.
+  if (keuze !== 'nu' || onlineUpdate.staat !== 'beschikbaar') return
+  const r = await window.api.installUpdate()
+  if (r && r.ok === false && r.fout) showToast(I18N.t('update.downloadFailedToast'))
 }
 
 async function installeerOnlineUpdate() {

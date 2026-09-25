@@ -292,6 +292,7 @@
   "update.portableText": "De portable versie kan zichzelf niet updaten. De downloadpagina opent, zodat je de nieuwe CommandDeck.exe kunt ophalen.",
   "update.portableButton": "downloadpagina openen",
   "update.downloadFailedToast": "Update downloaden mislukt — probeer het later nog eens",
+  "update.meldingTitel": "CommandDeck {versie} is beschikbaar",
   "browser.status.folderOne": "{n} map",
   "browser.status.folderMany": "{n} mappen",
   "browser.status.fileOne": "{n} bestand",

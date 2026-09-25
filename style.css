@@ -1436,6 +1436,12 @@ body.bezig-hoogte * { cursor: ns-resize !important; user-select: none; }
 .tbtn.build-btn:hover { background: var(--accent-d); color: var(--accent); }
 /* Tijdens het downloaden van een update: zichtbaar maar niet klikbaar. */
 .tbtn.build-btn:disabled { opacity: .5; cursor: progress; }
+/* Nieuwe versie klaar: de knop moet opvallen, niet alleen een tooltip hebben. */
+.tbtn.build-btn.update-klaar { position: relative; background: var(--accent-d); }
+.tbtn.build-btn.update-klaar::after {
+  content: ''; position: absolute; top: 5px; right: 5px;
+  width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
+}
 
 /* ── Sidebar navigatie (cmd / woordenboek) ── */
 .nav-list { display: flex; flex-direction: column; gap: 2px; padding: 0 6px 4px; min-height: 0; overflow-y: auto; }
