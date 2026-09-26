@@ -79,6 +79,48 @@ function opzet({ packaged = true, portable = false, checkFout = null, herkansing
   check('en zet de knop terug op "beschikbaar"', (await t.handlers['update:status']()).staat === 'beschikbaar')
   check('en installeert niets', t.geinstalleerd === null)
 
+  // Met haak van main: eerst netjes afsluiten, dan zelf de installer starten
+  // (zodat de Windows-toestemmingsvraag vooraan komt), niet quitAndInstall.
+  {
+    const gestart = []
+    let afgebroken = 0
+    let startFn = null
+    let antwoord = true
+    const handlers = {}, verzonden = []
+    const au = new EventEmitter()
+    au.setFeedURL = () => {}
+    au.checkForUpdates = async () => {}
+    au.downloadUpdate = async () => { au.emit('update-downloaded', {}) }
+    au.quitAndInstall = () => { gestart.push('quitAndInstall') }
+    au.installerPath = 'C:\\tmp\\CommandDeck-Setup-9.9.9.exe'
+    const u = maakUpdater({
+      app: { isPackaged: true },
+      ipcMain: { handle: (n, f) => { handlers[n] = f } },
+      shell: { openExternal: () => {} },
+      getWin: () => ({ isDestroyed: () => false, webContents: { send: (k, v) => verzonden.push(v) } }),
+      laadAutoUpdater: () => au, vertraging: 20, herkansing: [5000], log: { warn: () => {} },
+      regelInstallatie: (start) => { startFn = start },
+      startInstallerProces: async (pad, args) => { gestart.push([pad, args.join(' ')]); return antwoord },
+      naAfbreken: () => afgebroken++,
+    })
+    u.planCheck(); await wacht(50)
+    au.emit('update-available', { version: '9.9.9' })
+    await handlers['update:install']()
+    check('main krijgt de installatie in handen', typeof startFn === 'function' && gestart.length === 0)
+    check('geen quitAndInstall meer', !gestart.includes('quitAndInstall'))
+    antwoord = false
+    check('geweigerde toestemming: start() geeft false', (await startFn()) === false)
+    check('en de update blijft klaarstaan', (await handlers['update:status']()).staat === 'klaar' && afgebroken === 1)
+    check('de installer krijgt de juiste argumenten',
+      gestart[0][0] === au.installerPath && gestart[0][1] === '--updated /S --force-run')
+    antwoord = true
+    startFn = null
+    await handlers['update:install']()
+    check('opnieuw proberen kan', typeof startFn === 'function' && (await startFn()) === true)
+    u.installatieAfgebroken()
+    check('afgebroken afsluiten laat hem ook klaarstaan', (await handlers['update:status']()).staat === 'klaar')
+  }
+
   // Development: nooit zoeken.
   t = opzet({ packaged: false })
   t.u.planCheck(); await wacht(50)
@@ -90,6 +132,20 @@ function opzet({ packaged = true, portable = false, checkFout = null, herkansing
   t.au.emit('update-available', { version: '1.0.1' })
   const p = await t.handlers['update:install']()
   check('portable opent de releasepagina', p.portable && t.geopend[0] === RELEASES_URL && t.geinstalleerd === null)
+
+  // De bedrading in main: toestemming vragen met ons venster als eigenaar, en
+  // pas ná de git-vragen van het afsluiten.
+  {
+    const main = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8')
+    check('main start de installer na de afsluitcontrole',
+      /ipcMain\.on\('git:afsluitenMag'[\s\S]{0,500}if \(updateVoorSluiten\)[\s\S]{0,200}ok = await start\(\)/.test(main)
+      && /regelInstallatie: \(start\) =>[\s\S]{0,600}updateVoorSluiten = start\s*\n\s*win\.close\(\)/.test(main))
+    check('toestemming met ons venster als eigenaar, zonder eigen foutvenster van Windows',
+      /s\.fMask = 0x500; s\.hwnd = new IntPtr\(hwnd\); s\.lpVerb = "runas"/.test(main)
+      && /getNativeWindowHandle\(\)\.readBigUInt64LE\(0\)/.test(main))
+    check('blijven bij een git-vraag breekt de update netjes af',
+      /ipcMain\.on\('git:afsluitenAfgebroken'[\s\S]{0,300}updater\.installatieAfgebroken\(\)/.test(main))
+  }
 
   console.log(ok ? '\nALLES OK' : '\nER GING IETS MIS')
   process.exit(ok ? 0 : 1)

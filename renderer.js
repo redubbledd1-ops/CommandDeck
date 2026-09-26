@@ -2003,10 +2003,12 @@ function toonOnlineUpdate(btn, s) {
     return
   }
   btn.hidden = false
-  btn.disabled = s.staat !== 'beschikbaar'
-  btn.title = s.staat === 'beschikbaar'
-    ? I18N.t('update.availableTitle', { versie: s.versie })
-    : I18N.t('update.downloadingTitle', { procent: s.procent ?? 100 })
+  // 'klaar' = gedownload maar nog niet geïnstalleerd (bijv. toestemming
+  // geweigerd): dan moet je het gewoon opnieuw kunnen proberen.
+  btn.disabled = s.staat === 'downloaden'
+  btn.title = s.staat === 'downloaden'
+    ? I18N.t('update.downloadingTitle', { procent: s.procent ?? 100 })
+    : I18N.t('update.availableTitle', { versie: s.versie })
   if (s.staat === 'beschikbaar') void meldOnlineUpdate(s)
 }
 

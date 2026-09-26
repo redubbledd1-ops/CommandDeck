@@ -242,8 +242,18 @@ ipcMain.on('git:afsluitLuistert', () => {
   startAfsluitNoodrem(AFSLUIT_NOODREM_MS)
 })
 
-ipcMain.on('git:afsluitenMag', () => {
+ipcMain.on('git:afsluitenMag', async () => {
   if (afsluitNoodrem) { clearTimeout(afsluitNoodrem); afsluitNoodrem = null }
+  // Afsluiten voor een update: nú de installer starten, nu het venster nog
+  // vooraan staat — zie startUpdateInstaller. Geen toestemming gekregen? Dan
+  // blijft CommandDeck gewoon open.
+  if (updateVoorSluiten) {
+    const start = updateVoorSluiten
+    updateVoorSluiten = null
+    let ok = false
+    try { ok = await start() } catch { ok = false }
+    if (!ok) { afsluitenGevraagd = false; return }
+  }
   afsluitenBevestigd = true
   if (win && !win.isDestroyed()) win.close()
 })
@@ -253,6 +263,11 @@ ipcMain.on('git:afsluitenMag', () => {
 ipcMain.on('git:afsluitenAfgebroken', () => {
   if (afsluitNoodrem) { clearTimeout(afsluitNoodrem); afsluitNoodrem = null }
   afsluitenGevraagd = false
+  if (updateVoorSluiten) {
+    updateVoorSluiten = null
+    isQuittingForUpdate = false
+    updater.installatieAfgebroken()
+  }
 })
 
 // Renderer is nog bezig (volgende project, commitvenster, push). Zonder deze
@@ -308,7 +323,100 @@ const updater = maakUpdater({
   // De installer sluit ons af; lopende flutter-processen moeten dan mee weg,
   // net als bij de oude bouw-update (zie before-quit).
   voorInstalleren: () => { isQuittingForUpdate = true },
+  naAfbreken: () => { isQuittingForUpdate = false },
+  // Eerst dezelfde afsluitcontrole als bij het kruisje (git-vragen), en pas
+  // als die rond is de installer starten. Voorheen liep de installer al terwijl
+  // die vragen nog openstonden, en kon hij CommandDeck middenin afsluiten.
+  regelInstallatie: (start) => {
+    if (!win || win.isDestroyed() || actieveInstellingen().git.afsluiten === 'uit') {
+      start().then((ok) => {
+        if (!ok) return
+        afsluitenBevestigd = true
+        if (win && !win.isDestroyed()) win.close()
+      })
+      return
+    }
+    updateVoorSluiten = start
+    win.close()   // -> afsluitcontrole -> git:afsluitenMag -> start()
+  },
+  startInstallerProces: startUpdateInstaller,
 })
+
+// ── De update-installer starten ──────────────────────────────────────────────
+// Bij een installatie "voor alle gebruikers" moet de installer beheerders-
+// rechten hebben. Vraagt de installer die zelf, terwijl CommandDeck al aan het
+// afsluiten is, dan staat hij niet op de voorgrond — en dan zet Windows de
+// toestemmingsvraag knipperend in de taakbalk in plaats van vooraan. Precies
+// wat je niet ziet.
+//
+// Dus vragen we het zelf aan, zoals andere programma's dat doen: met
+// ShellExecuteEx "runas" en ons eigen venster als eigenaar, terwijl dat nog
+// vooraan staat. Dan komt de vraag direct naar voren. De installer draait
+// daarna al met rechten en vraagt niets meer.
+let updateVoorSluiten = null
+
+// Is CommandDeck voor alle gebruikers geïnstalleerd? Dan staat hij onder HKLM
+// bij de geïnstalleerde programma's, met onze map in de verwijderregel.
+async function updateVraagtBeheerder() {
+  if (process.platform !== 'win32') return false
+  const map = path.dirname(process.execPath)
+  const { uit } = await execFileAsync('reg.exe', [
+    'query', 'HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall', '/s', '/f', map, '/d',
+  ], { timeout: 8000 })
+  return uit.toLowerCase().includes(map.toLowerCase())
+}
+
+// Het C#-stukje voor ShellExecuteEx met een eigenaarvenster. PowerShell heeft
+// geen eigen manier om bij "runas" een venster mee te geven.
+const RUNAS_PS = [
+  'Add-Type -TypeDefinition @"',
+  'using System; using System.Runtime.InteropServices;',
+  'public static class CdVerhoog {',
+  '  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]',
+  '  public struct SEI { public int cbSize; public uint fMask; public IntPtr hwnd; public string lpVerb;',
+  '    public string lpFile; public string lpParameters; public string lpDirectory; public int nShow;',
+  '    public IntPtr hInstApp; public IntPtr lpIDList; public string lpClass; public IntPtr hkeyClass;',
+  '    public uint dwHotKey; public IntPtr hIcon; public IntPtr hProcess; }',
+  '  [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]',
+  '  static extern bool ShellExecuteEx(ref SEI s);',
+  '  public static int Start(long hwnd, string bestand, string args) {',
+  // 0x100 NOASYNC: pas terugkomen als het gestart is; 0x400 FLAG_NO_UI: bij een
+  // fout geen eigen foutvenster van Windows, dat anders onzichtbaar blijft wachten.
+  '    var s = new SEI(); s.cbSize = Marshal.SizeOf(s); s.fMask = 0x500; s.hwnd = new IntPtr(hwnd); s.lpVerb = "runas";',
+  '    s.lpFile = bestand; s.lpParameters = args; s.nShow = 1;',
+  '    return ShellExecuteEx(ref s) ? 0 : Marshal.GetLastWin32Error(); }',
+  '}',
+  '"@',
+  'exit [CdVerhoog]::Start([long]$env:CD_HWND, $env:CD_BESTAND, $env:CD_ARGS)',
+].join('\n')
+
+async function startUpdateInstaller(pad, args) {
+  const beheerder = await updateVraagtBeheerder().catch(() => false)
+  if (!beheerder) {
+    // Alleen voor deze gebruiker geïnstalleerd: geen toestemming nodig.
+    try {
+      spawn(pad, args, { detached: true, stdio: 'ignore', windowsHide: false }).unref()
+      return true
+    } catch { return false }
+  }
+  let hwnd = '0'
+  try {
+    if (win && !win.isDestroyed()) {
+      if (win.isMinimized()) win.restore()
+      win.show()
+      win.focus()
+      hwnd = win.getNativeWindowHandle().readBigUInt64LE(0).toString()
+    }
+  } catch {}
+  const { fout } = await execFileAsync('powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', RUNAS_PS], {
+      // Geen tijdslimiet: de vraag blijft staan tot je antwoordt.
+      env: { ...process.env, CD_HWND: hwnd, CD_BESTAND: pad, CD_ARGS: args.join(' ') },
+    })
+  // Exitcode 0 = de installer draait met rechten. 1223 = "nee" op de vraag.
+  if (fout) console.warn('[update] installer niet gestart:', fout.code, String(fout.stderr || fout.message || '').slice(0, 300))
+  return !fout
+}
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
 
 // Een lopend commando (flutter run, een build) houdt bestanden vast. Bij het

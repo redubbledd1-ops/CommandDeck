@@ -29,6 +29,13 @@ function maakUpdater({
   herkansing = [60e3, 5 * 60e3, 15 * 60e3],
   portable = !!process.env.PORTABLE_EXECUTABLE_DIR,
   log = console,
+  // Optioneel, van main: regelInstallatie(start) sluit netjes af en roept
+  // daarbij start() aan; startInstallerProces(pad, args) start de installer
+  // (zo nodig met beheerdersrechten, vraag vooraan); naAfbreken() als het
+  // installeren niet doorging.
+  regelInstallatie = null,
+  startInstallerProces = null,
+  naAfbreken = () => {},
 }) {
   // staat: 'geen' | 'beschikbaar' | 'downloaden' | 'klaar'
   let status = { staat: 'geen', portable }
@@ -97,8 +104,33 @@ function maakUpdater({
 
   function installeerNu() {
     voorInstalleren()
-    // Stil installeren in de bestaande map en daarna CommandDeck weer starten.
-    updater.quitAndInstall(true, true)
+    // Zonder haak van main: de standaardweg van electron-updater.
+    if (!regelInstallatie) { updater.quitAndInstall(true, true); return }
+    // Met haak: main regelt eerst het afsluiten (git-vragen) en roept daarna
+    // startInstaller aan, terwijl het venster nog vooraan staat.
+    regelInstallatie(startInstaller)
+  }
+
+  // De installer zelf starten, in plaats van via quitAndInstall. Die startte
+  // hem pas tijdens het afsluiten; vroeg de installer dan om beheerdersrechten,
+  // dan stond die Windows-vraag knipperend in de taakbalk in plaats van vooraan,
+  // en zag je hem vaak niet eens. Geeft false als het niet doorging (toestemming
+  // geweigerd); dan blijft de update klaarstaan voor een volgende poging.
+  async function startInstaller() {
+    const pad = updater && updater.installerPath
+    let ok = false
+    if (pad) {
+      try { ok = await startInstallerProces(pad, ['--updated', '/S', '--force-run']) } catch { ok = false }
+    }
+    if (!ok) { installeren = false; zet({ staat: 'klaar' }); naAfbreken() }
+    return ok
+  }
+
+  // Het afsluiten werd afgebroken (bijv. "blijven" bij een git-vraag): de
+  // update blijft klaarstaan.
+  function installatieAfgebroken() {
+    installeren = false
+    if (status.staat !== 'geen') zet({ staat: 'klaar' })
   }
 
   ipcMain.handle('update:status', () => status)
@@ -118,7 +150,7 @@ function maakUpdater({
     return { ok: true }
   })
 
-  return { planCheck, check }
+  return { planCheck, check, installatieAfgebroken }
 }
 
 module.exports = { maakUpdater, RELEASES_URL }
