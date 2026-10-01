@@ -999,6 +999,8 @@
   "git.groot.titel": "Bestand te groot voor GitHub",
   "git.groot.tekst": "{bestand} is {grootte}, en GitHub weigert alles boven de 100 MB. Je commit is hier gelukt, de push loopt aan hun kant stuk. Het bestand nu weggooien helpt niet meer: het zit in je geschiedenis, dus elke volgende push loopt op hetzelfde vast. Zet het in .gitignore, gooi het bestand weg, en haal het uit de geschiedenis — met git filter-repo, of door de geschiedenis opnieuw te beginnen als er nog niets gepusht is.",
   "git.groot.tekstKaal": "Er zit een bestand in dat groter is dan de 100 MB die GitHub aanneemt. Je commit is hier gelukt, de push loopt aan hun kant stuk. Kijk in de uitvoer hierboven welk bestand het is; het weggooien helpt niet meer, want het zit in je geschiedenis en daar moet het uit.",
+  "git.groot.vooraf": "{bestand} is {grootte} en zit in je commits. GitHub weigert alles boven de 100 MB, dus een push loopt hier hoe dan ook op stuk — ook als het bestand niet meer in je map staat, want het zit in je geschiedenis. Gevonden: {aantal} te groot. Haal ze eerst uit de geschiedenis; daarna kun je pushen.",
+  "git.groot.zoekBezig": "Even kijken of er te grote bestanden in je commits zitten…",
   "git.groot.opnieuw": "geschiedenis opnieuw beginnen",
   "git.groot.bevestigTitel": "Opnieuw beginnen met de geschiedenis",
   "git.groot.bevestigTekst": "Ik zet {regel} in .gitignore, schuif je .git-map opzij als .git-oud-<datum>, en maak één verse commit met alles wat er nu staat — daarna push ik die. Je bestanden blijven precies zoals ze zijn; alleen de commits van hiervoor verdwijnen uit beeld. Ze zitten nog in die opzijgezette map, dus hernoem je hem terug, dan is er niets gebeurd. Dit gaat alleen door als er nog niets op de remote staat en je geen stashes hebt.",

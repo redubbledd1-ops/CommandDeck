@@ -17712,6 +17712,7 @@ async function schrijfGitCmd(project, cmdKey) {
       await ververesGitStaat(project, true)
       return
     }
+    if (await grootBestandTegenhouden(project, actieveLocPad(project))) return
     // Zonder upstream is het een push -u; dat is een ander commando en de
     // vraag zegt dat er ook bij, want daarna volgt je branch de remote.
     const sleutel = staat.upstream ? 'git.push.text' : 'git.push.textEerste'
@@ -18593,6 +18594,10 @@ async function koppelGithub(project) {
     return
   }
 
+  // Alles hieronder eindigt in een push. Zit daar iets in dat GitHub weigert,
+  // dan nu zeggen — niet na het aanmaken van een repo en een halve upload.
+  if (await grootBestandTegenhouden(project, pad)) return
+
   if (stap === GitTools.KOPPEL_GH) {
     const naam = await vraagTekst({
       titel: I18N.t('git.link.nameTitle'),
@@ -18702,11 +18707,14 @@ async function koppelGithub(project) {
 //     meteen weer klaar om hetzelfde te doen
 async function herbouwGeschiedenis(project, werkmap, groot) {
   if (!werkmap) return
-  const regel = GitTools.negeerRegelVoor((groot && groot.bestand) || '')
+  // De controle vooraf kan er meer dan één vinden; die moeten er allemaal uit,
+  // anders loopt de verse push op de volgende vast.
+  const bestanden = (groot && groot.alle) || [(groot && groot.bestand) || '']
+  const regel = [...new Set(bestanden.map(b => GitTools.negeerRegelVoor(b)).filter(Boolean))].join('\n')
 
   const ja = await vraagJaNee(
     I18N.t('git.groot.bevestigTitel'),
-    I18N.t('git.groot.bevestigTekst', { regel: regel || I18N.t('git.groot.geenRegel') }),
+    I18N.t('git.groot.bevestigTekst', { regel: regel.split('\n').join(', ') || I18N.t('git.groot.geenRegel') }),
     I18N.t('git.groot.opnieuw'), 'gevaar')
   if (!ja) return
 
@@ -18743,6 +18751,41 @@ async function herbouwGeschiedenis(project, werkmap, groot) {
   await controleerKoppeling(werkmap, true)
   await ververesGitStaat(project, true)
   renderMain()
+}
+
+// Kijk vóór een push of er een bestand boven de 100 MB in de te pushen commits
+// zit. GitHub weigert dat hoe dan ook, ook als het bestand allang uit je map is
+// — en dan is een upload van honderden MB die pas aan het eind "nee" hoort, of
+// een koppeling die schijnbaar nergens komt, het slechtst denkbare antwoord.
+// Geeft true als de push hier stopt.
+async function grootBestandTegenhouden(project, pad) {
+  const fn = window.api && window.api.gitGrootInGeschiedenis
+  if (typeof fn !== 'function' || !pad) return false
+  showToast(I18N.t('git.groot.zoekBezig'))
+  const r = await fn({ dir: pad }).catch(() => null)
+  // Kon het niet nagaan: niet tegenhouden. Weigert GitHub alsnog, dan vangt
+  // executeCmd die melding op.
+  if (!r || !r.ok || !r.bestanden || !r.bestanden.length) return false
+
+  const eerste = r.bestanden[0]
+  const keus = await vraagKeuze({
+    titel: I18N.t('git.groot.titel'),
+    tekst: I18N.t('git.groot.vooraf', {
+      bestand: eerste.bestand, grootte: toonBytes(eerste.bytes), aantal: r.bestanden.length,
+    }),
+    regels: r.bestanden.slice(0, 10).map(b => b.bestand + '  (' + toonBytes(b.bytes) + ')'),
+    knoppen: [
+      { label: I18N.t('common.cancel'), waarde: '' },
+      { label: I18N.t('git.groot.opnieuw'), waarde: 'opnieuw', soort: 'primair' },
+    ],
+  })
+  if (keus === 'opnieuw') {
+    await herbouwGeschiedenis(project, pad, {
+      bestand: eerste.bestand, grootte: toonBytes(eerste.bytes),
+      alle: r.bestanden.map(b => b.bestand),
+    })
+  }
+  return true
 }
 
 // Staat deze naam al op het GitHub-account? Elke koppelpoging vraagt het

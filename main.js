@@ -2272,6 +2272,56 @@ ipcMain.handle('git:histOpzij', (_, { dir } = {}) => {
   return { ok: true, oud: path.basename(doel), url }
 })
 
+// Zit er in wat nog gepusht moet worden een bestand waar GitHub nee tegen zegt?
+// Anders hoor je dat pas na een upload van honderden MB — of, bij een push die
+// halverwege blijft hangen, helemaal niet. Alleen commits die nog op geen enkele
+// remote staan tellen: wat er al staat is kennelijk door GitHub heen gekomen.
+//
+// Async en met tijdslimiet: op een grote repo duurt dit seconden, en dan mag
+// het venster niet stilstaan. Lukt het niet, dan ok:false — de push mag dan
+// gewoon door, en vangt de melding van GitHub het achteraf op.
+ipcMain.handle('git:grootInGeschiedenis', (_, { dir } = {}) => {
+  if (!padToegestaan(dir) || !dir || !fs.existsSync(dir)) return { ok: false, reden: 'geen-map', bestanden: [] }
+  return new Promise((resolve) => {
+    const opties = { cwd: dir, windowsHide: true, env: childEnv() }
+    const rev = spawn('git', ['rev-list', '--objects', 'HEAD', '--not', '--remotes'], opties)
+    const cat = spawn('git', ['cat-file', '--batch-check=%(objecttype) %(objectsize) %(rest)'], opties)
+    let klaar = false
+    const einde = (uit) => {
+      if (klaar) return
+      klaar = true
+      clearTimeout(klok)
+      try { rev.kill() } catch {}
+      try { cat.kill() } catch {}
+      resolve(uit)
+    }
+    const klok = setTimeout(() => einde({ ok: false, reden: 'te-traag', bestanden: [] }), 30000)
+
+    // Regel voor regel filteren: alleen blobs boven de grens bewaren, anders
+    // houd je op een flinke repo de hele objectlijst in het geheugen.
+    let rest = ''
+    let groot = ''
+    cat.stdout.on('data', (stuk) => {
+      const regels = (rest + stuk.toString('utf8')).split('\n')
+      rest = regels.pop()
+      for (const r of regels) {
+        const m = r.match(/^blob (\d+) /)
+        if (m && Number(m[1]) > GitTools.GITHUB_MAX_BYTES) groot += r + '\n'
+      }
+    })
+    rev.stdout.pipe(cat.stdin)
+    rev.on('error', () => einde({ ok: false, reden: 'geen-git', bestanden: [] }))
+    cat.on('error', () => einde({ ok: false, reden: 'geen-git', bestanden: [] }))
+    // Nog geen commit: rev-list faalt op HEAD, en dan valt er ook niets te pushen.
+    rev.on('close', (code) => { if (code !== 0) einde({ ok: true, bestanden: [] }) })
+    cat.on('close', () => {
+      const bestanden = GitTools.grooteBlobs(groot + rest)
+      logSchrijf('git', 'grote bestanden in te pushen commits', { map: dir, aantal: bestanden.length })
+      einde({ ok: true, bestanden })
+    })
+  })
+})
+
 // Na koppelen, herstellen of een mislukte push wil je niet nog een half uur
 // naar het oude oordeel kijken.
 ipcMain.handle('git:remoteVergeet', (_, dir) => {

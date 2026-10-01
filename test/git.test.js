@@ -144,6 +144,36 @@ t('een gelukte push niet', !G.pushGeweigerdFout('To github.com:ik/b.git\n * [new
   t('een gewone melding is het niet', G.grootBestandFout('Everything up-to-date') === null)
   t('lege uitvoer ook niet', G.grootBestandFout('') === null)
 }
+// Vooraf, uit `git cat-file --batch-check`: zo hoor je het vóór de upload.
+{
+  const uit = [
+    'commit 300 ',
+    'tree 120 ',
+    'blob 129524641 oudeZlapBots/Zlapbotzv06.exe',
+    'blob 74452480 oudeZlapBots/.venv/cv2.pyd',
+    'blob 104857601 map met spatie/groot.bin',
+    'blob 110000000 map met spatie/groot.bin',
+    'blob 104857600 precies-op-de-grens.bin',
+  ].join('\r\n')
+  const lijst = G.grooteBlobs(uit)
+  t('alleen boven de 100 MB', lijst.length === 2)
+  t('grootste eerst', lijst[0].bestand === 'oudeZlapBots/Zlapbotzv06.exe')
+  t('één regel per pad, grootste versie', lijst[1].bestand === 'map met spatie/groot.bin' && lijst[1].bytes === 110000000)
+  t('niets gevonden is een lege lijst', G.grooteBlobs('').length === 0)
+}
+{
+  const ren = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer.js'), 'utf8')
+  const koppel = (ren.match(/async function koppelGithub[\s\S]*?\n\}/) || [''])[0]
+  t('koppelen kijkt vóór de push naar te grote bestanden',
+    koppel.indexOf('grootBestandTegenhouden') > -1
+      && koppel.indexOf('grootBestandTegenhouden') < koppel.indexOf('KOPPEL_GH, {'))
+  const hoofd = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8')
+  t('de controle telt alleen commits die nog nergens staan',
+    /git:grootInGeschiedenis[\s\S]*?'--not', '--remotes'/.test(hoofd))
+  const nlG = require('../locales/nl.json'), enG = require('../locales/en.json')
+  for (const k of ['git.groot.vooraf', 'git.groot.zoekBezig'])
+    t('tekst ' + k + ' in nl en en', !!nlG[k] && !!enG[k])
+}
 t('een heap dump staat in de standaard-gitignore',
   G.gitignoreVoor(['gradle']).includes('*.hprof'))
 t('en een aab ook', G.gitignoreVoor(['gradle']).includes('*.aab'))

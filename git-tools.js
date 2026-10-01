@@ -1504,6 +1504,26 @@
     return null
   }
 
+  // Hetzelfde, maar vóór de push in plaats van erna. Leest de uitvoer van
+  // `git rev-list --objects` door `git cat-file --batch-check='%(objecttype)
+  // %(objectsize) %(rest)'` en geeft elk bestand boven de grens, grootste
+  // eerst. Eén regel per pad: een bestand dat in drie commits net anders was
+  // hoef je maar één keer te zien.
+  const GITHUB_MAX_BYTES = 100 * 1024 * 1024
+  function grooteBlobs(uitvoer, grens = GITHUB_MAX_BYTES) {
+    const perPad = new Map()
+    for (const regel of String(uitvoer || '').split(/\r?\n/)) {
+      const m = regel.match(/^blob (\d+) (.+)$/)
+      if (!m) continue
+      const bytes = Number(m[1])
+      const bestand = m[2].trim()
+      if (!(bytes > grens) || !bestand) continue
+      if (!perPad.has(bestand) || perPad.get(bestand) < bytes) perPad.set(bestand, bytes)
+    }
+    return [...perPad].map(([bestand, bytes]) => ({ bestand, bytes }))
+      .sort((a, b) => b.bytes - a.bytes)
+  }
+
   function pushGeweigerdFout(tekst) {
     const s = String(tekst || '')
     return /!\s*\[rejected\]/i.test(s)
@@ -2441,7 +2461,7 @@
     zelfdeGitWeergave,
     koppelStap, koppelCommando, veiligeRepoNaam, normaliseerRepoUrl,
     repoNaamBezetFout, zoekRepoOpNaam, koppelBestaandeCommando, pushGeweigerdFout,
-    grootBestandFout, herbouwCommando, negeerRegelVoor,
+    grootBestandFout, grooteBlobs, GITHUB_MAX_BYTES, herbouwCommando, negeerRegelVoor,
     bareInitCommando, bareCloneCommando, joinPad, cmdPad,
     repoNaamUitUrl, cloneDoelPad, cloneOuderPad, cloneCommando, projectMapPad,
     verkeerdeKoppeling, zelfdeRepoNaam, magNaamUitGitOvernemen,
