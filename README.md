@@ -1,159 +1,174 @@
 # CommandDeck
 
-Dark-mode Electron launcher for Flutter projects (and general terminal commands).
+Dark-mode Electron launcher for Flutter projects and general terminal commands, for Windows.
 
-## Installeren
+## Installation
 
-### Kant-en-klare installer (aanbevolen)
+**Download the latest version: [github.com/redubbledd1-ops/CommandDeck/releases](https://github.com/redubbledd1-ops/CommandDeck/releases)**
 
-1. Bouw de installer (zie hieronder), of gebruik `dist\CommandDeck-Setup-1.0.0.exe`
-2. Start de Setup
-3. Kies desgewenst:
-   - installatiemap
-   - **snelkoppeling op het bureaublad** (standaard aan)
-   - vastmaken aan de taakbalk (standaard uit)
-4. Klaar — CommandDeck start na de installatie
+1. Open the [latest release](https://github.com/redubbledd1-ops/CommandDeck/releases/latest) and download `CommandDeck-Setup-<version>.exe`
+2. Run the setup and choose:
+   - the install folder
+   - a **desktop shortcut** (on by default)
+   - pin to the taskbar (off by default)
+3. Done. CommandDeck starts after the install and updates itself from then on.
 
-De portable variant `dist\CommandDeck.exe` heeft geen installatiestap (handig op een USB-stick), maar start trager omdat hij zichzelf bij elke start uitpakt.
+Prefer no installer? Download `CommandDeck.exe` from the same release. It is the
+portable version (handy on a USB stick), but it starts slower because it unpacks
+itself on every launch.
 
-### Vanuit broncode
+Requires Windows 10 or 11 (64-bit). Git and the GitHub CLI are optional: when
+you use a feature that needs them and they are missing, CommandDeck offers to
+install them for you through winget. For Flutter projects you need the
+[Flutter SDK](https://docs.flutter.dev/get-started/install/windows).
 
-1. Zorg dat [Node.js](https://nodejs.org/) is geïnstalleerd (v18+)
-2. Open de map in terminal:
+## Run from source
+
+1. Install [Node.js](https://nodejs.org/) 22 or newer, and [Git](https://git-scm.com/download/win)
+2. Clone and start:
 
 ```bash
-cd flutter-launcher
+git clone https://github.com/redubbledd1-ops/CommandDeck.git
+cd CommandDeck
 npm install
 npm start
 ```
 
-## Bouwen
+Run the tests with `npm test`.
+
+## Building
 
 ```bash
 npm run build
 ```
 
-Maakt in `dist/`:
+Creates in `dist/`:
 
-| Bestand | Wat |
+| File | What |
 | --- | --- |
-| `CommandDeck-Setup-1.0.0.exe` | NSIS-installer met desktop-/startmenu-opties |
-| `CommandDeck.exe` | Portable (zelfuitpakkend) |
+| `CommandDeck-Setup-<version>.exe` | NSIS installer with desktop and start menu options |
+| `CommandDeck.exe` | Portable (self-extracting) |
 
-Alleen installer of alleen portable:
+Only the installer, or only the portable version:
 
 ```bash
 npm run build:installer
 npm run build:portable
 ```
 
-## Nieuwe versie uitbrengen
+## Releasing a new version
 
-Geïnstalleerde CommandDecks vergelijken hun versie met de nieuwste
-[GitHub Release](https://github.com/redubbledd1-ops/CommandDeck/releases).
-Een nieuwe versie is dus pas zichtbaar voor gebruikers als hij daar staat.
+Installed copies of CommandDeck compare their version with the newest
+[GitHub release](https://github.com/redubbledd1-ops/CommandDeck/releases), so a
+new version only reaches users once it is published there.
 
-1. Hoog `version` in `package.json` op (`1.0.0` → `1.0.1` voor fixes, `1.1.0` voor nieuwe functies)
-2. Commit en push naar `main`
+1. Bump `version` in `package.json` (`1.0.0` → `1.0.1` for fixes, `1.1.0` for new features)
+2. Commit and push to `main`
 3. `npm run release`
 
-Het script weigert als er niet-gecommitte wijzigingen zijn, als `main` niet
-gelijk loopt met GitHub of als `v<versie>` al gepubliceerd is. Het gebruikt het
-token van je `gh`-login (of `GH_TOKEN` als die gezet is), zet en pusht de tag
-`v<versie>`, bouwt de Setup en portable, maakt de release aan en uploadt ook
-`latest.yml`, het bestand waar de updater naar kijkt. Brak een eerdere poging
-halverwege af (release zonder `latest.yml`), dan maakt hij die gewoon af.
+The script refuses to run with uncommitted changes, when `main` is not in sync
+with GitHub, or when `v<version>` is already published. It uses the token from
+your `gh` login (or `GH_TOKEN` when set), creates and pushes the tag
+`v<version>`, builds the setup and the portable version, creates the release and
+uploads `latest.yml`, the file the updater looks at. If an earlier attempt
+stopped halfway (a release without `latest.yml`), it simply finishes it.
 
 ## Features
 
-- Projecten met meerdere **locaties** (switchbaar via dropdown)
-- **Selecteer map** via folder picker
-- Commands: run android, run windows, run web, pub get, clean, doctor, build apk/web/windows
-- Live terminal output in de app
-- Projecten/instellingen in `%APPDATA%/commanddeck/` (blijven bewaard bij updates)
-- Eerste start: één voorbeeldproject **Default Flutter Project** (nog zonder map — die kies je zelf)
-- Mist Flutter in PATH bij een Flutter-actie: duidelijke installatiehulp in de terminal
+- Projects with multiple **locations**, switchable from a dropdown
+- **Choose folder** with a folder picker, or clone a GitHub repository straight into a new project
+- Flutter commands: run android / windows / web, pub get, clean, doctor, build apk / web / windows
+- Live terminal output inside the app, plus a real terminal for interactive programs
+- Git built in: status, commit, push, pull, linking to GitHub. Missing Git or GitHub CLI is installed on request
+- Open a project in your editor: VS Code, Cursor, JetBrains IDEs, Android Studio and more are detected automatically
+- Projects and settings live in `%APPDATA%\commanddeck\` and survive updates
+- Available in 30 languages; the first start follows your Windows language
+- When Flutter is missing from `PATH`, a Flutter action shows clear install help in the terminal
 
-> Tip: had je eerder **Flutter Launcher** geïnstalleerd, dan worden je oude projecten en instellingen automatisch overgenomen.
+> Tip: if you previously installed **Flutter Launcher**, your old projects and settings are taken over automatically.
 
-## AI-diensten in het uitvoervenster
+## AI services in the output window
 
-Naast Claude Code (dat als los programma in een echte terminal draait) kan
-CommandDeck zélf met een AI-dienst praten. Dat gebeurt in hetzelfde
-uitvoervenster: je typt in de commandobalk, het antwoord verschijnt erboven.
+Besides Claude Code (which runs as its own program in a real terminal),
+CommandDeck can talk to an AI service itself. That happens in the same output
+window: you type in the command bar and the answer appears above it.
 
-### Gebruiken
+### Usage
 
-| Commando | Wat |
+| Command | What |
 | --- | --- |
-| `/use claude` | in gesprek met Claude (`/use claude:opus` kiest meteen een model) |
-| `/ai <vraag>` | één vraag stellen zonder van modus te wisselen |
-| `/model`, `/modellen [live]` | model wisselen, of de lijst opvragen (`live` = bij de dienst zelf) |
-| `/diensten` | welke diensten er zijn en of ze klaarstaan |
-| `/sleutel <sleutel>` | API-sleutel opslaan (leeg = wissen) |
-| `/systeem <tekst>` | eigen systeemprompt |
-| `/nieuw` | gesprek wissen |
-| `/stop` | het lopende antwoord afbreken |
-| `/shell` | gespreksmodus uit |
-| `!<commando>` | tóch een gewoon commando draaien, midden in een gesprek |
+| `/use claude` | start a conversation with Claude (`/use claude:opus` picks a model right away) |
+| `/ai <question>` | ask one question without switching modes |
+| `/model`, `/models [live]` | switch model, or list them (`live` = ask the service itself) |
+| `/providers` | which services exist and whether they are ready |
+| `/key <key>` | save an API key (empty = remove) |
+| `/system <text>` | your own system prompt |
+| `/new` | clear the conversation |
+| `/stop` | stop the running answer |
+| `/shell` | leave conversation mode |
+| `!<command>` | run a normal command anyway, in the middle of a conversation |
 
-Zodra een dienst klaarstaat verschijnt er een knop: bij **uitvoeren** van een
-project, en bij de **snelkoppelingen** in de cmd-sectie. Eén klik zet je in
-gesprek, nog een klik op dezelfde knop zet je terug in de shell. Weg met
-`/knoppen uit`.
+As soon as a service is ready, a button appears: under **run** for a project,
+and among the **shortcuts** in the cmd section. One click starts a conversation,
+another click on the same button takes you back to the shell. Hide it with
+`/buttons off`.
 
-Elk project (en de losse cmd-sectie) heeft zijn eigen gesprek. Wissel je van
-project, dan wissel je van gesprek; wat je typte maar nog niet verstuurde blijft
-per weergave staan.
+Every project (and the separate cmd section) has its own conversation. Switch
+project and you switch conversation; what you typed but did not send yet stays
+per view.
 
-Alles hierboven staat ook in het woordenboek onder het thema **ai**, dus je hoeft
-het niet uit je hoofd te weten. Eigen categorieen maak je met `theme <naam>`, en
-`theme <naam> <commando>` zet er meteen iets in — vanuit de cmd-sectie of vanuit
-een project.
+All of the above is also in the dictionary under the theme **ai**, so you do not
+have to remember it. Create your own categories with `theme <name>`, and
+`theme <name> <command>` adds a command to it right away, from the cmd section
+or from a project.
 
-De sleutel kan ook uit de omgeving komen: staat `ANTHROPIC_API_KEY` al gezet,
-dan wordt die vanzelf gebruikt.
+The key can also come from the environment: when `ANTHROPIC_API_KEY` is already
+set, it is used automatically.
 
-### Welke diensten
+### Which services
 
-| Dienst | `/use` | Sleutel uit | Gratis? |
+| Service | `/use` | Key from | Free? |
 | --- | --- | --- | --- |
-| Claude | `claude` | `ANTHROPIC_API_KEY` | nee |
-| ChatGPT | `openai` | `OPENAI_API_KEY` | nee |
-| Gemini | `gemini` | `GEMINI_API_KEY` | ja — AI Studio, zonder pas |
-| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | ja — modellen met `:free` |
-| Groq | `groq` | `GROQ_API_KEY` | ja |
-| Cerebras | `cerebras` | `CEREBRAS_API_KEY` | ja |
-| Mistral | `mistral` | `MISTRAL_API_KEY` | ja — "Experiment" |
-| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | nee |
-| Grok | `grok` | `XAI_API_KEY` | nee |
-| Ollama | `ollama` | — | ja — draait lokaal |
-| LM Studio | `lmstudio` | — | ja — draait lokaal |
-| Eigen server | `eigen` | optioneel | — |
+| Claude | `claude` | `ANTHROPIC_API_KEY` | no |
+| ChatGPT | `openai` | `OPENAI_API_KEY` | no |
+| Gemini | `gemini` | `GEMINI_API_KEY` | yes, AI Studio, no card needed |
+| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | yes, models ending in `:free` |
+| Groq | `groq` | `GROQ_API_KEY` | yes |
+| Cerebras | `cerebras` | `CEREBRAS_API_KEY` | yes |
+| Mistral | `mistral` | `MISTRAL_API_KEY` | yes, "Experiment" tier |
+| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | no |
+| Grok | `grok` | `XAI_API_KEY` | no |
+| Ollama | `ollama` | — | yes, runs locally |
+| LM Studio | `lmstudio` | — | yes, runs locally |
+| Your own server | `eigen` | optional | — |
 
-De modellenlijsten in de code zijn een startpunt. `/modellen live` (of de knop
-**Ophalen** in de instellingen) vraagt de echte lijst op bij de dienst zelf, en
-een modelnaam die nergens in staat mag je gewoon intypen.
+The model lists in the code are a starting point. `/models live` (or the
+**Fetch** button in the settings) asks the service itself for the real list, and
+you can type any model name that is not in it.
 
-### Waar het staat
+Keys are **not** stored in `settings.json` but in `ai-keys.json` in
+`%APPDATA%\commanddeck\`, encrypted with the Windows keychain. They only travel
+from the renderer to the main process, never back.
 
-| Bestand | Wat |
+### Adding a service
+
+Add one object to `src/ai-providers.js` with: the address, which key belongs to
+it, the models, what a request looks like, and how to get a piece of text out of
+one stream event. The rest of the app does not need to change, since it only
+knows those fields. At the top of `src/ai-providers.js` is a worked example for
+an OpenAI-compatible server (which also covers Ollama, LM Studio and vLLM).
+
+## Project layout
+
+| Path | What |
 | --- | --- |
-| `ai-providers.js` | de catalogus: één object per dienst. Dit is het enige bestand dat weet hoe een dienst werkt. |
-| `ai-runtime.js` | het HTTP- en streamwerk plus de sleutelopslag, in het hoofdproces |
-| `main.js` | roept `maakAi(...)` aan en bewaart `settings.ai` |
-| `renderer.js` | gespreksmodus, slash-commando's, weergave in het uitvoervenster |
-| `test/ai.test.js` | tests zonder netwerk of Electron (`npm run test:ai`) |
-| `TODO-ai.md` | wat af is en wat er nog kan |
-
-Sleutels staan **niet** in `settings.json` maar in `ai-keys.json` in
-`%APPDATA%/commanddeck/`, versleuteld met de sleutelbos van Windows. Ze gaan
-alleen van de renderer náár het hoofdproces, nooit terug.
-
-### Een dienst toevoegen
-
-Eén object in `ai-providers.js`, met: het adres, welke sleutel erbij hoort, de
-modellen, hoe je verzoek eruitziet, en hoe je uit één stream-gebeurtenis een
-stukje tekst haalt. De rest van de app hoeft niet mee te veranderen — die kent
-alleen die velden. Bovenaan `ai-providers.js` staat een uitgewerkt voorbeeld
-voor een OpenAI-compatibele server (dat dekt ook Ollama, LM Studio en vLLM).
+| `src/main.js` | Electron main process: commands, git, settings, updates |
+| `src/renderer.js`, `src/index.html`, `src/style.css` | the window |
+| `src/preload.js` | the bridge between the two |
+| `src/*.js` | modules with pure logic (git, web, AI, editors, …), tested without Electron |
+| `src/locales/` | translations |
+| `src/assets/` | icons and fonts |
+| `test/` | tests, `npm test` runs them all |
+| `scripts/release.js` | publishes a release (`npm run release`) |
+| `build/` | installer customisation |
+| `docs/` | development notes and to-do lists |
