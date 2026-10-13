@@ -248,6 +248,74 @@ t('een willekeurige hash geldt niet als standaard',
   t('te groot eigen bestand wordt geweigerd', rGroot.ok === false && rGroot.reden === 'tegroot')
 }
 
+// ── CommandDeck zelf: de broncode staat in src/ ──────────────────────────────
+// Na het verplaatsen naar src/ vond CommandDeck zijn eigen icoon niet meer.
+{
+  const wortel = maakProject({ 'src/assets/icon.png': Buffer.from('het logo van commanddeck') })
+  const r = Ico.zoekProjectIcoon(wortel)
+  t('src/assets/icon.png wordt gevonden', r.ok === true && /icon\.png$/.test(r.bron))
+}
+
+// ── Het project wijst zelf aan wat zijn icoon is ─────────────────────────────
+{
+  const pkg = JSON.stringify({ name: 'x', build: { win: { icon: 'iets/eigenaardig.png' } } })
+  const wortel = maakProject({ 'package.json': pkg, 'iets/eigenaardig.png': Buffer.from('via package.json') })
+  const r = Ico.zoekProjectIcoon(wortel)
+  t('build.win.icon in package.json wordt gevolgd', r.ok === true && /eigenaardig\.png$/.test(r.bron))
+}
+{
+  const yaml = 'name: x\nflutter_launcher_icons:\n  android: true\n  image_path: "kunst/app.png"  # bron\n'
+  const wortel = maakProject({ 'pubspec.yaml': yaml, 'kunst/app.png': Buffer.from('via pubspec') })
+  const r = Ico.zoekProjectIcoon(wortel)
+  t('image_path van flutter_launcher_icons wordt gevolgd', r.ok === true && /app\.png$/.test(r.bron))
+}
+{
+  const pkg = JSON.stringify({ name: 'x', build: { win: { icon: '../buiten.png' } } })
+  const wortel = maakProject({ 'package.json': pkg })
+  fs.writeFileSync(path.join(path.dirname(wortel), 'buiten.png'), 'niet van dit project')
+  t('een pad buiten de projectmap telt niet', Ico.zoekProjectIcoon(wortel).ok === false)
+}
+
+// ── Geen vaste plek: een plaatje met icon of logo in de naam ─────────────────
+{
+  const wortel = maakProject({
+    'images/screenshot-1.png': Buffer.from('geen icoon'),
+    'images/mijn-logo.png': Buffer.from('het logo'),
+  })
+  const r = Ico.zoekProjectIcoon(wortel)
+  t('een logo in images/ wordt gevonden', r.ok === true && /mijn-logo\.png$/.test(r.bron))
+}
+{
+  const wortel = maakProject({
+    'assets/logo-groot.png': Buffer.from('logo'),
+    'assets/app-icon.png': Buffer.from('icoon'),
+  })
+  const r = Ico.zoekProjectIcoon(wortel)
+  t('icoon gaat boven logo', r.ok === true && /app-icon\.png$/.test(r.bron))
+}
+{
+  const wortel = maakProject({ 'assets/splash-icon.png': Buffer.from('splash'), 'lib/main.dart': 'void main(){}' })
+  t('een splashscreen is geen projecticoon', Ico.zoekProjectIcoon(wortel).ok === false)
+}
+{
+  Ico.vergeetSdkHashes()
+  const wortel = maakProject({ 'assets/icon-sjabloon.png': SJABLOON_BYTES })
+  const r = Ico.zoekProjectIcoon(wortel, { flutterWortel: SDK })
+  t('ook de naamzoektocht slaat het Flutter-sjabloonicoon over', r.ok === false)
+}
+
+// ── De renderer onthoudt "niets gevonden" maar even ──────────────────────────
+// Een gekloond project heeft bij de eerste tekening een lege map. Dat mag niet
+// tot de volgende herstart als "geen icoon" blijven staan.
+{
+  const ren = fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer.js'), 'utf8')
+  t('een gevonden icoon blijft onthouden, een "geen" verloopt',
+    /const ICOON_OPNIEUW_MS = \d+e3/.test(ren)
+    && /eerder\.ok \|\| Date\.now\(\) - \(eerder\.t \|\| 0\) < ICOON_OPNIEUW_MS/.test(ren))
+  const kloon = (ren.match(/async function haalRepoBinnen\([\s\S]*?\r?\n\}\r?\n/) || [''])[0]
+  t('na het klonen wordt het icoon opnieuw gezocht', /await vergeetProjIcoon\(doel\)/.test(kloon))
+}
+
 try { fs.rmSync(TMP, { recursive: true, force: true }) } catch { /* tijdelijke map */ }
 
 console.log(ok ? '\nAlles goed' : '\nEr ging iets mis')

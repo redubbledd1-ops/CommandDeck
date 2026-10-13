@@ -88,8 +88,18 @@ const KANDIDATEN = [
   { rel: 'icon128.png',       soort: 'webext' },
 
   // Electron-projecten en gewone websites. CommandDeck zelf valt hieronder.
+  // Sinds de broncode van CommandDeck in src/ staat, staat het icoon daar:
+  // zonder deze regels vond CommandDeck zijn eigen icoon niet meer.
   { rel: 'assets/icon.png',    soort: 'app' },
   { rel: 'assets/icon.ico',    soort: 'app' },
+  { rel: 'src/assets/icon.png', soort: 'app' },
+  { rel: 'src/assets/icon.ico', soort: 'app' },
+  // De map die flutter_launcher_icons zelf voorstelt.
+  { rel: 'assets/icon/icon.png',   soort: 'app' },
+  { rel: 'assets/icons/icon.png',  soort: 'app' },
+  { rel: 'assets/images/icon.png', soort: 'app' },
+  { rel: 'resources/icon.png',     soort: 'app' },
+  { rel: 'resources/icon.ico',     soort: 'app' },
   { rel: 'build/icon.png',     soort: 'app' },
   { rel: 'build/icon.ico',     soort: 'app' },
   { rel: 'public/favicon.ico', soort: 'web' },
@@ -500,6 +510,92 @@ function zoekViaManifestJson(projectWortel, flutterWortel, deps) {
   return leesBitmapKandidaat(vol, 'webext', flutterWortel, deps)
 }
 
+// ── Het project zegt zelf waar zijn icoon staat ──────────────────────────────
+// Electron (package.json: build.win.icon) en Flutter (flutter_launcher_icons:
+// image_path in pubspec.yaml of flutter_launcher_icons.yaml) leggen vast welk
+// plaatje het app-icoon wordt. Dat is betrouwbaarder dan raden naar een naam.
+function leesTekst(bestand, pad) {
+  try { return bestand.readFileSync(pad, 'utf8') } catch { return null }
+}
+
+function binnenProject(wortel, rel) {
+  if (!rel || typeof rel !== 'string') return null
+  const vol = path.resolve(wortel, rel.replace(/^[./\\]+(?=[^./\\])/, ''))
+  // Wat buiten de projectmap wijst is geen icoon van dit project.
+  return vol === wortel || vol.startsWith(wortel + path.sep) ? vol : null
+}
+
+function zoekViaPackageJson(wortel, flutterWortel, deps) {
+  const txt = leesTekst(deps.fs || fs, path.join(wortel, 'package.json'))
+  if (!txt) return null
+  let pkg
+  try { pkg = JSON.parse(txt) } catch { return null }
+  const b = pkg && pkg.build
+  const refs = [b && b.win && b.win.icon, b && b.icon, pkg && pkg.icon]
+  for (const ref of refs) {
+    if (typeof ref !== 'string' || !/\.(png|ico|svg|jpe?g|webp)$/i.test(ref)) continue
+    const vol = binnenProject(wortel, ref)
+    const uit = vol && leesBitmapKandidaat(vol, 'app', flutterWortel, deps)
+    if (uit && uit.ok) return uit
+  }
+  return null
+}
+
+function zoekViaLauncherIcons(wortel, flutterWortel, deps) {
+  const bestand = deps.fs || fs
+  for (const naam of ['flutter_launcher_icons.yaml', 'pubspec.yaml']) {
+    const txt = leesTekst(bestand, path.join(wortel, naam))
+    if (!txt) continue
+    // Eenvoudig regel voor regel: image_path, image_path_android of
+    // adaptive_icon_foreground, met of zonder aanhalingstekens.
+    const re = /^\s*(?:image_path(?:_android)?|adaptive_icon_foreground)\s*:\s*["']?([^"'\r\n#]+?)["']?\s*(?:#.*)?$/gim
+    let m
+    while ((m = re.exec(txt))) {
+      const vol = binnenProject(wortel, m[1].trim())
+      const uit = vol && leesBitmapKandidaat(vol, 'app', flutterWortel, deps)
+      if (uit && uit.ok) return uit
+    }
+  }
+  return null
+}
+
+// Laatste redmiddel: een plaatje met icon of logo in de naam, in de mappen waar
+// zoiets gewoonlijk staat. Eén map diep en nooit recursief, want dit draait bij
+// elke tekening van de zijbalk voor elk project zonder icoon.
+const NAAM_ZOEKMAPPEN = ['', 'assets', 'src/assets', 'assets/images', 'assets/icon', 'assets/icons',
+  'images', 'img', 'public', 'static', 'resources', 'res', 'src']
+const NAAM_PATROON = /(icon|logo)/i
+const NAAM_UITGESLOTEN = /(sprite|screenshot|splash|banner|background|notification|badge|placeholder|\.min\.)/i
+const NAAM_EXT = { '.png': 4, '.ico': 3, '.svg': 2, '.webp': 1, '.jpg': 1, '.jpeg': 1 }
+
+function naamScore(naam) {
+  const ext = path.extname(naam).toLowerCase()
+  if (!(ext in NAAM_EXT) || !NAAM_PATROON.test(naam) || NAAM_UITGESLOTEN.test(naam)) return -1
+  const stam = path.basename(naam, ext).toLowerCase()
+  let s = NAAM_EXT[ext]
+  if (/^(app[-_ ]?icon|icon|logo)([-_ ]?\d+(x\d+)?)?$/.test(stam)) s += 20      // de gewone namen
+  else if (/icon/.test(stam)) s += 10                                           // icoon boven logo
+  return s
+}
+
+function zoekOpNaam(wortel, flutterWortel, deps) {
+  const bestand = deps.fs || fs
+  for (const rel of NAAM_ZOEKMAPPEN) {
+    const map = rel ? path.join(wortel, ...rel.split('/')) : wortel
+    let items = []
+    try { items = bestand.readdirSync(map, { withFileTypes: true }) } catch { continue }
+    const kandidaten = items
+      .filter(i => i.isFile() && naamScore(i.name) >= 0)
+      .sort((a, b) => naamScore(b.name) - naamScore(a.name) || a.name.localeCompare(b.name))
+      .slice(0, 6)
+    for (const k of kandidaten) {
+      const uit = leesBitmapKandidaat(path.join(map, k.name), 'app', flutterWortel, deps)
+      if (uit && uit.ok) return uit
+    }
+  }
+  return null
+}
+
 // Zoekt het icoon van één projectmap.
 //
 // Geeft altijd een object terug, ook als er niets is — de aanroeper wil het
@@ -537,6 +633,15 @@ function zoekProjectIcoon(projectPad, opties = {}) {
   // icoon staat.
   const viaWebext = zoekViaManifestJson(wortel, flutterWortel, deps)
   if (viaWebext && viaWebext.ok) return viaWebext
+
+  // Het project wijst zelf aan welk plaatje zijn icoon is.
+  const viaPlan = zoekViaPackageJson(wortel, flutterWortel, deps)
+    || zoekViaLauncherIcons(wortel, flutterWortel, deps)
+  if (viaPlan) return viaPlan
+
+  // Geen vaste plek: dan een plaatje met icon of logo in de naam.
+  const opNaam = zoekOpNaam(wortel, flutterWortel, deps)
+  if (opNaam) return opNaam
 
   return { ok: false, reden: sjabloonGezien ? 'standaard' : 'geen' }
 }

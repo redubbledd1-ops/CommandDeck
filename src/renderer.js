@@ -929,15 +929,23 @@ function projIcoonVanPad(pad) {
 // Gedeeld door de mapzoektocht (auto) en het rechtstreeks lezen van een zelf
 // gekozen bestand (custom): zelfde cache, zelfde "alleen hertekenen als er
 // iets te zien is"-regel, alleen de manier van opzoeken verschilt.
+//
+// Een gevonden icoon blijft staan, een "niets gevonden" niet: dat is maar een
+// momentopname. Een project dat nog gekloond wordt heeft op het moment van de
+// eerste tekening een lege map, en kreeg daardoor tot de volgende herstart de
+// emoji -- ook als het icoon er een seconde later wél stond.
+const ICOON_OPNIEUW_MS = 30e3
+
 async function ververesIcoonViaPad(pad, zoeker) {
   if (!pad || !window.api || !window.api[zoeker]) return null
-  if (projIcoonPerPad.has(pad)) return projIcoonPerPad.get(pad)
-  if (projIcoonBezig.has(pad)) return null
+  const eerder = projIcoonPerPad.get(pad)
+  if (eerder && (eerder.ok || Date.now() - (eerder.t || 0) < ICOON_OPNIEUW_MS)) return eerder
+  if (projIcoonBezig.has(pad)) return eerder || null
 
   projIcoonBezig.add(pad)
   try {
     const uit = await window.api[zoeker](pad)
-    projIcoonPerPad.set(pad, uit || { ok: false, reden: 'geen' })
+    projIcoonPerPad.set(pad, uit && uit.ok ? uit : { ...(uit || { ok: false, reden: 'geen' }), t: Date.now() })
     // Alleen hertekenen als er ook echt iets te zien is. Anders zou elk
     // project zonder icoon een ronde tekenwerk kosten voor niets.
     if (uit && uit.ok) {
@@ -948,7 +956,7 @@ async function ververesIcoonViaPad(pad, zoeker) {
     }
     return projIcoonPerPad.get(pad)
   } catch {
-    projIcoonPerPad.set(pad, { ok: false, reden: 'fout' })
+    projIcoonPerPad.set(pad, { ok: false, reden: 'fout', t: Date.now() })
     return null
   } finally {
     projIcoonBezig.delete(pad)
@@ -20673,6 +20681,11 @@ async function haalRepoBinnen(project, adres, doel, ouder) {
       return
     }
   }
+
+  // De map was leeg toen de zijbalk hem voor het eerst tekende: nu er een
+  // project in staat, opnieuw naar het icoon kijken.
+  await vergeetProjIcoon(doel)
+  projIcoonInhoud(project)
 
   await controleerKoppeling(doel, true)
   neemNaamNaGitKoppelen(project, GitTools.repoNaamUitUrl(adres))
