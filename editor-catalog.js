@@ -166,4 +166,15 @@ const EDITORS = [
   { id: 'atom', label: 'Atom', gebruiker: ['..\\Local\\atom\\atom.exe'], startMenu: /^atom$/i },
 ]
 
-module.exports = { EDITORS }
+// Gevonden editors die de catalogus niet meer kent eruit. Oudere versies vonden
+// bijvoorbeeld Notepad++; die regel is uit de catalogus, maar wat toen in de
+// instellingen belandde bleef staan -- na elke update en op elke nieuwe pc.
+// Alleen wat de scan ooit vond heeft een catalogId; wat je zelf toevoegde
+// blijft dus altijd staan.
+const CATALOGUS_IDS = new Set(EDITORS.map(e => e.id))
+
+function zonderVerouderdeEditors(lijst) {
+  return (lijst || []).filter(e => !e || !e.catalogId || CATALOGUS_IDS.has(e.catalogId))
+}
+
+module.exports = { EDITORS, zonderVerouderdeEditors }

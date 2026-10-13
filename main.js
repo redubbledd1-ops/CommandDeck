@@ -11,7 +11,7 @@ const { parseFlutterAndroidDevices } = require('./flutter-devices')
 const { buildSed } = require('./bat-exe')
 const { BUILTIN_COMMANDS } = require('./cmd-library')
 const { psCommandLaunch, psWindowLaunch } = require('./ps-launch')
-const { EDITORS } = require('./editor-catalog')
+const { EDITORS, zonderVerouderdeEditors } = require('./editor-catalog')
 const GitTools = require('./git-tools')
 const WebTools = require('./web-tools')
 const NoteTools = require('./note-tools')
@@ -636,6 +636,7 @@ function vulLegeWerkmap(sectie) {
 
 function loadSettings() {
   let merged = null
+  let editorsOpgeruimd = false
   try {
     if (fs.existsSync(SETTINGS_FILE)) {
       const s = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'))
@@ -662,10 +663,12 @@ function loadSettings() {
               modellen:  { ...(s.ai && s.ai.modellen  || {}) },
               endpoints: { ...(s.ai && s.ai.endpoints || {}) } },
       }
+      const voor = Array.isArray(s.customEditors) ? s.customEditors : []
+      editorsOpgeruimd = zonderVerouderdeEditors(voor).length < voor.length
     }
   } catch {}
   if (!merged) merged = { ...DEFAULT_SETTINGS }
-  let moetOpslaan = false
+  let moetOpslaan = editorsOpgeruimd
   // Eerste start (of oud settings-bestand zonder taalveld): Windows-taal overnemen
   // en meteen wegschrijven, zodat dit maar één keer hoeft te gebeuren.
   if (!merged.language || !SUPPORTED_LANGUAGES.some(l => l.code === merged.language)) {
@@ -694,7 +697,7 @@ function migreerEigenEditors(s) {
       enabled: oud.enabled !== false,
     })
   }
-  return lijst
+  return zonderVerouderdeEditors(lijst)
 }
 
 function saveSettings(s) {

@@ -1,7 +1,7 @@
 // Bekende editors opsporen op de schijven
 const Module = require('module'), path = require('path'), fs = require('fs'), os = require('os')
 const REAL = path.join(__dirname, '..')
-const { EDITORS } = require(path.join(REAL, 'editor-catalog'))
+const { EDITORS, zonderVerouderdeEditors } = require(path.join(REAL, 'editor-catalog'))
 
 let ok = true
 const t = (l, c) => { console.log((c ? 'PASS  ' : 'FAIL  ') + l); if (!c) ok = false }
@@ -21,8 +21,25 @@ t('Claude Code en de Claude-app staan als aparte items in de catalogus',
   EDITORS.some(e => e.id === 'claudeCode') && EDITORS.some(e => e.id === 'claudeDesktop') &&
   EDITORS.find(e => e.id === 'claudeCode').label !== EDITORS.find(e => e.id === 'claudeDesktop').label)
 
+// ── wat een oude versie ooit vond, ruimen we op ──────────────────────────────
+// Notepad++ stond tot september in de catalogus. Wat toen in de instellingen
+// belandde, bleef daar staan -- ook op een nieuwe pc en na elke update.
+const notepadOud = { id: 'ce_notepadpp_5ve', label: 'Notepad++', path: 'C:\\Program Files\\Notepad++\\notepad++.exe', enabled: true, catalogId: 'notepadpp' }
+const vscodeGevonden = { id: 'ce_vscode_ueu', label: 'Visual Studio Code', path: 'C:\\Program Files\\Microsoft VS Code\\Code.exe', enabled: true, catalogId: 'vscode' }
+const zelfToegevoegd = { id: 'ce_eigen', label: 'Notepad++', path: 'C:\\Program Files\\Notepad++\\notepad++.exe', enabled: true }
+{
+  const schoon = zonderVerouderdeEditors([notepadOud, vscodeGevonden, zelfToegevoegd])
+  t('een gevonden editor die de catalogus niet meer kent verdwijnt', !schoon.includes(notepadOud))
+  t('een gevonden editor uit de catalogus blijft', schoon.includes(vscodeGevonden))
+  t('wat je zelf toevoegde blijft altijd, ook Notepad++', schoon.includes(zelfToegevoegd))
+  t('een lege lijst kan geen kwaad', zonderVerouderdeEditors(undefined).length === 0)
+}
+
 // ── nagebootste installaties ─────────────────────────────────────────────────
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'scan-'))
+// Instellingen zoals een oude versie ze achterliet
+fs.writeFileSync(path.join(TMP, 'settings.json'),
+  JSON.stringify({ language: 'nl', customEditors: [notepadOud, vscodeGevonden] }))
 const maak = (p) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, 'nep') ; return p }
 
 // C-schijf
@@ -100,6 +117,15 @@ Module._load = orig
 const call = (n, a) => handlers[n](null, a)
 
 ;(async () => {
+{
+  const geladen = await call('settings:load')
+  const ids = (geladen.customEditors || []).map(e => e.catalogId)
+  t('bij het laden is de oude Notepad++ uit de instellingen', !ids.includes('notepadpp'))
+  t('en VS Code staat er nog', ids.includes('vscode'))
+  const opSchijf = JSON.parse(fs.readFileSync(path.join(TMP, 'settings.json'), 'utf8'))
+  t('de opschoning is ook weggeschreven, niet alleen in het geheugen',
+    !opSchijf.customEditors.some(e => e.catalogId === 'notepadpp'))
+}
 const gevonden = await call('app:scanEditors')
 fs.existsSync = echteExists
 fs.readdirSync = echteReaddir
