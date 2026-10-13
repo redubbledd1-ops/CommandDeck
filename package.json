@@ -1,6 +1,6 @@
 {
   "name": "commanddeck",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "description": "CommandDeck — Flutter & terminal command launcher",
   "author": "CommandDeck",
   "main": "src/main.js",
