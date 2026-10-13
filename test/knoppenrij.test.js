@@ -6,9 +6,9 @@
 // hier groen staat geldt voor alle drie.
 const fs = require('fs')
 const path = require('path')
-const K = require('../knoppenrij.js')
+const K = require('../src/knoppenrij.js')
 
-const APP = path.join(__dirname, '..')
+const APP = path.join(__dirname, '..', 'src')
 let ok = true
 const t = (label, waar) => { console.log((waar ? 'PASS  ' : 'FAIL  ') + label); if (!waar) ok = false }
 

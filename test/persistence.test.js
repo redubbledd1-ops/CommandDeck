@@ -14,7 +14,7 @@ if (!fs.existsSync(path.join(TMP, 'history.json'))) {
 
 const orig=Module._load
 Module._load=function(r){if(r==='electron')return fakeElectron;return orig.apply(this,arguments)}
-require(path.join(__dirname,'..','main.js'))
+require(path.join(__dirname, '..', 'src', 'main.js'))
 const call=(n,a)=>handlers[n](null,a)
 ;(async()=>{
 let ok=true; const check=(l,c)=>{console.log((c?'PASS  ':'FAIL  ')+l);if(!c)ok=false}

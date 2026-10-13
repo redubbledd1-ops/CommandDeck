@@ -1,5 +1,5 @@
 const fs = require('fs'), path = require('path')
-const G = require('../git-tools')
+const G = require('../src/git-tools')
 
 let ok = true
 const t = (l, c) => { console.log((c ? 'PASS  ' : 'FAIL  ') + l); if (!c) ok = false }
@@ -162,15 +162,15 @@ t('een gelukte push niet', !G.pushGeweigerdFout('To github.com:ik/b.git\n * [new
   t('niets gevonden is een lege lijst', G.grooteBlobs('').length === 0)
 }
 {
-  const ren = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer.js'), 'utf8')
+  const ren = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'renderer.js'), 'utf8')
   const koppel = (ren.match(/async function koppelGithub[\s\S]*?\n\}/) || [''])[0]
   t('koppelen kijkt vóór de push naar te grote bestanden',
     koppel.indexOf('grootBestandTegenhouden') > -1
       && koppel.indexOf('grootBestandTegenhouden') < koppel.indexOf('KOPPEL_GH, {'))
-  const hoofd = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8')
+  const hoofd = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'main.js'), 'utf8')
   t('de controle telt alleen commits die nog nergens staan',
     /git:grootInGeschiedenis[\s\S]*?'--not', '--remotes'/.test(hoofd))
-  const nlG = require('../locales/nl.json'), enG = require('../locales/en.json')
+  const nlG = require('../src/locales/nl.json'), enG = require('../src/locales/en.json')
   for (const k of ['git.groot.vooraf', 'git.groot.zoekBezig'])
     t('tekst ' + k + ' in nl en en', !!nlG[k] && !!enG[k])
 }
@@ -965,12 +965,12 @@ t('een profiel zonder GitHub-account zet alleen de naam',
 // maar nooit inlogde, kreeg meteen de omweg via de browser — terwijl de app
 // het allebei kan oplossen. En wie helemaal geen GitHub-account had, hoorde
 // nergens dat dát de eerste stap is.
-const rendererBron2 = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer.js'), 'utf8')
+const rendererBron2 = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'renderer.js'), 'utf8')
 const zorgBlok = (rendererBron2.match(/async function zorgVoorGithub\(\)[\s\S]*?\n\}/) || [''])[0]
 
 t('na gh create roept de UI bescherming aan',
   /beschermMainNaAanmaken\(pad\)/.test(rendererBron2)
-  && /gitBeschermMain/.test(require('fs').readFileSync(require('path').join(__dirname, '..', 'preload.js'), 'utf8')))
+  && /gitBeschermMain/.test(require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'preload.js'), 'utf8')))
 
 t('de koppelknop vraagt eerst of GitHub klaarstaat',
   /const ghKlaar = await zorgVoorGithub\(\)/.test(rendererBron2))
@@ -989,7 +989,7 @@ t('ingelogd? dan meteen door, zonder venster',
 // `gh auth login --web` toont een code en wacht op Enter. In de gewone terminal
 // van de app kun je niets typen en de uitvoer niet selecteren — daar liep het
 // op vast. Main voert het gesprek nu zelf.
-const mainBron5 = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8')
+const mainBron5 = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'main.js'), 'utf8')
 const loginBlok = (mainBron5.match(/ipcMain\.handle\('git:ghLogin'[\s\S]*?\n\}\)\)/) || [''])[0]
 
 t('inloggen draait als los proces met stdin, niet als kaal commando',
@@ -1030,14 +1030,14 @@ t('ook niet de andere variant',
 t('en met een echte login wél',
   G.parseGhAccounts('  ✓ Logged in to github.com account frank-v (keyring)').length === 1)
 
-const mainBron4 = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8')
+const mainBron4 = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'main.js'), 'utf8')
 const statusBlok = (mainBron4.match(/ipcMain\.handle\('git:ghStatus'[\s\S]*?\n\}\)/) || [''])[0]
 t('er is een status die beide vragen beantwoordt',
   /geinstalleerd/.test(statusBlok) && /ingelogd/.test(statusBlok))
 t('ingelogd hangt aan een gevonden account, niet aan het bestaan van gh',
   /ingelogd: accounts\.length > 0/.test(statusBlok))
 
-const rendererBron = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer.js'), 'utf8')
+const rendererBron = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'renderer.js'), 'utf8')
 t('de renderer logt eerst in en haalt daarna pas op',
   rendererBron.indexOf('githubInloggen') > 0
   && rendererBron.indexOf('githubInloggen') < rendererBron.indexOf('await window.api.gitGhIdentiteit('))
@@ -1062,7 +1062,7 @@ t('dat GitHub aan je account koppelt',
 t('zonder login blijft het leeg — dan is er echt niets',
   G.parseGhAccounts('You are not logged into any GitHub hosts.').length === 0)
 
-const mainBron3 = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8')
+const mainBron3 = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'main.js'), 'utf8')
 const identBlok = (mainBron3.match(/ipcMain\.handle\('git:ghIdentiteit'[\s\S]*?\n\}\)/) || [''])[0]
 t('mislukken levert een reden op, geen kale null',
   /reden: 'geen-gh'/.test(identBlok) && /reden: 'niet-ingelogd'/.test(identBlok))
@@ -1115,8 +1115,8 @@ t('ontbreekt: een gewone git-fout is dat niet',
   && G.ontbrekendGitProgramma("'flutter' is not recognized as an internal or external command") === null)
 
 {
-  const mainBron = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8')
-  const renBron = fs.readFileSync(path.join(__dirname, '..', 'renderer.js'), 'utf8')
+  const mainBron = fs.readFileSync(path.join(__dirname, '..', 'src', 'main.js'), 'utf8')
+  const renBron = fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer.js'), 'utf8')
   const runBlok = (mainBron.match(/function runCommandOnce\([\s\S]*?\r?\n\}\r?\n/) || [''])[0]
   t('runCommandOnce kijkt vóór het starten of git of gh er is',
     runBlok.indexOf('gitProgrammaOntbreekt(cmd)') > 0
@@ -1180,7 +1180,7 @@ t('het adres is nooit leeg als er een login is',
 
 // De app moet git en gh met een verse PATH zoeken; anders vindt hij iets dat
 // net geïnstalleerd is pas na een herstart, en lijkt de installatie mislukt.
-const mainBron2 = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8')
+const mainBron2 = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'main.js'), 'utf8')
 const gitUitBlok = (mainBron2.match(/function gitUit\([\s\S]*?\n\}/) || [''])[0]
 t('git wordt gezocht met een verse PATH',
   gitUitBlok.length > 0 && /env: childEnv\(\)/.test(gitUitBlok))
@@ -1384,7 +1384,7 @@ t('zonder conflict is het nul',
 // ── bedrading naar de app ────────────────────────────────────────────────────
 // Zonder deze twee zie je de knoppen wel staan, maar grijs en zonder icoon —
 // ze lijken dan uitgeschakeld. Dat is precies wat er de eerste keer misging.
-const APP = path.join(__dirname, '..')
+const APP = path.join(__dirname, '..', 'src')
 const css = fs.readFileSync(path.join(APP, 'style.css'), 'utf8')
 const html = fs.readFileSync(path.join(APP, 'index.html'), 'utf8')
 const nl = JSON.parse(fs.readFileSync(path.join(APP, 'locales', 'nl.json'), 'utf8'))
@@ -1564,7 +1564,7 @@ t('index.html laadt git-tools.js vóór renderer.js',
   html.indexOf('src="git-tools.js"') > 0
   && html.indexOf('src="git-tools.js"') < html.indexOf('src="renderer.js"'))
 t('ui.test.js laadt git-tools.js ook',
-  fs.readFileSync(path.join(APP, 'test', 'ui.test.js'), 'utf8').includes('git-tools.js'))
+  fs.readFileSync(path.join(APP, '..', 'test', 'ui.test.js'), 'utf8').includes('git-tools.js'))
 
 // ── repo-naam en url opschonen ───────────────────────────────────────────────
 t('spaties worden streepjes', G.veiligeRepoNaam('Mijn Project') === 'Mijn-Project')
@@ -1887,7 +1887,7 @@ t('en het hoofdproces stelt de knop beschikbaar',
   /gitSlotenOpruimen/.test(fs.readFileSync(path.join(APP, 'preload.js'), 'utf8')))
 // Slotbestanden horen bij één pc op één moment, dus nooit in de repo.
 {
-  const negeer = fs.readFileSync(path.join(APP, '.gitignore'), 'utf8')
+  const negeer = fs.readFileSync(path.join(APP, '..', '.gitignore'), 'utf8')
   t('slotbestanden staan in .gitignore', /^\*\.lock$/m.test(negeer))
 }
 
@@ -2705,7 +2705,7 @@ t('een gewone regel niet', G.uncWaarschuwing('alles ging goed') === false)
   t('aanhalingstekens in het pad worden weggehaald',
     !G.cmdInMap('x', share + '"rare').cmd.replace('pushd "', '').replace('" && x', '').includes('"'))
 
-  const mainUnc = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8')
+  const mainUnc = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'main.js'), 'utf8')
   t('runCommandOnce gebruikt het omhulsel voor cmd',
     /const start = isPs \? null : GitTools\.cmdInMap\(cmd, cwd, process\.platform === 'win32'\)/.test(mainUnc))
   t('en spawnt het omhulde commando', /spawn\(start\.cmd, \[\]/.test(mainUnc))
@@ -2785,7 +2785,7 @@ t('een gewone regel niet', G.uncWaarschuwing('alles ging goed') === false)
     G.vensterInMap(share + '"rare', '', true) ===
       'start "" cmd.exe /k "pushd "' + share + 'rare""')
 
-  const mainVenster = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8')
+  const mainVenster = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'main.js'), 'utf8')
   const openCmdBlok = (mainVenster.match(/ipcMain\.handle\('shell:openCmd'[\s\S]*?\n\}\)/) || [''])[0]
   const openPsBlok = (mainVenster.match(/ipcMain\.handle\('shell:openPs'[\s\S]*?\n\}\)/) || [''])[0]
   const batTestBlok = (mainVenster.match(/ipcMain\.handle\('bat:test'[\s\S]*?\n\}\)/) || [''])[0]
@@ -2830,7 +2830,7 @@ t('een gewone regel niet', G.uncWaarschuwing('alles ging goed') === false)
 
 {
   // De toast hoort in de renderer: een los venster heeft geen uitvoerpaneel.
-  const ren = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer.js'), 'utf8')
+  const ren = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'renderer.js'), 'utf8')
   t('renderer heeft openCmdMetMelding', /async function openCmdMetMelding\(arg\)/.test(ren))
   t('die toast bij viaLetter', /r\.viaLetter[\s\S]{0,80}cmd\.uncViaLetterToast/.test(ren))
   // Alleen de helper mag openCmd aanroepen; knoppen gaan via openCmdMetMelding.
@@ -2864,8 +2864,8 @@ t('een gewone regel niet', G.uncWaarschuwing('alles ging goed') === false)
 
   // ouderVan liep hier door naar \\server en daarna naar een losse \, allebei
   // geen map die je kunt openen.
-  const ren = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer.js'), 'utf8')
-  const mainUnc = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8')
+  const ren = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'renderer.js'), 'utf8')
+  const mainUnc = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'main.js'), 'utf8')
   const ouderBlok = (ren.match(/function ouderVan\([\s\S]*?\n\}/) || [''])[0]
   t('boven een share zit alleen nog Deze pc',
     /GitTools\.isUncWortel\(kaal\)[\s\S]{0,40}return DEZE_PC/.test(ouderBlok))
@@ -2914,7 +2914,7 @@ t('een gewone regel niet', G.uncWaarschuwing('alles ging goed') === false)
     /reden: 'geen-netwerkpad'/.test(mainUnc))
   t('en iets dat niet antwoordt', /reden: 'niet-bereikbaar'/.test(mainUnc))
 
-  const pre = require('fs').readFileSync(require('path').join(__dirname, '..', 'preload.js'), 'utf8')
+  const pre = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'preload.js'), 'utf8')
   t('de renderer kan erbij via preload',
     /netwerkWortelToevoegen/.test(pre) && /netwerkWortelWeg/.test(pre))
 }
@@ -2954,7 +2954,7 @@ t('een gewone regel niet', G.uncWaarschuwing('alles ging goed') === false)
     t('netwerk-tekst ' + sleutel + ' bestaat in nl en en', !!nl[sleutel] && !!en[sleutel])
   }
 
-  const ren4 = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer.js'), 'utf8')
+  const ren4 = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'renderer.js'), 'utf8')
   t('koppelen vraagt het bare-patroon op een netwerkpad',
     /padIsNetwerk\(pad\)/.test(ren4)
     && /git\.link\.netwerkBare/.test(ren4)
@@ -2969,7 +2969,7 @@ t('een gewone regel niet', G.uncWaarschuwing('alles ging goed') === false)
 }
 
 {
-  const ren5 = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer.js'), 'utf8')
+  const ren5 = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'renderer.js'), 'utf8')
   t('koppelen kijkt eerst of de naam al bestaat',
     /zoekGhRepoOpNaam\(repoNaam\)/.test(ren5))
   t('en biedt dan koppelen aan in plaats van aanmaken',
@@ -2987,7 +2987,7 @@ t('een gewone regel niet', G.uncWaarschuwing('alles ging goed') === false)
     /GitTools\.negeerRegelVoor/.test(ren5)
     && ren5.indexOf('GitTools.negeerRegelVoor') < ren5.indexOf('window.api.gitHistOpzij'))
 
-  const hoofd5 = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8')
+  const hoofd5 = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'main.js'), 'utf8')
   const opzij = (hoofd5.match(/ipcMain\.handle\('git:histOpzij'[\s\S]*?\n\}\)/) || [''])[0]
   t('de hoofdkant zet .git opzij en gooit hem niet weg',
     /fs\.renameSync\(gitMap, doel\)/.test(opzij) && !/rmSync|rmdirSync|unlinkSync/.test(opzij))
@@ -2996,10 +2996,10 @@ t('een gewone regel niet', G.uncWaarschuwing('alles ging goed') === false)
   t('en als dat niet na te gaan is', /reden: 'remote-onbekend'/.test(opzij))
   t('de map moet van dit account zijn', /padToegestaan\(dir\)/.test(opzij))
   t('de renderer kan erbij via preload',
-    /git:histOpzij/.test(require('fs').readFileSync(require('path').join(__dirname, '..', 'preload.js'), 'utf8')))
+    /git:histOpzij/.test(require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'preload.js'), 'utf8')))
 
-  const nl5 = JSON.parse(require('fs').readFileSync(require('path').join(__dirname, '..', 'locales', 'nl.json'), 'utf8'))
-  const en5 = JSON.parse(require('fs').readFileSync(require('path').join(__dirname, '..', 'locales', 'en.json'), 'utf8'))
+  const nl5 = JSON.parse(require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'locales', 'nl.json'), 'utf8'))
+  const en5 = JSON.parse(require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'locales', 'en.json'), 'utf8'))
   for (const sleutel of ['git.groot.titel', 'git.groot.tekst', 'git.groot.tekstKaal',
                          'git.groot.opnieuw', 'git.groot.bevestigTitel', 'git.groot.bevestigTekst',
                          'git.groot.geenRegel', 'git.groot.negeerKop', 'git.groot.commitBericht',

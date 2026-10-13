@@ -1,6 +1,6 @@
 // Inkorten van lange paden in het commandoveld
 const fs = require('fs'), path = require('path')
-const src = fs.readFileSync(path.join(__dirname, '..', 'renderer.js'), 'utf8')
+const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer.js'), 'utf8')
 eval(src.match(/function shortenPath[\s\S]*?\n}/)[0])
 
 let ok = true

@@ -1,5 +1,5 @@
 // Pure notitie-logica: footer parse/schrijf en sorteren.
-const N = require('../note-tools')
+const N = require('../src/note-tools')
 
 let ok = true
 const t = (l, c) => { console.log((c ? 'PASS  ' : 'FAIL  ') + l); if (!c) ok = false }
@@ -80,7 +80,7 @@ t('zonder marker geen footer', !N.heeftNoteFooter('gewoon tekst'))
 
 // Contract: bedrading in de app
 const fs = require('fs'), path = require('path')
-const APP = path.join(__dirname, '..')
+const APP = path.join(__dirname, '..', 'src')
 const ren = fs.readFileSync(path.join(APP, 'renderer.js'), 'utf8')
 const html = fs.readFileSync(path.join(APP, 'index.html'), 'utf8')
 const main = fs.readFileSync(path.join(APP, 'main.js'), 'utf8')

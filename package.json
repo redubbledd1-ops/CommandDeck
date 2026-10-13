@@ -3,7 +3,7 @@
   "version": "1.0.11",
   "description": "CommandDeck — Flutter & terminal command launcher",
   "author": "CommandDeck",
-  "main": "main.js",
+  "main": "src/main.js",
   "engines": {
     "node": ">=22.22.0"
   },
@@ -58,7 +58,7 @@
           ]
         }
       ],
-      "icon": "assets/icon.ico"
+      "icon": "src/assets/icon.ico"
     },
     "nsis": {
       "oneClick": false,
@@ -68,9 +68,9 @@
       "createDesktopShortcut": false,
       "createStartMenuShortcut": true,
       "shortcutName": "CommandDeck",
-      "installerIcon": "assets/icon.ico",
-      "uninstallerIcon": "assets/icon.ico",
-      "installerHeaderIcon": "assets/icon.ico",
+      "installerIcon": "src/assets/icon.ico",
+      "uninstallerIcon": "src/assets/icon.ico",
+      "installerHeaderIcon": "src/assets/icon.ico",
       "deleteAppDataOnUninstall": false,
       "runAfterFinish": true,
       "menuCategory": false,
@@ -83,18 +83,8 @@
       "artifactName": "CommandDeck.exe"
     },
     "files": [
-      "**/*",
-      "!dist/**",
-      "!test/**",
-      "!.git/**",
-      "!TODO.md",
-      "!update-run.bat",
-      "!**/*.md",
-      "!**/*.map",
-      "!build/**",
-      "!scripts/**",
-      "!.claude/**",
-      "!.cursor/**"
+      "src/**/*",
+      "package.json"
     ],
     "asarUnpack": [
       "**/node_modules/@lydell/**"

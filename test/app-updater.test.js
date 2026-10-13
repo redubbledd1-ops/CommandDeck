@@ -1,5 +1,5 @@
 const { EventEmitter } = require('events')
-const { maakUpdater, RELEASES_URL } = require('../app-updater')
+const { maakUpdater, RELEASES_URL } = require('../src/app-updater')
 let ok = true; const check = (l, c) => { console.log((c ? 'PASS  ' : 'FAIL  ') + l); if (!c) ok = false }
 const wacht = (ms) => new Promise(r => setTimeout(r, ms))
 
@@ -136,7 +136,7 @@ function opzet({ packaged = true, portable = false, checkFout = null, herkansing
   // De bedrading in main: toestemming vragen met ons venster als eigenaar, en
   // pas ná de git-vragen van het afsluiten.
   {
-    const main = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8')
+    const main = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'main.js'), 'utf8')
     check('main start de installer na de afsluitcontrole',
       /ipcMain\.on\('git:afsluitenMag'[\s\S]{0,500}if \(updateVoorSluiten\)[\s\S]{0,200}ok = await start\(\)/.test(main)
       && /regelInstallatie: \(start\) =>[\s\S]{0,600}updateVoorSluiten = start\s*\n\s*win\.close\(\)/.test(main))

@@ -6,9 +6,9 @@ const os = require('os')
 const fs = require('fs')
 const path = require('path')
 
-const REAL = path.join(__dirname, '..')
-const { AI_PROVIDERS, vindProvider, vindModel } = require('../ai-providers')
-const { maakAi, sseBlokken, sseData } = require('../ai-runtime')
+const REAL = path.join(__dirname, '..', 'src')
+const { AI_PROVIDERS, vindProvider, vindModel } = require('../src/ai-providers')
+const { maakAi, sseBlokken, sseData } = require('../src/ai-runtime')
 
 let ok = true
 const check = (l, c) => { console.log((c ? 'PASS  ' : 'FAIL  ') + l); if (!c) ok = false }
@@ -207,7 +207,7 @@ check('zonder systeemprompt blijft het veld weg',
     return /sessie sluiten/.test(nl['ai.viaProgramHint'] || '')
   })())
   check('dat catalogus-id bestaat ook echt in de programmacatalogus', (() => {
-    const { EDITORS } = require('../editor-catalog')
+    const { EDITORS } = require('../src/editor-catalog')
     return metProgramma.every(p => EDITORS.some(e => e.id === p.programma.catalogId))
   })())
   check('en dat commando krijgt een echte terminal', (() => {
@@ -643,7 +643,7 @@ check('zonder systeemprompt blijft het veld weg',
 
 // ── Wat er in het woordenboek terechtkomt ─────────────────────────────────────
 {
-  const { BUILTIN_COMMANDS } = require('../cmd-library')
+  const { BUILTIN_COMMANDS } = require('../src/cmd-library')
   const metTag = (t) => BUILTIN_COMMANDS.filter(c => (c.tags || []).includes(t))
   const ai = metTag('ai')
   const wb = metTag('woordenboek')

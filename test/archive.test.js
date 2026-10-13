@@ -1,6 +1,6 @@
 // Zip zelf lezen, en de rest via 7-Zip of WinRAR
 const path = require('path'), fs = require('fs'), os = require('os'), zlib = require('zlib')
-const a = require(path.join(__dirname, '..', 'archive'))
+const a = require(path.join(__dirname, '..', 'src', 'archive'))
 
 let ok = true
 const t = (l, c) => { console.log((c ? 'PASS  ' : 'FAIL  ') + l); if (!c) ok = false }

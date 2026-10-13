@@ -1,6 +1,6 @@
 const fs = require('fs'), path = require('path')
 const { JSDOM } = require('jsdom')
-const APP = path.join(__dirname, '..')
+const APP = path.join(__dirname, '..', 'src')
 
 let ok = true
 const check = (l, c) => { console.log((c ? 'PASS  ' : 'FAIL  ') + l); if (!c) ok = false }

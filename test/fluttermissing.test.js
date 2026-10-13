@@ -1,4 +1,4 @@
-const fx = require('../install-fixer')
+const fx = require('../src/install-fixer')
 const fs = require('fs')
 const path = require('path')
 let ok = true
@@ -15,7 +15,7 @@ const a = fx.analyzeFailure("'flutter' is not recognized as an internal or exter
 t('rule flutter-sdk-missing matcht', a.matchedRules.includes('flutter-sdk-missing'))
 t('helptekst aanwezig', fx.FLUTTER_MISSING_HELP.length >= 4)
 
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8')
+const main = fs.readFileSync(path.join(__dirname, '..', 'src', 'main.js'), 'utf8')
 t('default projectnaam', main.includes("name: 'Default Flutter Project'"))
 t('geen dd_crypto meer', !main.includes('dd_crypto'))
 t('geen persoonlijk redub-pad', !main.includes('Users\\\\redub\\\\Desktop\\\\dd_crypto'))

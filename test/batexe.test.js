@@ -1,6 +1,6 @@
 // SED-generatie voor IExpress
 const path = require('path')
-const { buildSed, sanitizeString } = require(path.join(__dirname, '..', 'bat-exe'))
+const { buildSed, sanitizeString } = require(path.join(__dirname, '..', 'src', 'bat-exe'))
 
 let ok = true
 const t = (l, c) => { console.log((c ? 'PASS  ' : 'FAIL  ') + l); if (!c) ok = false }

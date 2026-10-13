@@ -1,5 +1,5 @@
 const Module=require('module'),path=require('path'),fs=require('fs'),os=require('os')
-const REAL=path.join(__dirname,'..')
+const REAL=path.join(__dirname,'..', 'src')
 let ok=true; const check=(l,c)=>{console.log((c?'PASS  ':'FAIL  ')+l);if(!c)ok=false}
 
 const ROOT=fs.mkdtempSync(path.join(os.tmpdir(),'bat-'))
@@ -99,12 +99,17 @@ Module._load=orig
   check('en schiet een blijvend proces alsnog af',
     bat.slice(bat.indexOf(':ruim_op')).includes('taskkill /F /IM CommandDeck.exe'))
   // De uitvoermap ligt buiten het project, dus electron-builder sluit dist niet
-  // meer vanzelf uit. Zonder deze regels pakt hij de vorige exe mee in de nieuwe
-  // en groeit het bestand met elke build.
-  const pkg = JSON.parse(fs.readFileSync(path.join(REAL, 'package.json'), 'utf8'))
-  check('dist wordt niet mee ingepakt', (pkg.build.files || []).includes('!dist/**'))
-  check('de tests ook niet', (pkg.build.files || []).includes('!test/**'))
-  check('en alles wat wel nodig is blijft', (pkg.build.files || [])[0] === '**/*')
+  // meer vanzelf uit. Vroeger ging alles mee behalve een lijst uitzonderingen;
+  // daardoor zat in 1.0.11 van alles wat toevallig in de map lag (update-logs,
+  // een oude renderer-kopie, _to_delete). Nu gaat alleen mee wat erin hoort.
+  const pkg = JSON.parse(fs.readFileSync(path.join(REAL, '..', 'package.json'), 'utf8'))
+  const files = pkg.build.files || []
+  check('alleen src en package.json gaan mee de app in',
+    files.length === 2 && files.includes('src/**/*') && files.includes('package.json'))
+  check('dist en de tests dus niet', !files.some(f => /^(\*\*|dist|test)/.test(f)))
+  check('package.json wijst naar main.js in src', pkg.main === 'src/main.js')
+  check('en main.js laadt het venster uit zijn eigen map, niet uit de app-wortel',
+    /win\.loadFile\(path\.join\(__dirname, 'index\.html'\)\)/.test(fs.readFileSync(path.join(REAL, 'main.js'), 'utf8')))
 
   // ── bouwen buiten de projectmap ────────────────────────────────────────────
   // Het uitpakken en hernoemen van Electron gaat mis in mappen die OneDrive of

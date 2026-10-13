@@ -48,7 +48,7 @@ Module._load = function (r) {
 // desktop-snelkoppeling.js haalt `spawn` er via destructuring bij het `require`
 // hierboven al uit — de nagebootste versie blijft dus gebonden ook nadat de
 // override hier weer teruggezet wordt.
-const DS = require('../desktop-snelkoppeling')
+const DS = require('../src/desktop-snelkoppeling')
 Module._load = orig
 
 ;(async () => {

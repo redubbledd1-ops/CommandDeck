@@ -112,7 +112,7 @@ function createWindow() {
     const { Menu } = require('electron')
     if (Menu && typeof Menu.setApplicationMenu === 'function') Menu.setApplicationMenu(null)
   } catch {}
-  win.loadFile('index.html')
+  win.loadFile(path.join(__dirname, 'index.html'))
   // Pas zoeken naar een update als het venster er staat; de start zelf merkt er niets van.
   win.webContents.once('did-finish-load', () => updater.planCheck())
   // Een nieuwe pagina moet zich opnieuw melden voor de afsluitcontrole.
@@ -5384,8 +5384,11 @@ function isSourceDir(dir) {
     if (!dir) return false
     const pkgPath = path.join(dir, 'package.json')
     if (!fs.existsSync(pkgPath)) return false
-    if (!fs.existsSync(path.join(dir, 'main.js'))) return false
-    return JSON.parse(fs.readFileSync(pkgPath, 'utf8')).name === 'commanddeck'
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'))
+    // De broncode staat in src/; package.json zegt waar main.js precies staat,
+    // zodat ook een oudere checkout (main.js in de hoofdmap) herkend wordt.
+    if (!fs.existsSync(path.join(dir, pkg.main || 'main.js'))) return false
+    return pkg.name === 'commanddeck'
   } catch { return false }
 }
 
@@ -5431,7 +5434,9 @@ ipcMain.handle('app:findSourceDir', () => findSourceDir())
 // Mappen die mee de build in gaan en dus meetellen voor "is er iets veranderd".
 // locales hoort er echt bij: die bestanden zitten in de app, en zonder deze
 // regel meldde een taalwijziging zich als "niets te updaten".
-const BRON_MAPPEN = ['assets', 'locales']
+// Sinds de broncode in src/ staat is dat de map die telt; assets en locales
+// blijven erbij voor een oudere checkout met alles in de hoofdmap.
+const BRON_MAPPEN = ['src', 'assets', 'locales']
 function bronVingerafdruk(dir) {
   const hash = crypto.createHash('sha1')
   const doe = (map, prefix) => {

@@ -31,7 +31,7 @@ Module._load = function (req, parent, isMain) {
 // Daarom meten we hieronder ten opzichte van de startvoorraad, en gebruiken we
 // commando's die níét in cmd-library.js staan — anders vindt het woordenboek
 // een bestaande meegeleverde regel en wordt er niets nieuws aangemaakt.
-require(path.join(__dirname,'..','main.js'))
+require(path.join(__dirname, '..', 'src', 'main.js'))
 
 const call = (n, a) => handlers[n](null, a)
 const HIST = path.join(TMP, 'history.json')

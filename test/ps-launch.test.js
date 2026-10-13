@@ -1,7 +1,7 @@
 // Hoe de powershell-sectie een proces start, los van Electron.
 const { psLaunchConfig, psCommandLaunch, psWindowLaunch,
         psFileLaunch, parsePs1Invocation,
-        psEncodeCommand, psScriptIncomplete } = require('../ps-launch')
+        psEncodeCommand, psScriptIncomplete } = require('../src/ps-launch')
 
 let ok = true
 const t = (l, c) => { console.log((c ? 'PASS  ' : 'FAIL  ') + l); if (!c) ok = false }

@@ -1,6 +1,6 @@
 // Bekende editors opsporen op de schijven
 const Module = require('module'), path = require('path'), fs = require('fs'), os = require('os')
-const REAL = path.join(__dirname, '..')
+const REAL = path.join(__dirname, '..', 'src')
 const { EDITORS, zonderVerouderdeEditors } = require(path.join(REAL, 'editor-catalog'))
 
 let ok = true

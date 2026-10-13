@@ -3,7 +3,7 @@
 // hoe de uitvoer wordt gelezen, niet of Windows zelf meewerkt.
 const Module = require('module'), path = require('path'), fs = require('fs'), os = require('os')
 const EventEmitter = require('events')
-const REAL = path.join(__dirname, '..')
+const REAL = path.join(__dirname, '..', 'src')
 
 let ok = true
 const t = (l, c) => { console.log((c ? 'PASS  ' : 'FAIL  ') + l); if (!c) ok = false }

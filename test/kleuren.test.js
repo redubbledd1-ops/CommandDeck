@@ -5,9 +5,9 @@
 // vallen of verdubbelt, laat de gekleurde laag onder het tekstvak wegschuiven —
 // en dat zie je pas als je het bestand al aan het bewerken bent.
 const fs = require('fs'), path = require('path')
-const K = require('../code-kleuren')
+const K = require('../src/code-kleuren')
 
-const APP = path.join(__dirname, '..')
+const APP = path.join(__dirname, '..', 'src')
 const nl = JSON.parse(fs.readFileSync(path.join(APP, 'locales/nl.json'), 'utf8'))
 const en = JSON.parse(fs.readFileSync(path.join(APP, 'locales/en.json'), 'utf8'))
 

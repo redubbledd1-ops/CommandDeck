@@ -1,4 +1,4 @@
-const C = require('../process-conflict')
+const C = require('../src/process-conflict')
 let ok = true
 const t = (l, c) => { console.log((c ? 'PASS  ' : 'FAIL  ') + l); if (!c) ok = false }
 
@@ -87,7 +87,7 @@ t('parse object', C.parseProcessJson('{"ProcessId":1,"Name":"dart.exe"}').length
 
 const fs = require('fs')
 const path = require('path')
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8')
+const main = fs.readFileSync(path.join(__dirname, '..', 'src', 'main.js'), 'utf8')
 t('main: conflictScan ipc', main.includes("cmd:conflictScan"))
 t('main: openTaskManager ipc', main.includes("cmd:openTaskManager"))
 t('main: geen stille killFlutter in applyFix kill-tak',

@@ -1,5 +1,5 @@
 const fs = require('fs'), path = require('path')
-const A = require('../accounts')
+const A = require('../src/accounts')
 
 let ok = true
 const t = (l, c) => { console.log((c ? 'PASS  ' : 'FAIL  ') + l); if (!c) ok = false }
@@ -199,7 +199,7 @@ t('en laat niets van het pad weg',
   A.normaliseerPad('C:/Map/Sub') === 'c:/map/sub')
 
 // ── de bedrading ─────────────────────────────────────────────────────────────
-const APP = path.join(__dirname, '..')
+const APP = path.join(__dirname, '..', 'src')
 const html = fs.readFileSync(path.join(APP, 'index.html'), 'utf8')
 t('index.html laadt accounts.js vóór renderer.js',
   html.indexOf('src="accounts.js"') > 0

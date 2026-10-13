@@ -1,6 +1,6 @@
 // Icoonbron inlezen: .ico, een programma, of een snelkoppeling die ernaar wijst
 const Module = require('module'), path = require('path'), fs = require('fs'), os = require('os')
-const REAL = path.join(__dirname, '..')
+const REAL = path.join(__dirname, '..', 'src')
 
 let ok = true
 const t = (l, c) => { console.log((c ? 'PASS  ' : 'FAIL  ') + l); if (!c) ok = false }

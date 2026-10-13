@@ -1,6 +1,6 @@
 // De aanvulling moet óók lopen bij iemand die de app al gebruikte
 const Module=require('module'),path=require('path'),fs=require('fs'),os=require('os')
-const REAL=path.join(__dirname,'..')
+const REAL=path.join(__dirname,'..', 'src')
 const {BUILTIN_COMMANDS}=require(path.join(REAL,'cmd-library'))
 let ok=true; const t=(l,c)=>{console.log((c?'PASS  ':'FAIL  ')+l);if(!c)ok=false}
 

@@ -1,4 +1,4 @@
-const { isAndroidDevice, parseFlutterAndroidDevices } = require('../flutter-devices')
+const { isAndroidDevice, parseFlutterAndroidDevices } = require('../src/flutter-devices')
 
 let ok = true
 const t = (l, c) => { console.log((c ? 'PASS  ' : 'FAIL  ') + l); if (!c) ok = false }
@@ -85,7 +85,7 @@ t('onzin-output → geen crash, geen apparaten', parseFlutterAndroidDevices('flu
 
 const fs = require('fs')
 const path = require('path')
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8')
+const main = fs.readFileSync(path.join(__dirname, '..', 'src', 'main.js'), 'utf8')
 t('main.js filtert niet meer op category === mobile', !main.includes("d.category === 'mobile'"))
 t('main.js gebruikt childEnv bij apparaatscan', /flutter devices[\s\S]{0,400}childEnv\(\)/.test(main)
   || /childEnv\(\)[\s\S]{0,200}flutter devices/.test(main)

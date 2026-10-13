@@ -1,6 +1,6 @@
 // De startvoorraad van het woordenboek
 const Module = require('module'), path = require('path'), fs = require('fs'), os = require('os')
-const REAL = path.join(__dirname, '..')
+const REAL = path.join(__dirname, '..', 'src')
 const { BUILTIN_COMMANDS } = require(path.join(REAL, 'cmd-library'))
 
 let ok = true

@@ -7,7 +7,7 @@
 // grens vast, plus de volgorde (launcher-icoon boven favicon) en de cache.
 
 const fs = require('fs'), os = require('os'), path = require('path')
-const Ico = require('../project-icoon')
+const Ico = require('../src/project-icoon')
 
 let ok = true
 const t = (l, c) => { console.log((c ? 'PASS  ' : 'FAIL  ') + l); if (!c) ok = false }

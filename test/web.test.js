@@ -1,9 +1,9 @@
 // Websitebestanden openen: de pure logica uit web-tools.js, plus de teksten en
 // de bedrading die erbij hoort. De UI-kant staat in ui.test.js.
 const fs = require('fs'), path = require('path')
-const W = require('../web-tools')
+const W = require('../src/web-tools')
 
-const APP = path.join(__dirname, '..')
+const APP = path.join(__dirname, '..', 'src')
 const nl = JSON.parse(fs.readFileSync(path.join(APP, 'locales/nl.json'), 'utf8'))
 const en = JSON.parse(fs.readFileSync(path.join(APP, 'locales/en.json'), 'utf8'))
 
@@ -124,7 +124,7 @@ t('buiten de map telt de huidige html niet',
   }).relatief === 'home.html')
 
 // ── Lichte aanvulling ────────────────────────────────────────────────────────
-const A = require('../lezer-aanvul')
+const A = require('../src/lezer-aanvul')
 t('taal volgt de extensie',
   A.taalVanPad('a/b.html') === 'html'
   && A.taalVanPad('x.CSS') === 'css'
@@ -167,7 +167,7 @@ t('open-keuze editor → termTab editor',
   && W.termTabVoorOpenKeuze('site') === 'output')
 
 // ── Website-helpknoppen ──────────────────────────────────────────────────────
-const WK = require('../web-knoppen')
+const WK = require('../src/web-knoppen')
 t('elke web-knop heeft een snippet',
   WK.WEB_CMD_DEFS.every(d => d.snippet && d.taal && d.groep))
 t('html/css/js hebben elk meerdere groepen',
