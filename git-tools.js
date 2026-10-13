@@ -2103,6 +2103,32 @@
          + ' --accept-package-agreements --accept-source-agreements'
   }
 
+  // Git zelf, met dezelfde regels als gh hierboven. Ontbreekt gh ook, dan gaat
+  // die in dezelfde ronde mee: zonder gh kan de app niet inloggen bij GitHub,
+  // en twee keer vragen voor één klus is er één te veel. `&` en niet `&&`:
+  // winget geeft ook een foutcode als iets er al staat, en dat mag de tweede
+  // installatie niet tegenhouden. Of het gelukt is meten we daarna zelf.
+  function gitInstallCommando(opties = {}) {
+    const git = 'winget install --id Git.Git -e --source winget --scope user'
+              + ' --accept-package-agreements --accept-source-agreements'
+    return opties.metGh ? git + ' & ' + ghInstallCommando() : git
+  }
+
+  // Welk programma een commando nodig heeft: 'git', 'gh' of null.
+  function gitProgrammaVan(cmd) {
+    const m = String(cmd || '').match(/^\s*(git|gh)(?:\.exe)?(?=\s|$)/i)
+    return m ? m[1].toLowerCase() : null
+  }
+
+  // "'git' is not recognized as an internal or external command" -- of de
+  // Nederlandse Windows-variant, of PowerShell. Geeft 'git', 'gh' of null.
+  function ontbrekendGitProgramma(uitvoer) {
+    const tekst = String(uitvoer || '')
+    const m = tekst.match(/['"]?\b(git|gh)['"]? (?:is not recognized|wordt niet herkend)/i)
+      || tekst.match(/The term '(git|gh)' is not recognized/i)
+    return m ? m[1].toLowerCase() : null
+  }
+
   // ── Je gegevens ophalen bij GitHub ──────────────────────────────────────────
   // Na het inloggen weet gh wie je bent. Dan hoeft niemand zijn naam en adres
   // over te typen — de app haalt ze op. Dat scheelt niet alleen werk maar ook
@@ -2456,6 +2482,7 @@
   }
 
   return {
+    gitInstallCommando, gitProgrammaVan, ontbrekendGitProgramma,
     GIT_CMD_DEFS, GIT_CMD_MAP, GIT_IDS, isGitId, isSchrijfKnop, STANDAARD_UIT_IDS,
     parseRemotes, parseBranch, parseStatusV2, maakStaat, zichtbareGitIds,
     zelfdeGitWeergave,

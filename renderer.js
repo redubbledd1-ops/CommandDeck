@@ -11945,6 +11945,76 @@ async function installeerGh(opties = {}) {
   return true
 }
 
+// Git (en zo nodig gh) installeren, op dezelfde manier als installeerGh: één
+// vraag, daarna winget in de uitvoer zodat je ziet wat er gebeurt. Op een
+// nieuwe pc liep een clone anders stuk op "'git' is not recognized", en moest
+// je zelf in cmd met winget aan de slag. `prog` is wat er ontbrak: 'git' of
+// 'gh'. Geeft true als het er daarna is.
+async function installeerGit(project, prog = 'git') {
+  let winget = false
+  try { winget = await window.api.gitWinget() } catch {}
+  let er = { git: false, gh: false }
+  try { er = await window.api.gitProgrammas() } catch {}
+  if (prog === 'gh' && !er.gh) return installeerGh()
+  if (er.git) return true
+
+  const keuze = await vraagKeuze({
+    titel: I18N.t('git.installeer.titel'),
+    tekst: I18N.t(!winget ? 'git.installeer.tekstGeenWinget'
+      : er.gh ? 'git.installeer.tekst' : 'git.installeer.tekstMetGh'),
+    knoppen: [
+      { label: I18N.t('common.cancel'), waarde: '' },
+      { label: I18N.t('git.installeer.naarSite'), waarde: 'site' },
+      ...(winget ? [{ label: I18N.t('git.installeer.knop'), waarde: 'winget', soort: 'primair' }] : []),
+    ],
+  })
+  if (!keuze) return false
+  if (keuze === 'site') { await window.api.openUrl('https://git-scm.com/download/win'); return false }
+
+  const p = project || projects.find(x => x.id === activeId) || projects[0]
+  if (!p) { await meldKort(I18N.t('git.installeer.titel'), I18N.t('git.inlog.geenProject')); return false }
+
+  if (view === 'settings') toggleSettings()
+  await executeCmd(p, GitTools.gitInstallCommando({ metGh: !er.gh }), null)
+
+  // Zelfde als na gh: het pad komt vers uit het register, een herstart van de
+  // app is niet nodig.
+  try { await window.api.gitGhVergeet() } catch {}
+  try { er = await window.api.gitProgrammas() } catch {}
+  if (!er.git) {
+    await meldKort(I18N.t('git.installeer.titel'), I18N.t('git.inlog.installMislukt'))
+    return false
+  }
+  showToast(I18N.t('git.installeer.klaarToast'))
+  return true
+}
+
+// Vóór iets dat git nodig heeft: staat het er, dan meteen door; zo niet, dan
+// aanbieden te installeren.
+async function zorgVoorGit(project) {
+  let er = { git: true }
+  try { er = await window.api.gitProgrammas() } catch {}
+  return er.git ? true : installeerGit(project, 'git')
+}
+
+// Een git- of gh-commando dat struikelde over een ontbrekend programma. Na een
+// geslaagde installatie bieden we aan het nog eens te doen: daar was je
+// tenslotte mee bezig. Geeft true als het opnieuw mag.
+async function naOntbrekendGit(project, prog, cmd) {
+  appendLine('warn', I18N.t('git.installeer.regel', { prog: prog === 'gh' ? 'GitHub CLI (gh)' : 'Git' }))
+  const gelukt = await installeerGit(project, prog)
+  if (!gelukt || !cmd) return false
+  const nogmaals = await vraagKeuze({
+    titel: I18N.t(prog === 'gh' ? 'git.installeer.titelGh' : 'git.installeer.titel'),
+    tekst: I18N.t('git.installeer.opnieuw', { cmd }),
+    knoppen: [
+      { label: I18N.t('common.cancel'), waarde: '' },
+      { label: I18N.t('git.installeer.opnieuwKnop'), waarde: 'ja', soort: 'primair' },
+    ],
+  })
+  return nogmaals === 'ja'
+}
+
 // Uitleg als gh ontbreekt of winget geblokkeerd is. Geen stille installatie:
 // de gebruiker kiest, en ziet waar het vandaan komt.
 async function toonGhZelfDoen(opties = {}) {
@@ -16649,6 +16719,12 @@ async function executeCmd(project, cmd, cmdKey = null, opties = {}) {
     } else if (result.flutterMissing || result.manual) {
       setStatus('failed', '⚠ ' + I18N.t('term.manualActionRequiredStatus'))
     }
+    if (result.gitMissing && !opties.geenGitHerstel) {
+      setStatus('failed', '⚠ ' + I18N.t('term.manualActionRequiredStatus'))
+      if (await naOntbrekendGit(project, result.gitMissing, cmd)) {
+        return await executeCmd(project, cmd, cmdKey, { ...opties, geenGitHerstel: true })
+      }
+    }
     // Het commando klaagde dat het geen invoer kreeg: dan weet je waarom, en
     // hoe je het wel voor elkaar krijgt.
     if (stdinKlacht) {
@@ -18505,8 +18581,9 @@ async function koppelGithub(project) {
   let staat = await ververesGitStaat(project, true)
   if (!staat) return
   if (!staat.beschikbaar) {
-    await meldKort(I18N.t('git.link.noGitTitle'), I18N.t('git.link.noGitText'))
-    return
+    if (!(await installeerGit(project, 'git'))) return
+    staat = await ververesGitStaat(project, true)
+    if (!staat || !staat.beschikbaar) return
   }
 
   // Staat er een adres dat we nog niet nagekeken hebben? Dan eerst kijken, want
@@ -20580,6 +20657,9 @@ async function saveProjectModal() {
 async function haalRepoBinnen(project, adres, doel, ouder) {
   const cmd = GitTools.cloneCommando(adres, doel)
   if (!cmd) return
+  // Op een nieuwe pc is er vaak nog geen git. Dan eerst dat, anders strandt de
+  // clone op "'git' is not recognized".
+  if (!(await zorgVoorGit(project))) return
 
   await ververesGitStaat(project, true)
   const al = gitStaatVan(project)

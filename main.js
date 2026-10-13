@@ -3205,10 +3205,38 @@ ipcMain.handle('git:winget', () => {
 // het gelukt is. Dán mag het even blokkeren: een verkeerd antwoord hier laat een
 // geslaagde installatie op een mislukte lijken.
 ipcMain.handle('git:ghVergeet', () => {
-  ghAanwezig = null
-  gitAanwezig = null
+  vergeetGitMeting()
   try { windowsPathNu() } catch { windowsPathCache = { at: 0, value: '' } }
   return true
+})
+
+function vergeetGitMeting() {
+  ghAanwezig = null
+  gitAanwezig = null
+}
+
+// Heeft dit commando git of gh nodig, en ontbreekt dat? Geeft 'git', 'gh' of
+// null. Een eerder "nee" meten we opnieuw: wie git intussen zelf installeerde,
+// moet niet tot een herstart van de app tegen een oud antwoord aanlopen. Als
+// het er niet is, is die meting toch kort -- Windows zegt meteen ENOENT.
+async function gitProgrammaOntbreekt(cmd) {
+  const prog = GitTools.gitProgrammaVan(cmd)
+  if (prog === 'git') {
+    if (gitAanwezig === false) gitAanwezig = null
+    return (await heeftGitAsync()) ? null : 'git'
+  }
+  if (prog === 'gh') {
+    if (ghAanwezig === false) ghAanwezig = null
+    return (await ghBeschikbaarAsync()) ? null : 'gh'
+  }
+  return null
+}
+
+// Voor de renderer: staan git en gh er nu, vers gemeten.
+ipcMain.handle('git:programmas', async () => {
+  vergeetGitMeting()
+  const [git, gh] = await Promise.all([heeftGitAsync(), ghBeschikbaarAsync()])
+  return { git, gh }
 })
 
 // ── Mapgroottes ───────────────────────────────────────────────────────────────
@@ -4856,6 +4884,15 @@ function runCommandOnce({ projectId, cmd, cwd, echoCmd = true, shell } = {}) {
       return
     }
 
+    // Zelfde voor git en gh: zonder het programma geen "is not recognized" en
+    // "afgebroken (exit 1)", maar de vraag aan de renderer of het erop mag.
+    const gitNodig = await gitProgrammaOntbreekt(cmd)
+    if (gitNodig) {
+      if (echoCmd) sendOutput(projectId, 'cmd', `> ${cmd}`)
+      resolve({ code: 1, output: '', gitMissing: gitNodig })
+      return
+    }
+
     const chunks = []
     const capture = (line) => { chunks.push(line) }
     // Zet cmd zichzelf onderweg alsnog in een andere map, dan mag de uitkomst
@@ -4921,7 +4958,11 @@ function runCommandOnce({ projectId, cmd, cwd, echoCmd = true, shell } = {}) {
         : uitgeweken ? '✗ niet in de projectmap gedraaid'
         :              `✗ afgebroken (exit ${code})`)
       sendOutput(projectId, 'sep', '')
-      resolve({ code: uitgeweken && code === 0 ? 1 : (code ?? 1), output, uitgeweken })
+      // Ook als git midden in een samengesteld commando ontbreekt, of als de
+      // meting hierboven nog van vóór een verwijdering was.
+      const gitMissing = ok ? null : GitTools.ontbrekendGitProgramma(output)
+      if (gitMissing) vergeetGitMeting()
+      resolve({ code: uitgeweken && code === 0 ? 1 : (code ?? 1), output, uitgeweken, gitMissing })
     })
 
     proc.on('error', err => {
@@ -5130,6 +5171,7 @@ ipcMain.handle('cmd:run', async (_, opts) => {
     output: r.output || '',
     cancelled: cancelRequested,
     flutterMissing: !!r.flutterMissing,
+    gitMissing: r.gitMissing || null,
     manual: !!r.flutterMissing,
   }
 })

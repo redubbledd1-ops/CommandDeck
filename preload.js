@@ -56,6 +56,7 @@ contextBridge.exposeInMainWorld('api', {
   gitGh:         ()      => ipcRenderer.invoke('git:gh'),
   gitGhVergeet:  ()      => ipcRenderer.invoke('git:ghVergeet'),
   gitWinget:     ()      => ipcRenderer.invoke('git:winget'),
+  gitProgrammas: ()      => ipcRenderer.invoke('git:programmas'),
   gitGhStatus:   ()      => ipcRenderer.invoke('git:ghStatus'),
   gitRemoteCheck:  (p)   => ipcRenderer.invoke('git:remoteCheck', p),
   gitRemoteVergeet:(p)   => ipcRenderer.invoke('git:remoteVergeet', p),

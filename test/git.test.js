@@ -1082,6 +1082,61 @@ t('en blijft niet hangen op een bevestiging die niemand ziet',
 t('het installeert niets anders',
   !/(;|&&|\|\|)/.test(inst) && (inst.match(/--id/g) || []).length === 1)
 
+// ── git zelf installeren ─────────────────────────────────────────────────────
+// Op een nieuwe pc strandde een clone op "'git' is not recognized", en moest je
+// buiten de app om in cmd met winget aan de slag.
+const gitInst = G.gitInstallCommando()
+t('git: precies het juiste pakket', gitInst.includes('--id Git.Git') && gitInst.includes('-e'))
+t('git: uit de winget-bron', gitInst.includes('--source winget'))
+t('git: zonder beheerdersrechten', gitInst.includes('--scope user'))
+t('git: blijft niet hangen op een bevestiging',
+  gitInst.includes('--accept-package-agreements') && gitInst.includes('--accept-source-agreements'))
+t('git: alleen git als gh er al is', (gitInst.match(/--id/g) || []).length === 1 && !/GitHub\.cli/.test(gitInst))
+const gitEnGh = G.gitInstallCommando({ metGh: true })
+t('git: ontbreekt gh ook, dan gaat die in dezelfde ronde mee',
+  gitEnGh.includes('--id Git.Git') && gitEnGh.includes('--id GitHub.cli'))
+t('git: en een mislukte eerste stap houdt de tweede niet tegen', / & /.test(gitEnGh) && !/&&/.test(gitEnGh))
+
+t('welk programma: git', G.gitProgrammaVan('git clone -- "a" "b"') === 'git')
+t('welk programma: gh', G.gitProgrammaVan('  gh auth login') === 'gh')
+t('welk programma: git.exe telt ook', G.gitProgrammaVan('git.exe status') === 'git')
+t('welk programma: alleen git', G.gitProgrammaVan('git') === 'git')
+t('welk programma: gitk of github-iets is geen git', G.gitProgrammaVan('gitk') === null && G.gitProgrammaVan('ghost') === null)
+t('welk programma: iets anders', G.gitProgrammaVan('flutter run') === null && G.gitProgrammaVan('') === null)
+
+t('ontbreekt: cmd in het Engels',
+  G.ontbrekendGitProgramma("'git' is not recognized as an internal or external command,") === 'git')
+t('ontbreekt: cmd in het Nederlands',
+  G.ontbrekendGitProgramma("'gh' wordt niet herkend als een interne of externe opdracht") === 'gh')
+t('ontbreekt: PowerShell',
+  G.ontbrekendGitProgramma("git : The term 'git' is not recognized as the name of a cmdlet") === 'git')
+t('ontbreekt: een gewone git-fout is dat niet',
+  G.ontbrekendGitProgramma('fatal: not a git repository') === null
+  && G.ontbrekendGitProgramma("'flutter' is not recognized as an internal or external command") === null)
+
+{
+  const mainBron = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8')
+  const renBron = fs.readFileSync(path.join(__dirname, '..', 'renderer.js'), 'utf8')
+  const runBlok = (mainBron.match(/function runCommandOnce\([\s\S]*?\r?\n\}\r?\n/) || [''])[0]
+  t('runCommandOnce kijkt vóór het starten of git of gh er is',
+    runBlok.indexOf('gitProgrammaOntbreekt(cmd)') > 0
+    && runBlok.indexOf('gitProgrammaOntbreekt(cmd)') < runBlok.indexOf('spawn('))
+  t('en herkent het achteraf ook aan de uitvoer', /GitTools\.ontbrekendGitProgramma\(output\)/.test(runBlok))
+  t('cmd:run geeft dat door aan de renderer',
+    /ipcMain\.handle\('cmd:run'[\s\S]{0,500}gitMissing: r\.gitMissing/.test(mainBron))
+  t('een eerder "geen git" wordt opnieuw gemeten',
+    /async function gitProgrammaOntbreekt[\s\S]{0,400}if \(gitAanwezig === false\) gitAanwezig = null/.test(mainBron))
+  const kloon = (renBron.match(/async function haalRepoBinnen\([\s\S]*?\r?\n\}\r?\n/) || [''])[0]
+  t('clonen vraagt eerst om git, vóór de clone zelf',
+    kloon.indexOf('zorgVoorGit(project)') > 0 && kloon.indexOf('zorgVoorGit(project)') < kloon.indexOf('executeCmd('))
+  t('koppelen aan GitHub biedt installeren aan in plaats van alleen "niet gevonden"',
+    /if \(!staat\.beschikbaar\) \{\s*if \(!\(await installeerGit\(project, 'git'\)\)\) return/.test(renBron))
+  t('een getypt git-commando zonder git leidt naar installeren, en daarna één keer opnieuw',
+    /if \(result\.gitMissing && !opties\.geenGitHerstel\)[\s\S]{0,300}geenGitHerstel: true/.test(renBron))
+  t('installeren gaat via winget in de uitvoer, met gh erbij als die ook ontbreekt',
+    /GitTools\.gitInstallCommando\(\{ metGh: !er\.gh \}\)/.test(renBron))
+}
+
 // ── je gegevens ophalen bij GitHub ───────────────────────────────────────────
 // Zodat niemand zijn naam en adres hoeft over te typen. Een tikfout in je
 // e-mailadres merk je pas als GitHub je commits niet meer aan je koppelt.
