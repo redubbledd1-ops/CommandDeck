@@ -102,4 +102,33 @@ const r = spawnSync('npx', ['electron-builder', '--win', '--x64', '--publish', '
   shell: true,
   env: { ...process.env, GH_TOKEN: token, CSC_IDENTITY_AUTO_DISCOVERY: 'false' },
 })
-process.exit(r.status ?? 1)
+
+// Een release zonder bestanden is voor de updater de nieuwste: die zoekt daar
+// latest.yml, vindt niets, en dan krijgt niemand meer een updatemelding — ook
+// niet voor de vorige, wel complete versie. Mislukt het bouwen of uploaden, dan
+// gaat de release terug naar concept (onzichtbaar voor de updater). Lukt het,
+// dan wordt hij pas gepubliceerd nadat latest.yml er echt op staat.
+const ghEnv = { ...process.env, GH_TOKEN: token }
+const gh = (args) => execFileSync('gh', args, { encoding: 'utf8', env: ghEnv, stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+const namenOp = () => probeer(() => gh(['release', 'view', tag, '--json', 'assets', '-q', '.assets[].name'])).split(/\r?\n/)
+
+if (r.status !== 0) {
+  try {
+    gh(['release', 'edit', tag, '--draft'])
+    console.error(`\nBouwen of uploaden mislukt. ${tag} staat nu als concept op GitHub, zodat de update-melding van de vorige versie blijft werken.\nLos het probleem op en draai "npm run release" om dezelfde versie af te maken.\n`)
+  } catch {
+    console.error(`\nBouwen of uploaden mislukt, en ${tag} kon niet terug naar concept. Doe dat zelf:\n  gh release edit ${tag} --draft\n`)
+  }
+  process.exit(r.status ?? 1)
+}
+
+if (!namenOp().includes('latest.yml')) {
+  probeer(() => gh(['release', 'edit', tag, '--draft']))
+  stop(`latest.yml staat niet op ${tag}, dus geen enkele app zou de update zien. De release staat als concept; draai "npm run release" opnieuw.`)
+}
+// Stond hij als concept (na een eerdere mislukte poging), dan nu publiceren.
+if (probeer(() => gh(['release', 'view', tag, '--json', 'isDraft', '-q', '.isDraft'])) === 'true') {
+  gh(['release', 'edit', tag, '--draft=false', '--latest'])
+  console.log(`${tag} is gepubliceerd.`)
+}
+process.exit(0)

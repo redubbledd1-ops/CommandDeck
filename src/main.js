@@ -5317,7 +5317,16 @@ ipcMain.handle('release:run', async (_, { projectId, dir, soort, notes, bouwen }
       const stap = stappen[i]
       sendOutput(projectId, 'info', `▶ ${i + 1}/${stappen.length}  ${stap.label}`)
       let gelukt = false
-      if (stap.intern) {
+      if (stap.intern && stap.intern.actie === 'controleerAssets') {
+        // Staan de verwachte bestanden echt op de release?
+        const ls = await execFileAsync('gh', ['release', 'view', stap.intern.tag, '--json', 'assets', '-q', '.assets[].name'],
+          { cwd: dir, env: childEnv({ GH_TOKEN: token }), timeout: 30000 })
+        const namen = ls.uit.split(/\r?\n/).map(s => s.trim()).filter(Boolean)
+        const mist = stap.intern.verwacht.filter(n => !namen.includes(n))
+        if (ls.fout) sendOutput(projectId, 'err', `Kon de release niet bekijken: ${(ls.stderr || ls.fout.message || '').trim()}`)
+        else if (mist.length) sendOutput(projectId, 'err', `Op de release ontbreekt: ${mist.join(', ')}`)
+        else { sendOutput(projectId, 'ok', `✓ ${stap.intern.verwacht.join(', ')} staat online`); gelukt = true }
+      } else if (stap.intern) {
         try {
           const pad = path.join(dir, stap.intern.bestand)
           const tekst = fs.readFileSync(pad, 'utf8')
@@ -5332,10 +5341,18 @@ ipcMain.handle('release:run', async (_, { projectId, dir, soort, notes, bouwen }
       }
       if (!gelukt) {
         sendOutput(projectId, 'err', `✗ Release afgebroken bij: ${stap.label}`)
-        const tip = ReleaseTools.afmaakTip(stappen, stap.id)
+        // Een release zonder bestanden zou de update-melding van iedereen
+        // blokkeren; terug naar concept tot hij compleet is.
+        let naarConcept = false
+        if (ReleaseTools.TERUG_NAAR_CONCEPT.includes(stap.id)) {
+          const dr = await runCommandOnce({ projectId, cmd: ReleaseTools.conceptCommando(tag), cwd: dir, extraEnv: { GH_TOKEN: token } })
+          naarConcept = dr.code === 0
+          if (!naarConcept) sendOutput(projectId, 'err', `Zet ${tag} zelf terug naar concept (gh release edit ${tag} --draft): hij staat nu zonder bestanden online en blokkeert update-meldingen.`)
+        }
+        const tip = naarConcept || !ReleaseTools.TERUG_NAAR_CONCEPT.includes(stap.id) ? ReleaseTools.afmaakTip(stappen, stap.id) : ''
         if (tip) sendOutput(projectId, 'warn', tip)
         sendOutput(projectId, 'sep', '')
-        return { ok: false, reden: 'stap', stap: stap.id, label: stap.label, tip, tag }
+        return { ok: false, reden: 'stap', stap: stap.id, label: stap.label, tip, tag, naarConcept }
       }
     }
     const url = info.remote ? `https://github.com/${info.remote.owner}/${info.remote.repo}/releases/tag/${tag}` : ''

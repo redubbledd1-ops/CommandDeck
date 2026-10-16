@@ -88,7 +88,7 @@ is('ontbrekende dependencies houden de release tegen', ids({ ...prima, ontbreekt
 // ── stappen ──────────────────────────────────────────────────────────────────
 const cmds = (s) => s.map(x => x.cmd || '[intern]')
 const el = R.bouwStappen({ type: 'electron', nieuw: '1.0.13', versieBestanden: ['package.json', 'package-lock.json'], notesPad: 'C:\\tmp\\n.md' })
-is('electron-stappen', el.map(s => s.id), ['versie', 'add', 'commit', 'tag', 'push', 'release', 'bouw'])
+is('electron-stappen', el.map(s => s.id), ['versie', 'add', 'commit', 'tag', 'push', 'release', 'bouw', 'controle'])
 t('electron: npm version zonder hooks en zonder eigen tag', el[0].cmd === 'npm version 1.0.13 --no-git-tag-version --ignore-scripts')
 t('electron: beide bestanden toegevoegd', el[1].cmd === 'git add -- "package.json" "package-lock.json"')
 t('electron: bouwen krijgt token', el.find(s => s.id === 'bouw').tokenNodig === true)
@@ -108,6 +108,14 @@ t('tip bij mislukte push noemt de lokale tag', R.afmaakTip(el, 'push').includes(
 t('tip na de push noemt de stap zelf', R.afmaakTip(el, 'bouw').includes('npx electron-builder'))
 t('tip voor de push zegt dat er niets gepusht is', R.afmaakTip(el, 'versie').includes('nog niets gepusht'))
 is('tip bij onbekende stap', R.afmaakTip(el, 'bestaatniet'), '')
+// Een release zonder bestanden blokkeert de update-melding van iedereen
+t('mislukt bouwen: terug naar concept', R.TERUG_NAAR_CONCEPT.includes('bouw') && R.TERUG_NAAR_CONCEPT.includes('controle'))
+t('maar niet als de release zelf al mislukt', !R.TERUG_NAAR_CONCEPT.includes('release') && !R.TERUG_NAAR_CONCEPT.includes('push'))
+is('concept-commando', R.conceptCommando('v1.0.14'), 'gh release edit v1.0.14 --draft')
+is('publiceer-commando', R.publiceerCommando('v1.0.14'), 'gh release edit v1.0.14 --draft=false --latest')
+t('tip bij mislukt bouwen zegt hoe je publiceert', R.afmaakTip(el, 'bouw').includes('gh release edit v1.0.13 --draft=false --latest') && R.afmaakTip(el, 'bouw').includes('concept'))
+t('controle van latest.yml hoort bij electron', el.find(s => s.id === 'controle').intern.verwacht[0] === 'latest.yml')
+t('flutter heeft geen latest.yml-controle', !fl.some(s => s.id === 'controle'))
 
 if (!ok) { console.log('\n✗ ER ZIJN TESTS GEFAALD'); process.exit(1) }
 console.log('\n✓ alle release-tests geslaagd')

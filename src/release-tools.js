@@ -252,6 +252,11 @@
       stappen.push({ id: 'bouw', label: 'bouwen en uploaden (electron-builder)', tokenNodig: true,
         env: { CSC_IDENTITY_AUTO_DISCOVERY: 'false' },
         cmd: 'npx electron-builder --win --x64 --publish always' })
+      // electron-builder kan stil klaar zijn zonder te hebben geüpload. Zonder
+      // latest.yml op de release ziet geen enkele geïnstalleerde app de update,
+      // dus dat controleren we hier in plaats van het te geloven.
+      stappen.push({ id: 'controle', label: 'controleren of latest.yml online staat',
+        intern: { actie: 'controleerAssets', tag, verwacht: ['latest.yml'] } })
     } else if (bouwen && type === 'flutter') {
       stappen.push({ id: 'bouw', label: 'apk bouwen', cmd: 'flutter build apk --release' })
       stappen.push({ id: 'upload', label: 'apk uploaden', tokenNodig: true,
@@ -259,6 +264,15 @@
     }
     return stappen
   }
+
+  // Een release zonder bestanden is voor de updater de nieuwste: die zoekt daar
+  // latest.yml, vindt niets, en dan krijgt niemand meer een updatemelding —
+  // ook niet voor de vorige, wel complete versie. Mislukt het bouwen of
+  // uploaden, dan gaat de release terug naar concept (onzichtbaar voor de
+  // updater) tot hij compleet is.
+  const conceptCommando = (tag) => `gh release edit ${tag} --draft`
+  const publiceerCommando = (tag) => `gh release edit ${tag} --draft=false --latest`
+  const TERUG_NAAR_CONCEPT = ['bouw', 'upload', 'controle']
 
   // Wat je moet weten als een stap faalt: wat er al wel gebeurd is, en wat je
   // zelf nog kunt doen. De release is geen transactie; vanaf de push staat de
@@ -274,6 +288,11 @@
     if (stap.id === 'push') {
       return `De versie is lokaal opgehoogd, gecommit en getagd (${tagTekst}), maar niet gepusht. Los het probleem op en draai zelf: git push --follow-tags`
     }
+    if (TERUG_NAAR_CONCEPT.includes(stap.id)) {
+      const bouw = lijst.find(s => s.id === 'bouw')
+      return `${tagTekst} staat als concept op GitHub: onzichtbaar voor je gebruikers, zodat hun update-melding van de vorige versie blijft werken. `
+        + `Los het probleem op, bouw en upload opnieuw${bouw && bouw.cmd ? ` (${bouw.cmd})` : ''} en publiceer daarna met: ${publiceerCommando(tagTekst)}`
+    }
     if (naPush) {
       return `${tagTekst} staat al op GitHub. Los het probleem op en draai de stap zelf opnieuw: ${stap.cmd}`
     }
@@ -287,5 +306,6 @@
     isRuis, changelogConcept,
     githubRepoUitUrl, electronGereedheid, updatesMogelijk,
     blokkades, bouwStappen, afmaakTip,
+    conceptCommando, publiceerCommando, TERUG_NAAR_CONCEPT,
   }
 })
