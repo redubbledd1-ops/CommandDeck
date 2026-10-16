@@ -451,6 +451,7 @@
   "term.runningHereLine": "{name} draait hier · {path}",
   "term.notForInteractiveWarn": "Dit commando wil met je praten; daar is deze uitvoer niet voor gemaakt.",
   "term.openedInOwnWindowLine": "geopend in een eigen venster · {path}",
+  "term.ptyFallbackReason": "Ingebouwde terminal niet beschikbaar: {reason}",
   "term.endedOwnWindowStatus": "in eigen venster",
   "term.manualActionRequiredStatus": "handmatige actie vereist",
   "term.doneStatus": "klaar",

@@ -15292,15 +15292,15 @@ function laadXterm() {
   if (!kanScriptsBijladen()) return Promise.resolve(false)
   if (xtermLaden) return xtermLaden
   xtermLaden = (async () => {
-    const css = 'node_modules/@xterm/xterm/css/xterm.css'
+    const css = '../node_modules/@xterm/xterm/css/xterm.css'
     if (!document.querySelector(`link[href="${css}"]`)) {
       const l = document.createElement('link')
       l.rel = 'stylesheet'
       l.href = css
       document.head.appendChild(l)
     }
-    await laadVensterScript('node_modules/@xterm/xterm/lib/xterm.js')
-    await laadVensterScript('node_modules/@xterm/addon-fit/lib/addon-fit.js')
+    await laadVensterScript('../node_modules/@xterm/xterm/lib/xterm.js')
+    await laadVensterScript('../node_modules/@xterm/addon-fit/lib/addon-fit.js')
     return typeof window.Terminal === 'function'
   })()
   return xtermLaden
@@ -15310,7 +15310,10 @@ async function ptyMogelijk() {
   if (typeof window.Terminal !== 'function') {
     try { await laadXterm() } catch {}
   }
-  if (typeof window.Terminal !== 'function') return false
+  if (typeof window.Terminal !== 'function') {
+    ptyReden = 'xterm.js kon niet geladen worden (node_modules/@xterm ontbreekt of is niet bereikbaar vanuit index.html)'
+    return false
+  }
   if (ptyKan === null) {
     try {
       const r = await window.api.ptyBeschikbaar()
@@ -15322,6 +15325,13 @@ async function ptyMogelijk() {
     }
   }
   return ptyKan
+}
+
+// Waarom de echte terminal niet gebruikt kon worden. Leeg als er geen reden
+// bekend is. Zonder deze regel valt alles stil terug op een los consolevenster
+// en weet niemand waarom.
+function ptyTerugvalRegel() {
+  return ptyReden ? I18N.t('term.ptyFallbackReason', { reason: ptyReden }) : ''
 }
 
 // De naam op het tabblad: het programma, niet de hele regel met vlaggen.
@@ -16510,6 +16520,7 @@ async function aiStartProgramma(project, info, programma) {
 
   // Geen echte terminal beschikbaar: dan alsnog een eigen consolevenster.
   aiRegel(id, 't-warn', I18N.t('term.notForInteractiveWarn'))
+  if (ptyTerugvalRegel()) aiRegel(id, 't-warn', ptyTerugvalRegel())
   openCmdMetMelding({ cwd: loc.path, cmd: programma.cmd })
 }
 
@@ -16664,6 +16675,7 @@ async function executeCmd(project, cmd, cmdKey = null, opties = {}) {
     }
 
     appendLine('warn', I18N.t('term.notForInteractiveWarn'))
+    if (ptyTerugvalRegel()) appendLine('warn', ptyTerugvalRegel())
     appendLine('ok',  '✓ ' + I18N.t('term.openedInOwnWindowLine', { path: werkmap }))
     appendLine('sep', '')
     if (project.id === PS_CTX_ID) window.api.openPs({ cwd: werkmap, cmd })

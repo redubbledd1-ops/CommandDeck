@@ -451,6 +451,7 @@
   "term.runningHereLine": "{name} is running here · {path}",
   "term.notForInteractiveWarn": "This command wants to talk to you; this output isn’t built for that.",
   "term.openedInOwnWindowLine": "opened in its own window · {path}",
+  "term.ptyFallbackReason": "Built-in terminal unavailable: {reason}",
   "term.endedOwnWindowStatus": "in its own window",
   "term.manualActionRequiredStatus": "manual action required",
   "term.doneStatus": "done",
