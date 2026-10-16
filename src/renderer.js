@@ -4841,9 +4841,16 @@ function renderMain() {
           return
         }
         const r = await openCmdMetMelding({ cwd: loc.path, cmd: commando })
+        // Zeg waarom het niet in het uitvoerpaneel kon, anders weet niemand
+        // waarom de knop een los venster opent.
+        const terugval = ptyTerugvalRegel()
+        if (terugval) {
+          springNaarOutput()
+          appendLine('warn', terugval)
+        }
         // Netwerk-toast wint: die is nieuwer en zegt iets wat de gebruiker
         // anders niet ziet in het losse venster.
-        if (!(r && r.viaLetter)) showToast(I18N.t('editor.claudeCodeOpenedToast'))
+        if (!(r && r.viaLetter)) showToast(terugval || I18N.t('editor.claudeCodeOpenedToast'))
         return
       }
       window.api.openEditor({ editorPath: schoonPad || editorPath, cwd: loc.path })
