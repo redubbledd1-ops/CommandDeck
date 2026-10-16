@@ -201,6 +201,8 @@ contextBridge.exposeInMainWorld('api', {
 
   listFlutterDevices: (o)   => ipcRenderer.invoke('cmd:listFlutterDevices', o),
   runCmd:           (o)     => ipcRenderer.invoke('cmd:run', o),
+  releaseInfo:      (o)     => ipcRenderer.invoke('release:info', o),
+  releaseRun:       (o)     => ipcRenderer.invoke('release:run', o),
   runCmdWithAutofix:(o)     => ipcRenderer.invoke('cmd:runWithAutofix', o),
   openEditor:    (o)     => ipcRenderer.invoke('cmd:openEditor', o),
   openClaudeDesktop: (o) => ipcRenderer.invoke('cmd:openClaudeDesktop', o),

@@ -13,6 +13,7 @@ const { BUILTIN_COMMANDS } = require('./cmd-library')
 const { psCommandLaunch, psWindowLaunch } = require('./ps-launch')
 const { EDITORS, zonderVerouderdeEditors } = require('./editor-catalog')
 const GitTools = require('./git-tools')
+const ReleaseTools = require('./release-tools')
 const WebTools = require('./web-tools')
 const NoteTools = require('./note-tools')
 const ProjectIcoon = require('./project-icoon')
@@ -4868,7 +4869,7 @@ async function probeerBureaubladSnelkoppeling(projectId, cwd, line) {
   } catch { /* nooit de run zelf laten struikelen */ }
 }
 
-function runCommandOnce({ projectId, cmd, cwd, echoCmd = true, shell } = {}) {
+function runCommandOnce({ projectId, cmd, cwd, echoCmd = true, shell, extraEnv } = {}) {
   return new Promise(async (resolve) => {
     if (!validateCwd(projectId, cwd, shell)) {
       resolve({ code: 1, output: '' })
@@ -4911,14 +4912,14 @@ function runCommandOnce({ projectId, cmd, cwd, echoCmd = true, shell } = {}) {
     }
     const proc = isPs
       ? spawn(psStart.exe, psStart.args, {
-          cwd, env: childEnv(), windowsHide: true, shell: false,
+          cwd, env: childEnv(extraEnv), windowsHide: true, shell: false,
         })
       : spawn(start.cmd, [], {
           // cwd null = starten waar het hoofdproces staat; pushd springt meteen
           // daarna naar de netwerkmap, en zonder dat springen doet het commando
           // niets (zie het `&&` in cmdInMap).
           cwd: start.cwd === null ? undefined : start.cwd,
-          env: childEnv(), windowsHide: true, shell: true,
+          env: childEnv(extraEnv), windowsHide: true, shell: true,
         })
     activeProc = proc
 
@@ -5158,6 +5159,194 @@ ipcMain.handle('cmd:listFlutterDevices', async (_, opts) => {
   }
   if (!devices.length) devices = await flutterDevicesOnce(cwd, false)
   return devices
+})
+
+// ── Een versie uitbrengen ─────────────────────────────────────────────────────
+// De logica (versies, stappen, controles) staat in release-tools.js en is daar
+// getest. Hier staat wat Electron nodig heeft: git en gh aanroepen, bestanden
+// lezen en de stappen één voor één in het uitvoerpaneel draaien.
+
+function leesJsonBestand(p) {
+  try { return JSON.parse(fs.readFileSync(p, 'utf8').replace(/^﻿/, '')) } catch { return null }
+}
+function leesTekstBestand(p) {
+  try { return fs.readFileSync(p, 'utf8') } catch { return null }
+}
+
+// Gebruikt de code van de app electron-updater? We kijken alleen naar de
+// .js-bestanden naast het hoofdbestand; dat is waar zoiets in staat.
+function gebruiktElectronUpdater(dir, pkg) {
+  try {
+    const hoofd = path.join(dir, (pkg && pkg.main) || 'main.js')
+    const map = path.dirname(hoofd)
+    return fs.readdirSync(map).filter(f => f.endsWith('.js')).slice(0, 80).some(f => {
+      try {
+        const p = path.join(map, f)
+        if (fs.statSync(p).size > 3 * 1024 * 1024) return false
+        return fs.readFileSync(p, 'utf8').includes('electron-updater')
+      } catch { return false }
+    })
+  } catch { return false }
+}
+
+async function releaseInfo(dir) {
+  if (!dir || !fs.existsSync(dir)) return { ok: false, reden: 'map' }
+  const g = (...args) => execFileAsync('git', args, { cwd: dir, env: childEnv(), timeout: 20000 })
+
+  const binnen = await g('rev-parse', '--is-inside-work-tree')
+  if (binnen.fout || binnen.uit.trim() !== 'true') return { ok: true, isRepo: false }
+  const info = { ok: true, isRepo: true, dir }
+
+  info.branch = (await g('rev-parse', '--abbrev-ref', 'HEAD')).uit.trim()
+  info.schoon = !(await g('status', '--porcelain')).uit.trim()
+
+  // De adres zoals het in de config staat: `remote get-url` past een insteadOf-regel toe.
+  const url = (await g('config', '--get', 'remote.origin.url')).uit.trim()
+  info.remote = ReleaseTools.githubRepoUitUrl(url)
+
+  // Eerst bijwerken: een tag die al op GitHub staat of commits die er nog niet
+  // zijn, zie je anders pas als het push-commando ervan struikelt.
+  if (info.remote) {
+    const f = await execFileAsync('git', ['fetch', 'origin', '--tags', '--quiet'], { cwd: dir, env: childEnv(), timeout: 30000 })
+    info.fetchMislukt = !!f.fout
+  }
+
+  const up = await g('rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}')
+  info.upstream = up.fout ? '' : up.uit.trim()
+  info.ahead = 0
+  info.behind = 0
+  if (info.upstream) {
+    const tel = await g('rev-list', '--left-right', '--count', 'HEAD...@{u}')
+    const m = /^(\d+)\s+(\d+)/.exec(tel.uit.trim())
+    if (m) { info.ahead = parseInt(m[1], 10); info.behind = parseInt(m[2], 10) }
+  }
+
+  info.tags = (await g('tag', '--list')).uit.split(/\r?\n/).map(s => s.trim()).filter(Boolean).slice(0, 2000)
+  const laatste = await g('describe', '--tags', '--abbrev=0')
+  info.laatsteTag = laatste.fout ? '' : laatste.uit.trim()
+  const log = info.laatsteTag
+    ? await g('log', `${info.laatsteTag}..HEAD`, '--pretty=%s', '--no-merges')
+    : await g('log', '-30', '--pretty=%s', '--no-merges')
+  const onderwerpen = log.uit.split(/\r?\n/).map(s => s.trim()).filter(Boolean)
+  info.commitAantal = onderwerpen.length
+  info.concept = ReleaseTools.changelogConcept(onderwerpen)
+
+  // gh moet bestaan én ingelogd zijn; het token zelf verlaat main niet.
+  if (!(await ghBeschikbaarAsync())) info.gh = 'ontbreekt'
+  else {
+    const tk = await execFileAsync('gh', ['auth', 'token'], { env: childEnv(), timeout: 10000 })
+    info.gh = !tk.fout && tk.uit.trim() ? 'ok' : 'uit'
+  }
+
+  const pkg = leesJsonBestand(path.join(dir, 'package.json'))
+  const pubspec = leesTekstBestand(path.join(dir, 'pubspec.yaml'))
+  const manifest = leesJsonBestand(path.join(dir, 'manifest.json'))
+  const bestanden = { pkg, pubspec, manifest }
+  info.type = ReleaseTools.detecteerType(bestanden)
+  info.naam = (pkg && (pkg.productName || pkg.name)) || path.basename(dir)
+
+  let versie = ReleaseTools.leesVersie(info.type, bestanden)
+  if (!versie && info.laatsteTag && ReleaseTools.geldigeVersie(info.laatsteTag.replace(/^v/, ''))) versie = info.laatsteTag.replace(/^v/, '')
+  info.versie = versie || '0.0.0'
+  info.versieBekend = !!versie
+
+  const vb = ReleaseTools.VERSIE_BESTAND[info.type]
+  info.versieBestanden = vb ? [vb] : []
+  if ((info.type === 'electron' || info.type === 'node') && fs.existsSync(path.join(dir, 'package-lock.json'))) {
+    info.versieBestanden.push('package-lock.json')
+  }
+  info.bouwt = ReleaseTools.HEEFT_BOUWEN.includes(info.type)
+
+  // electron-builder pakt alleen in wat in node_modules staat. Een dependency
+  // die niet geïnstalleerd is gaat stil niet mee (1.0.2 ging zo zonder updater
+  // de deur uit), dus dat houdt de release tegen.
+  info.ontbreekt = []
+  if (info.type === 'electron' && pkg) {
+    info.ontbreekt = Object.keys(pkg.dependencies || {})
+      .filter(n => !fs.existsSync(path.join(dir, 'node_modules', n, 'package.json')))
+  }
+
+  if (info.type === 'electron') {
+    info.gereedheid = ReleaseTools.electronGereedheid({
+      pkg,
+      updaterGeinstalleerd: fs.existsSync(path.join(dir, 'node_modules', 'electron-updater', 'package.json')),
+      gebruiktUpdater: gebruiktElectronUpdater(dir, pkg),
+      remote: info.remote,
+    })
+    info.updatesMogelijk = ReleaseTools.updatesMogelijk(info.gereedheid)
+  }
+  return info
+}
+
+let releaseBezig = false
+
+ipcMain.handle('release:info', async (_, { dir } = {}) => {
+  try { return await releaseInfo(dir) }
+  catch (e) { return { ok: false, reden: 'fout', fout: e && e.message ? e.message : String(e) } }
+})
+
+ipcMain.handle('release:run', async (_, { projectId, dir, soort, notes, bouwen } = {}) => {
+  if (releaseBezig) return { ok: false, reden: 'bezig' }
+  releaseBezig = true
+  try {
+    const info = await releaseInfo(dir)
+    if (!info.ok || !info.isRepo) return { ok: false, reden: 'geenRepo' }
+    const nieuw = ReleaseTools.verhoogVersie(info.versie, soort)
+    const blok = ReleaseTools.blokkades(info, nieuw)
+    if (blok.length) return { ok: false, reden: 'blokkade', blokkades: blok }
+
+    const tag = ReleaseTools.tagNaam(nieuw)
+    const notesPad = path.join(app.getPath('userData'), 'release-notes.md')
+    fs.writeFileSync(notesPad, String(notes || '').trim() || `Release ${ReleaseTools.kaleVersie(nieuw)}`, 'utf8')
+
+    const stappen = ReleaseTools.bouwStappen({
+      type: info.type, nieuw, versieBestanden: info.versieBestanden, notesPad, bouwen: bouwen !== false,
+    })
+    if (!stappen.length) return { ok: false, reden: 'geenStappen' }
+
+    let token = ''
+    if (stappen.some(s => s.tokenNodig)) {
+      const tk = await execFileAsync('gh', ['auth', 'token'], { env: childEnv(), timeout: 10000 })
+      token = tk.fout ? '' : tk.uit.trim()
+      if (!token) return { ok: false, reden: 'blokkade', blokkades: [{ id: 'ghUit' }] }
+    }
+
+    cancelRequested = false
+    sendOutput(projectId, 'info', `── Release ${tag} (${info.type}) — ${stappen.length} stappen`)
+    for (let i = 0; i < stappen.length; i++) {
+      const stap = stappen[i]
+      sendOutput(projectId, 'info', `▶ ${i + 1}/${stappen.length}  ${stap.label}`)
+      let gelukt = false
+      if (stap.intern) {
+        try {
+          const pad = path.join(dir, stap.intern.bestand)
+          const tekst = fs.readFileSync(pad, 'utf8')
+          const nieuweTekst = ReleaseTools.zetVersieInTekst(stap.intern.type, tekst, stap.intern.nieuw)
+          if (nieuweTekst === null) sendOutput(projectId, 'err', `Geen versieregel gevonden in ${stap.intern.bestand}`)
+          else { fs.writeFileSync(pad, nieuweTekst, 'utf8'); sendOutput(projectId, 'ok', `✓ ${stap.intern.bestand} → ${stap.intern.nieuw}`); gelukt = true }
+        } catch (e) { sendOutput(projectId, 'err', `Fout: ${e.message}`) }
+      } else {
+        const extraEnv = { ...(stap.env || {}), ...(stap.tokenNodig ? { GH_TOKEN: token } : {}) }
+        const r = await runCommandOnce({ projectId, cmd: stap.cmd, cwd: dir, extraEnv })
+        gelukt = r.code === 0 && !cancelRequested
+      }
+      if (!gelukt) {
+        sendOutput(projectId, 'err', `✗ Release afgebroken bij: ${stap.label}`)
+        const tip = ReleaseTools.afmaakTip(stappen, stap.id)
+        if (tip) sendOutput(projectId, 'warn', tip)
+        sendOutput(projectId, 'sep', '')
+        return { ok: false, reden: 'stap', stap: stap.id, label: stap.label, tip, tag }
+      }
+    }
+    const url = info.remote ? `https://github.com/${info.remote.owner}/${info.remote.repo}/releases/tag/${tag}` : ''
+    sendOutput(projectId, 'ok', `✓ Release ${tag} staat online${url ? ' · ' + url : ''}`)
+    sendOutput(projectId, 'sep', '')
+    return { ok: true, tag, nieuw, url, type: info.type, updatesMogelijk: info.updatesMogelijk ?? null }
+  } catch (e) {
+    return { ok: false, reden: 'fout', fout: e && e.message ? e.message : String(e) }
+  } finally {
+    releaseBezig = false
+  }
 })
 
 ipcMain.handle('cmd:run', async (_, opts) => {

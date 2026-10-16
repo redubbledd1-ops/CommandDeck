@@ -2475,3 +2475,44 @@ button.thema-regel.wis:hover .thema-aantal { color: var(--red); }
 
 .btn-mini { font-size: 11px; padding: 4px 8px; flex-shrink: 0; }
 .btn-mini.gevaar { color: #f87171; }
+
+/* ── Een versie uitbrengen ── */
+.release-modal { width: 520px; max-width: 94vw; }
+.release-body { display: flex; flex-direction: column; gap: 10px; max-height: 70vh; overflow-y: auto; padding-right: 2px; }
+.release-kop { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.release-type { font-size: 11px; color: var(--accent); background: var(--accent-d); border-radius: 10px; padding: 2px 9px; }
+.release-nu { font-size: 12px; color: var(--muted2); }
+.release-nu b { color: var(--text); font-family: var(--mono); font-weight: 600; }
+.release-soorten { display: flex; flex-direction: column; gap: 4px; }
+.release-soort {
+  display: flex; align-items: center; gap: 9px; cursor: pointer;
+  background: var(--s2); border: 1px solid var(--border); border-radius: var(--radius); padding: 7px 10px;
+}
+.release-soort:hover { border-color: var(--border2); }
+.release-soort:has(input:checked) { border-color: var(--accent); background: var(--accent-d); }
+.release-soort-naam { flex: 1; font-size: 12.5px; color: var(--text); }
+.release-soort-versie { font-family: var(--mono); font-size: 12px; color: var(--muted2); }
+.release-label { font-size: 12px; color: var(--muted2); margin-top: 2px; }
+.release-notes {
+  width: 100%; box-sizing: border-box; resize: vertical; min-height: 90px;
+  background: var(--s1); border: 1px solid var(--border2); border-radius: var(--radius);
+  padding: 8px 10px; font-family: var(--mono); font-size: 12px; line-height: 1.5; color: var(--text);
+  caret-color: var(--accent); outline: none;
+}
+.release-notes:focus { border-color: var(--accent); }
+.release-hint { font-size: 11px; color: var(--muted2); line-height: 1.4; }
+.release-online { color: var(--amber); }
+.release-bouwen { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text); cursor: pointer; }
+.release-blokken { display: flex; flex-direction: column; gap: 4px; }
+.release-blok {
+  font-size: 12px; color: var(--red); background: var(--red-d);
+  border-radius: var(--radius); padding: 6px 9px; line-height: 1.4;
+}
+.release-updates { font-size: 12px; border-radius: var(--radius); padding: 8px 10px; line-height: 1.45; }
+.release-updates ul { margin: 5px 0 0; padding-left: 18px; }
+.release-updates.ok { color: var(--green); background: var(--green-d); }
+.release-updates.nok { color: var(--amber); background: var(--amber-d); }
+.release-updates.neutraal { color: var(--muted2); background: var(--s2); }
+.modal-footer .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+.cmd-btn.gitrelease { border-color: rgba(251,146,60,0.4); color: #fb923c; }
+.cmd-btn.gitrelease:hover { background: rgba(251,146,60,0.12); border-color: #fb923c; }

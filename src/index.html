@@ -417,6 +417,18 @@
   </div>
 </div>
 
+<!-- Een versie uitbrengen (release-ui.js) -->
+<div class="modal-backdrop" id="modal-release" hidden>
+  <div class="modal release-modal">
+    <div class="modal-header">
+      <span id="release-titel"></span>
+      <button class="modal-close" id="release-sluit"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="release-body" id="release-body"></div>
+    <div class="modal-footer" id="release-knoppen"></div>
+  </div>
+</div>
+
 <div class="modal-backdrop" id="modal-vraag" hidden>
   <div class="modal modal-sm">
     <div class="modal-header">
@@ -513,6 +525,8 @@
      echte terminal, anders parseert Chromium ~500 kB voordat je kunt slepen. -->
 <script src="i18n.js" defer></script>
 <script src="git-tools.js" defer></script>
+<script src="release-tools.js" defer></script>
+<script src="release-ui.js" defer></script>
 <script src="web-tools.js" defer></script>
 <script src="note-tools.js" defer></script>
 <script src="web-knoppen.js" defer></script>

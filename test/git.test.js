@@ -47,7 +47,11 @@ gelijk('losse repo -> koppelen plus wat lokaal werkt',
   ['git-koppelen', 'git-status', 'git-commit', 'git-stash', 'git-branch', 'git-terug', 'git-log'])
 gelijk('gekoppeld -> alles, koppelen valt weg',
   G.zichtbareGitIds(gekoppeld),
-  ['git-status', 'git-commit', 'git-push', 'git-pull', 'git-fetch', 'git-stash', 'git-branch', 'git-terug', 'git-log'])
+  ['git-status', 'git-commit', 'git-push', 'git-pull', 'git-fetch', 'git-stash', 'git-branch', 'git-terug', 'git-log', 'git-release'])
+// Een release is een tag plus een push: zonder GitHub-koppeling of zonder
+// commits is er niets uit te brengen.
+t('release alleen met koppeling', !G.zichtbareGitIds(losseRepo).includes('git-release'))
+t('release niet zonder commits', !G.zichtbareGitIds({ ...gekoppeld, commits: 0 }).includes('git-release'))
 gelijk('nog niet gemeten -> geen enkele knop', G.zichtbareGitIds(null), [])
 gelijk('git ontbreekt -> geen enkele knop', G.zichtbareGitIds(geenGit), [])
 t('koppelen verdwijnt zodra er een remote is',
@@ -224,7 +228,7 @@ t('koppelen heeft geen vast commando', G.GIT_CMD_MAP['git-koppelen'] === undefin
 // omdat hij van de toestand afhangt. Geen enkele knop mag door de mazen vallen.
 t('elke zichtbare knop kan ergens vandaan komen',
   G.zichtbareGitIds(gekoppeld).every(id =>
-    typeof G.GIT_CMD_MAP[id] === 'string' || G.isSchrijfKnop(id) || id === 'git-koppelen'))
+    typeof G.GIT_CMD_MAP[id] === 'string' || G.isSchrijfKnop(id) || id === 'git-koppelen' || id === 'git-release'))
 t('de vaste commandolijst schrijft nergens — alles wat schrijft gaat langs een vraag',
   Object.values(G.GIT_CMD_MAP).every(c => !/\b(commit|push|stash|reset|checkout|merge|rebase)\b/.test(c)))
 t('geen enkele knop kan zonder bevestiging schrijven',

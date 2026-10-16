@@ -42,6 +42,10 @@
     // achter een instelling zitten.
     { id: 'git-stash-lijst', labelKey: 'git.btn.stashList', label: 'stash terughalen', icon: 'ti-restore', cls: 'gitstashlijst', schrijft: true },
     { id: 'git-log',      labelKey: 'git.btn.log',    label: 'git log',         icon: 'ti-history',      cls: 'gitlog'   },
+    // Een versie uitbrengen: versie ophogen, taggen, een GitHub Release met
+    // changelog, en bouwen. Eén venster (release-ui.js); de logica staat in
+    // release-tools.js.
+    { id: 'git-release',  labelKey: 'git.btn.release', label: 'release',        icon: 'ti-rocket',       cls: 'gitrelease' },
   ]
 
   // De id's die standaard uit staan. De renderer gebruikt deze lijst om een
@@ -387,7 +391,7 @@
   // Commit hoort dus al bij een niet-gekoppelde repo. Anders stuurt de
   // koppel-dialoog je naar "maak eerst een commit" zonder knop om dat te doen.
   const LOKAAL = ['git-status', 'git-commit', 'git-diff', 'git-stash', 'git-branch', 'git-terug', 'git-log']
-  const REMOTE = ['git-push', 'git-pull', 'git-fetch']
+  const REMOTE = ['git-push', 'git-pull', 'git-fetch', 'git-release']
 
   function zichtbareGitIds(staat) {
     if (!staat || staat.gemeten === false) return []
@@ -410,6 +414,9 @@
       if (id === 'git-diff' && !(staat.vuil > 0)) continue
       // Zonder commits valt er niets terug te draaien.
       if (id === 'git-terug' && !staat.commits) continue
+      // Een release is een tag op een commit; zonder commits is er niets uit
+      // te brengen.
+      if (id === 'git-release' && !staat.commits) continue
       uit.push(id)
     }
     return uit

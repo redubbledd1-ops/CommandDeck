@@ -207,7 +207,7 @@ const KLEUR_IDX = {
   android: 2, windows: 5, web: 3, info: 3, pub: 5, clean: 10, doctor: 8,
   apk: 9, buildweb: 0, buildwin: 11,
   gitlink: 4, gitread: 6, gitpull: 2, gitfetch: 7, gitlog: 1,
-  gitcommit: 9, gitpush: 3, gitstash: 8, gitstashlijst: 10, gitbranch: 5, gitdiff: 7, gitterug: 11,
+  gitcommit: 9, gitpush: 3, gitstash: 8, gitstashlijst: 10, gitbranch: 5, gitdiff: 7, gitterug: 11, gitrelease: 4,
   'editor-vscode': 5, 'editor-cursor': 0, 'editor-claude': 4,
   'editor-android-studio': 2, 'editor-claude-desktop': 6,
   'merk-visualstudio': 1, 'merk-codex': 8, 'merk-openai': 8, 'merk-gemini': 5,
@@ -17688,6 +17688,7 @@ async function runGitCmd(project, cmdKey) {
   if (cmdKey === 'git-branch') { await branchOverzicht(project); return }
   if (cmdKey === 'git-diff') { await toonDiff(project); return }
   if (cmdKey === 'git-terug') { await terugdraaien(project); return }
+  if (cmdKey === 'git-release') { await releaseDialoog(project); return }
   if (GitTools.isSchrijfKnop(cmdKey)) { await schrijfGitCmd(project, cmdKey); return }
 
   const cmd = GitTools.GIT_CMD_MAP[cmdKey]
